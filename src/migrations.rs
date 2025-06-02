@@ -12,42 +12,71 @@ struct Migration {
     timestamp: i64,
 }
 
-pub enum Error {
+pub enum NewMigrationError {
     WritingFile(io::Error),
+    ConnectingToDb(tokio_postgres::Error),
+}
+
+pub enum RunError {
+    GetMigrations(GetMigrationsError),
+    DbConfig(db::ConfigError),
+    ReadingMigrationFile(io::Error),
+    ExecutingMigration(tokio_postgres::Error),
+    ConnectingToDb(tokio_postgres::Error),
+}
+
+pub enum GetMigrationsError {
     GettingMigrations(io::Error),
     ParsingDateFromFileName {
         file_name: String,
         err: chrono::ParseError,
     },
-    ConnectingToDb(tokio_postgres::Error),
-    ReadingMigrationFile(io::Error),
-    DbConfig(db::ConfigError),
-    ExecutingMigration(tokio_postgres::Error),
     SplittingFileName {
         file_name: String,
     },
 }
 
-impl NiceDisplay for Error {
+impl NiceDisplay for NewMigrationError {
     fn message(&self) -> String {
         match self {
-            Error::WritingFile(err) => format!("Error writing migration file: {}", err),
-            Error::GettingMigrations(err) => format!("Error getting migrations: {}", err),
-            Error::ParsingDateFromFileName { file_name, err } => {
+            NewMigrationError::WritingFile(err) => format!("Error writing migration file: {}", err),
+            NewMigrationError::ConnectingToDb(err) => {
+                format!("Error connecting to database: {}", err)
+            }
+        }
+    }
+}
+impl NiceDisplay for RunError {
+    fn message(&self) -> String {
+        match self {
+            RunError::GetMigrations(err) => err.message(),
+            RunError::DbConfig(err) => err.message(),
+            RunError::ReadingMigrationFile(err) => format!("Error reading migration file: {}", err),
+            RunError::ExecutingMigration(err) => format!("Error executing migration: {}", err),
+            RunError::ConnectingToDb(err) => {
+                format!("Error connecting to database: {}", err)
+            }
+        }
+    }
+}
+
+impl NiceDisplay for GetMigrationsError {
+    fn message(&self) -> String {
+        match self {
+            GetMigrationsError::GettingMigrations(err) => {
+                format!("Error getting migrations: {}", err)
+            }
+            GetMigrationsError::ParsingDateFromFileName { file_name, err } => {
                 format!("Error parsing date from file name '{}': {}", file_name, err)
             }
-            Error::ConnectingToDb(err) => format!("Error connecting to database: {}", err),
-            Error::ReadingMigrationFile(err) => format!("Error reading migration file: {}", err),
-            Error::DbConfig(err) => format!("Database configuration error: {}", err.message()),
-            Error::ExecutingMigration(err) => format!("Error executing migration: {}", err),
-            Error::SplittingFileName { file_name } => {
+            GetMigrationsError::SplittingFileName { file_name } => {
                 format!("Error splitting file name '{}'", file_name)
             }
         }
     }
 }
 
-pub async fn new(name: String) -> Result<(), Error> {
+pub async fn new(name: String) -> Result<(), NewMigrationError> {
     let now = chrono::Utc::now().format(DATE_FORMAT).to_string();
 
     let new_migration_file_name = format!("{}{}{}.sql", now, SEPARATOR, name);
@@ -61,18 +90,18 @@ BEGIN;
 COMMIT;"#
             .replace("${name}", name.as_str()),
     )
-    .map_err(Error::WritingFile)?;
+    .map_err(NewMigrationError::WritingFile)?;
 
     Ok(())
 }
 
-pub async fn run() -> Result<(), Error> {
+pub async fn run() -> Result<(), RunError> {
     // Get migrations
-    let migrations: Vec<Migration> = get_migrations()?;
+    let migrations: Vec<Migration> = get_migrations().map_err(RunError::GetMigrations)?;
     let migrations_len = migrations.len();
 
     // Connect to the database
-    let config = db::Config::load().await.map_err(Error::DbConfig)?;
+    let config = db::Config::load().await.map_err(RunError::DbConfig)?;
 
     println!(
         "Should I run migrations at host {} with password {}? (Y/n): ",
@@ -98,7 +127,7 @@ pub async fn run() -> Result<(), Error> {
 
         tokio_postgres::connect(connect_string.as_str(), NoTls)
             .await
-            .map_err(Error::ConnectingToDb)?
+            .map_err(RunError::ConnectingToDb)?
     };
 
     tokio::spawn(async move {
@@ -134,12 +163,12 @@ pub async fn run() -> Result<(), Error> {
         let migration_file_path = format!("./db/migrations/{}", migration.name);
 
         let migration_file_content =
-            fs::read_to_string(migration_file_path).map_err(Error::ReadingMigrationFile)?;
+            fs::read_to_string(migration_file_path).map_err(RunError::ReadingMigrationFile)?;
 
         client
             .batch_execute(migration_file_content.as_str())
             .await
-            .map_err(Error::ExecutingMigration)?;
+            .map_err(RunError::ExecutingMigration)?;
 
         ran_at_least_one_migration = true;
     }
@@ -155,9 +184,9 @@ pub async fn run() -> Result<(), Error> {
     Ok(())
 }
 
-fn get_migrations() -> Result<Vec<Migration>, Error> {
+fn get_migrations() -> Result<Vec<Migration>, GetMigrationsError> {
     let migration_dir_content =
-        fs::read_dir("./db/migrations").map_err(|err| Error::GettingMigrations(err))?;
+        fs::read_dir("./db/migrations").map_err(GetMigrationsError::GettingMigrations)?;
 
     let mut migrations = migration_dir_content
         .filter_map(|file| {
@@ -178,7 +207,7 @@ fn get_migrations() -> Result<Vec<Migration>, Error> {
         .map(
             |file_name: String| match file_name.split(SEPARATOR).collect::<Vec<&str>>().first() {
                 Some(n) => NaiveDateTime::parse_from_str(n, DATE_FORMAT)
-                    .map_err(|err| Error::ParsingDateFromFileName {
+                    .map_err(|err| GetMigrationsError::ParsingDateFromFileName {
                         err,
                         file_name: file_name.clone(),
                     })
@@ -186,10 +215,10 @@ fn get_migrations() -> Result<Vec<Migration>, Error> {
                         name: file_name,
                         timestamp: dt.and_utc().timestamp(),
                     }),
-                None => Err(Error::SplittingFileName { file_name })?,
+                None => Err(GetMigrationsError::SplittingFileName { file_name })?,
             },
         )
-        .collect::<Result<Vec<Migration>, Error>>()?;
+        .collect::<Result<Vec<Migration>, GetMigrationsError>>()?;
 
     migrations.sort_by(|m0, m1| m0.timestamp.cmp(&m1.timestamp));
 

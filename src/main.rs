@@ -19,18 +19,21 @@ const PORT: u16 = 1754;
 enum Cmd {
     Run,
     NewMigration { migration_name: String },
+    RunMigrations,
 }
 
 enum Error {
     ActixWeb(WebServerError),
-    Migrations(migrations::Error),
+    NewMigration(migrations::NewMigrationError),
+    RunMigrations(migrations::RunError),
 }
 
 impl NiceDisplay for Error {
     fn message(&self) -> String {
         match self {
             Error::ActixWeb(err) => err.message(),
-            Error::Migrations(err) => err.message(),
+            Error::NewMigration(err) => err.message(),
+            Error::RunMigrations(err) => err.message(),
         }
     }
 }
@@ -43,7 +46,8 @@ async fn main() -> Result<(), String> {
         Cmd::Run => run_server().await.map_err(Error::ActixWeb),
         Cmd::NewMigration { migration_name } => migrations::new(migration_name)
             .await
-            .map_err(Error::Migrations),
+            .map_err(Error::NewMigration),
+        Cmd::RunMigrations => migrations::run().await.map_err(Error::RunMigrations),
     };
 
     res.map_err(|err| err.to_nice_error().to_string())
