@@ -14,7 +14,6 @@ struct Migration {
 
 pub enum NewMigrationError {
     WritingFile(io::Error),
-    ConnectingToDb(tokio_postgres::Error),
 }
 
 pub enum RunError {
@@ -40,9 +39,6 @@ impl NiceDisplay for NewMigrationError {
     fn message(&self) -> String {
         match self {
             NewMigrationError::WritingFile(err) => format!("Error writing migration file: {}", err),
-            NewMigrationError::ConnectingToDb(err) => {
-                format!("Error connecting to database: {}", err)
-            }
         }
     }
 }
@@ -121,7 +117,7 @@ pub async fn run() -> Result<(), RunError> {
 
     let (client, connection) = {
         let connect_string = format!(
-            "host={} user={} password={} dbname=audio_storer",
+            "host={} user={} password={} dbname=arizona2",
             config.host, config.user, config.password
         );
 

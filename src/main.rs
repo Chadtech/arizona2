@@ -3,9 +3,10 @@ mod db;
 mod migrations;
 mod nice_display;
 
-use crate::nice_display::NiceDisplay;
+use crate::nice_display::{NiceDisplay, NiceError};
 use actix_web::{get, App, HttpResponse, HttpServer, Responder};
 use clap::Parser;
+use std::env;
 use std::process::Command;
 
 const PORT: u16 = 1754;
@@ -26,6 +27,7 @@ enum Error {
     ActixWeb(WebServerError),
     NewMigration(migrations::NewMigrationError),
     RunMigrations(migrations::RunError),
+    EnvVars(dotenv::Error),
 }
 
 impl NiceDisplay for Error {
@@ -34,23 +36,32 @@ impl NiceDisplay for Error {
             Error::ActixWeb(err) => err.message(),
             Error::NewMigration(err) => err.message(),
             Error::RunMigrations(err) => err.message(),
+            Error::EnvVars(err) => {
+                format!("Error loading environment variables: {}", err)
+            }
         }
     }
 }
 
 #[actix_web::main]
 async fn main() -> Result<(), String> {
+    nice_main()
+        .await
+        .map_err(|err| err.to_nice_error().to_string())
+}
+
+async fn nice_main() -> Result<(), Error> {
+    dotenv::dotenv().map_err(Error::EnvVars)?;
+
     let cmd = Cmd::parse();
 
-    let res = match cmd {
+    match cmd {
         Cmd::Run => run_server().await.map_err(Error::ActixWeb),
         Cmd::NewMigration { migration_name } => migrations::new(migration_name)
             .await
             .map_err(Error::NewMigration),
         Cmd::RunMigrations => migrations::run().await.map_err(Error::RunMigrations),
-    };
-
-    res.map_err(|err| err.to_nice_error().to_string())
+    }
 }
 
 #[get("/")]
@@ -59,14 +70,14 @@ async fn html() -> impl Responder {
 }
 
 enum WebServerError {
-    ActixWeb(actix_web::Error),
     Bind(std::io::Error),
+    Run(std::io::Error),
 }
 
 impl NiceDisplay for WebServerError {
     fn message(&self) -> String {
         match self {
-            WebServerError::ActixWeb(err) => format!("Actix web error: {}", err),
+            WebServerError::Run(err) => format!("Error running server: {}", err),
             WebServerError::Bind(err) => {
                 format!("Error binding server: {}", err)
             }
@@ -84,7 +95,7 @@ async fn run_server() -> Result<(), WebServerError> {
     .map_err(WebServerError::Bind)?
     .run()
     .await
-    .map_err(WebServerError::Bind)?;
+    .map_err(WebServerError::Run)?;
 
     Ok(r)
 }
