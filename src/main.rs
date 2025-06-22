@@ -1,3 +1,4 @@
+mod admin_ui;
 mod az2_error;
 mod db;
 mod migrations;
@@ -21,6 +22,7 @@ enum Cmd {
     Run,
     NewMigration { migration_name: String },
     RunMigrations,
+    AdminUi,
 }
 
 enum Error {
@@ -28,6 +30,7 @@ enum Error {
     NewMigration(migrations::NewMigrationError),
     RunMigrations(migrations::RunError),
     EnvVars(dotenv::Error),
+    AdminUi(admin_ui::Error),
 }
 
 impl NiceDisplay for Error {
@@ -39,6 +42,7 @@ impl NiceDisplay for Error {
             Error::EnvVars(err) => {
                 format!("Error loading environment variables: {}", err)
             }
+            Error::AdminUi(err) => err.message(),
         }
     }
 }
@@ -61,6 +65,7 @@ async fn nice_main() -> Result<(), Error> {
             .await
             .map_err(Error::NewMigration),
         Cmd::RunMigrations => migrations::run().await.map_err(Error::RunMigrations),
+        Cmd::AdminUi => admin_ui::run().await.map_err(Error::AdminUi),
     }
 }
 
