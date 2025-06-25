@@ -3,6 +3,8 @@ mod az2_error;
 mod db;
 mod migrations;
 mod nice_display;
+mod open_ai_key;
+mod worker;
 
 use crate::nice_display::{NiceDisplay, NiceError};
 use actix_web::{get, App, HttpResponse, HttpServer, Responder};
