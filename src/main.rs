@@ -6,11 +6,9 @@ mod nice_display;
 mod open_ai_key;
 mod worker;
 
-use crate::nice_display::{NiceDisplay, NiceError};
+use crate::nice_display::NiceDisplay;
 use actix_web::{get, App, HttpResponse, HttpServer, Responder};
 use clap::Parser;
-use std::env;
-use std::process::Command;
 
 const PORT: u16 = 1754;
 

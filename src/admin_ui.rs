@@ -6,32 +6,99 @@ use crate::open_ai_key::OpenAiKey;
 use crate::worker;
 use crate::worker::Worker;
 use iced;
-use iced::futures::future::Lazy;
-use iced::widget::{Column, Row};
-use iced::{widget as w, Application, Color, Command, Element, Font, Theme};
-use tokio::runtime::Runtime;
+use iced::{widget as w, Application, Color, Command, Element, Font, Length, Theme};
+use serde::{Deserialize, Serialize};
+use std::fs::File;
+use std::io::Write;
+use std::path::Path;
 
 struct Model {
     prompt: String,
+    prompt_response: PromptResponse,
     worker: Worker,
+    error: Option<Error>,
+}
+
+impl Model {
+    pub fn to_storage(&self) -> Storage {
+        Storage {
+            prompt: self.prompt.clone(),
+        }
+    }
+}
+
+enum PromptResponse {
+    Ready,
+    Response(String),
+    Error(String),
+}
+
+#[derive(Serialize, Deserialize)]
+struct Storage {
+    prompt: String,
+}
+
+impl Storage {
+    pub fn save_to_file_system(&self) -> Result<(), Error> {
+        // Serialize the Storage struct to JSON
+        let json = serde_json::to_string_pretty(self)
+            .map_err(|e| Error::StorageSerializationError(e.to_string()))?;
+
+        // Create a file to save the JSON
+        let path = Path::new("storage.json");
+        let mut file = File::create(path).map_err(Error::StorageFileCreationError)?;
+
+        // Write the JSON to the file
+        file.write_all(json.as_bytes())
+            .map_err(Error::StorageFileWriteError)?;
+
+        Ok(())
+    }
+
+    pub fn read_from_file_system() -> Result<Self, Error> {
+        // Check if the file exists
+        let path = Path::new("storage.json");
+        if !path.exists() {
+            return Ok(Self::default());
+        }
+
+        // Open the file
+        let file = File::open(path).map_err(Error::StorageFileReadError)?;
+
+        // Deserialize the JSON into a Storage struct
+        let storage: Storage = serde_json::from_reader(file)
+            .map_err(|e| Error::StorageDeserializationError(e.to_string()))?;
+
+        Ok(storage)
+    }
+
+    pub fn default() -> Self {
+        Storage {
+            prompt: String::new(),
+        }
+    }
 }
 
 struct Flags {
     worker: Worker,
+    storage: Storage,
 }
 
 #[derive(Debug, Clone)]
 enum Msg {
     PromptFieldChanged(String),
-    CickedSubmit,
-    SubmissionResult,
-    SubmissionErrored,
+    ClickedSubmitPrompt,
+    SubmissionResult(Result<String, String>),
 }
 
 pub enum Error {
     IcedRunError(iced::Error),
-    OpenAiResponseError(reqwest::Error),
     WorkerInitError(worker::InitError),
+    StorageFileCreationError(std::io::Error),
+    StorageFileWriteError(std::io::Error),
+    StorageSerializationError(String),
+    StorageFileReadError(std::io::Error),
+    StorageDeserializationError(String),
 }
 
 impl NiceDisplay for Error {
@@ -39,8 +106,14 @@ impl NiceDisplay for Error {
         match self {
             Error::IcedRunError(err) => format!("Iced run error: {}", err),
             Error::WorkerInitError(err) => err.message(),
-            Error::OpenAiResponseError(err) => {
-                format!("OpenAI response error: {}", err)
+            Error::StorageFileCreationError(err) => format!("Storage file creation error: {}", err),
+            Error::StorageFileWriteError(err) => format!("Storage file write error: {}", err),
+            Error::StorageSerializationError(msg) => {
+                format!("Storage serialization error: {}", msg)
+            },
+            Error::StorageFileReadError(err) => format!("Storage file read error: {}", err),
+            Error::StorageDeserializationError(msg) => {
+                format!("Storage deserialization error: {}", msg)
             }
         }
     }
@@ -54,8 +127,10 @@ impl Application for Model {
 
     fn new(flags: Self::Flags) -> (Self, Command<Self::Message>) {
         let model = Model {
-            prompt: String::new(),
+            prompt: flags.storage.prompt,
             worker: flags.worker,
+            prompt_response: PromptResponse::Ready,
+            error: None,
         };
 
         (model, Command::none())
@@ -67,43 +142,47 @@ impl Application for Model {
 
     fn update(&mut self, message: Self::Message) -> Command<Self::Message> {
         match message {
-            // Msg::PressedPing => {
-            //     // Command::perform(insert_beep_job(self.worker.clone()), |_result| {
-            //     //     Msg::BeepInserted
-            //     // })
-            //     Command::none()
-            // }
             Msg::PromptFieldChanged(field) => {
                 self.prompt = field;
+
+                if let Err(err) = self.to_storage().save_to_file_system() {
+                    self.error = Some(err);
+                }
+
                 Command::none()
             }
-            Msg::CickedSubmit => {
+            Msg::ClickedSubmitPrompt => {
                 let open_ai_key = self.worker.open_ai_key.clone();
                 let reqwest_client = self.worker.reqwest_client.clone();
                 Command::perform(
                     submit_prompt(open_ai_key, reqwest_client, self.prompt.clone()),
-                    |result| {
-                        match result {
-                            Ok(_) => Msg::SubmissionResult, // Handle success
-                            Err(e) => {
-                                println!("Error submitting prompt");
-                                Msg::SubmissionErrored // Handle error, could be a different message
-                            }
-                        }
-                    },
+                    Msg::SubmissionResult,
                 )
             }
-            Msg::SubmissionResult => Command::none(),
-            Msg::SubmissionErrored => Command::none(),
+            Msg::SubmissionResult(result) => {
+                self.prompt_response = match result {
+                    Ok(response) => PromptResponse::Response(response.clone()),
+                    Err(err) => PromptResponse::Error(err.clone()),
+                };
+
+                Command::none()
+            }
         }
     }
 
     fn view(&self) -> Element<Msg> {
+        let prompt_response_view: Element<Msg> = match &self.prompt_response {
+            PromptResponse::Ready => w::Column::new().into(),
+            PromptResponse::Response(response) => w::text(format!("Response: {}", response)).into(),
+            PromptResponse::Error(err) => w::text(format!("Error: {}", err)).into(),
+        };
+
         w::container(
             w::column![
                 "Prompt",
                 w::text_input("", &self.prompt).on_input(Msg::PromptFieldChanged),
-                w::button("Submit").on_press(Msg::CickedSubmit)
+                prompt_response_view,
+                w::button("Submit").on_press(Msg::ClickedSubmitPrompt)
             ]
             .spacing(s::S4),
         )
@@ -133,7 +212,7 @@ async fn submit_prompt(
     open_ai_key: OpenAiKey,
     client: reqwest::Client,
     prompt: String,
-) -> Result<(), Error> {
+) -> Result<String, String> {
     let body = serde_json::json!({
         "model": "gpt-4.1",
         "input": prompt
@@ -146,20 +225,30 @@ async fn submit_prompt(
         .json(&body)
         .send()
         .await
-        .map_err(Error::OpenAiResponseError)?
+        .map_err(|err| {
+            format!(
+                "I encountered an error with the request to open AI: {}",
+                err.to_string()
+            )
+        })?
         .text()
         .await
-        .unwrap();
+        .map_err(|err| {
+            format!(
+                "I encountered an error when turning the open AI response into text: {}",
+                err.to_string()
+            )
+        })?;
 
-    println!("Response: {}", res);
-
-    Ok(())
+    Ok(res)
 }
 
 pub async fn run() -> Result<(), Error> {
     let worker = Worker::new().map_err(Error::WorkerInitError)?;
 
-    let flags = Flags { worker };
+    let storage = Storage::read_from_file_system()?;
+
+    let flags = Flags { worker, storage };
 
     let mut settings = iced::Settings::with_flags(flags);
 
