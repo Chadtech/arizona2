@@ -3,14 +3,16 @@ mod style;
 use self::style as s;
 use crate::nice_display::NiceDisplay;
 use crate::open_ai_key::OpenAiKey;
-use crate::worker;
 use crate::worker::Worker;
+use crate::{open_ai, worker};
 use iced;
-use iced::{widget as w, Application, Color, Command, Element, Font, Length, Theme};
+use iced::{widget as w, Application, Color, Command, Element, Font, Theme};
 use serde::{Deserialize, Serialize};
 use std::fs::File;
 use std::io::Write;
 use std::path::Path;
+
+const STORAGE_FILE_PATH: &str = "storage.json";
 
 struct Model {
     prompt: String,
@@ -30,7 +32,7 @@ impl Model {
 enum PromptResponse {
     Ready,
     Response(String),
-    Error(String),
+    Error(open_ai::CompletionError),
 }
 
 #[derive(Serialize, Deserialize)]
@@ -45,7 +47,7 @@ impl Storage {
             .map_err(|e| Error::StorageSerializationError(e.to_string()))?;
 
         // Create a file to save the JSON
-        let path = Path::new("storage.json");
+        let path = Path::new(STORAGE_FILE_PATH);
         let mut file = File::create(path).map_err(Error::StorageFileCreationError)?;
 
         // Write the JSON to the file
@@ -57,7 +59,7 @@ impl Storage {
 
     pub fn read_from_file_system() -> Result<Self, Error> {
         // Check if the file exists
-        let path = Path::new("storage.json");
+        let path = Path::new(STORAGE_FILE_PATH);
         if !path.exists() {
             return Ok(Self::default());
         }
@@ -88,7 +90,7 @@ struct Flags {
 enum Msg {
     PromptFieldChanged(String),
     ClickedSubmitPrompt,
-    SubmissionResult(Result<String, String>),
+    SubmissionResult(Result<String, open_ai::CompletionError>),
 }
 
 pub enum Error {
@@ -110,7 +112,7 @@ impl NiceDisplay for Error {
             Error::StorageFileWriteError(err) => format!("Storage file write error: {}", err),
             Error::StorageSerializationError(msg) => {
                 format!("Storage serialization error: {}", msg)
-            },
+            }
             Error::StorageFileReadError(err) => format!("Storage file read error: {}", err),
             Error::StorageDeserializationError(msg) => {
                 format!("Storage deserialization error: {}", msg)
@@ -174,7 +176,9 @@ impl Application for Model {
         let prompt_response_view: Element<Msg> = match &self.prompt_response {
             PromptResponse::Ready => w::Column::new().into(),
             PromptResponse::Response(response) => w::text(format!("Response: {}", response)).into(),
-            PromptResponse::Error(err) => w::text(format!("Error: {}", err)).into(),
+            PromptResponse::Error(err) => {
+                w::text(format!("Error: {}", err.to_nice_error().to_string())).into()
+            }
         };
 
         w::container(
@@ -212,35 +216,13 @@ async fn submit_prompt(
     open_ai_key: OpenAiKey,
     client: reqwest::Client,
     prompt: String,
-) -> Result<String, String> {
-    let body = serde_json::json!({
-        "model": "gpt-4.1",
-        "input": prompt
-    });
+) -> Result<String, open_ai::CompletionError> {
+    let response = open_ai::Completion::new(open_ai::Model::Gpt4p1)
+        .add_message(open_ai::Role::User, prompt.as_str())
+        .send_request(&open_ai_key, client)
+        .await?;
 
-    let res = client
-        .post("https://api.openai.com/v1/responses")
-        .header("Content-Type", "application/json")
-        .header("Authorization", open_ai_key.to_header())
-        .json(&body)
-        .send()
-        .await
-        .map_err(|err| {
-            format!(
-                "I encountered an error with the request to open AI: {}",
-                err.to_string()
-            )
-        })?
-        .text()
-        .await
-        .map_err(|err| {
-            format!(
-                "I encountered an error when turning the open AI response into text: {}",
-                err.to_string()
-            )
-        })?;
-
-    Ok(res)
+    Ok(response)
 }
 
 pub async fn run() -> Result<(), Error> {

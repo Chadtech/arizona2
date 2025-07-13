@@ -3,6 +3,7 @@ mod az2_error;
 mod db;
 mod migrations;
 mod nice_display;
+mod open_ai;
 mod open_ai_key;
 mod worker;
 
