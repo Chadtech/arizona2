@@ -64,6 +64,7 @@ pub struct Completion {
 pub enum CompletionError {
     RequestError(String),
     ResponseError(String),
+    ResponseJsonDecodeError(String),
 }
 
 impl NiceDisplay for CompletionError {
@@ -74,6 +75,9 @@ impl NiceDisplay for CompletionError {
             }
             CompletionError::ResponseError(err) => {
                 format!("I had trouble with the response from open ai: {}", err)
+            }
+            CompletionError::ResponseJsonDecodeError(err) => {
+                format!("I had trouble decoding the response from open ai: {}", err)
             }
         }
     }
@@ -124,6 +128,17 @@ impl Completion {
             .await
             .map_err(|err| CompletionError::ResponseError(err.to_string()))?;
 
-        Ok(res)
+        let res_json: serde_json::Value = serde_json::from_str(&res)
+            .map_err(|err| CompletionError::ResponseJsonDecodeError(err.to_string()))?;
+
+        // let res = res_json["choices"][0]["message"]["content"];
+        let message_res = res_json["choices"][0]["message"]["content"]
+            .as_str()
+            .ok_or_else(|| {
+                CompletionError::ResponseError(format!("Missing content in response {}", res))
+            })?
+            .to_string();
+
+        Ok(message_res)
     }
 }
