@@ -6,7 +6,7 @@ use crate::open_ai_key::OpenAiKey;
 use crate::worker::Worker;
 use crate::{open_ai, worker};
 use iced;
-use iced::{widget as w, Application, Color, Command, Element, Font, Theme};
+use iced::{widget as w, Application, Color, Element, Font, Task, Theme};
 use serde::{Deserialize, Serialize};
 use std::fs::File;
 use std::io::Write;
@@ -14,9 +14,78 @@ use std::path::Path;
 
 const STORAGE_FILE_PATH: &str = "storage.json";
 
+#[derive(Default)]
+enum State {
+    #[default]
+    Loading,
+    Loaded(Model),
+    // TODO maybe a special init fail error type?
+    FailedToLoad(Error),
+}
+
+#[derive(Debug)]
+enum SuperMsg {
+    LoadedFlags(Result<Flags, Error>),
+    LoadedMsg(Msg),
+}
+
+impl State {
+    fn new() -> (Self, Task<SuperMsg>) {
+        (State::Loading, Self::get_flags())
+    }
+
+    fn title(&self) -> String {
+        "Arizona 2 Admin".to_string()
+    }
+
+    fn get_flags() -> Task<SuperMsg> {
+        println!("Getting flags...");
+        Task::perform(
+            async {
+                let worker = Worker::new().map_err(Error::WorkerInitError)?;
+
+                let storage = Storage::read_from_file_system()?;
+
+                Ok(Flags { worker, storage })
+            },
+            SuperMsg::LoadedFlags,
+        )
+    }
+
+    fn update(&mut self, message: SuperMsg) -> Task<SuperMsg> {
+        match message {
+            SuperMsg::LoadedFlags(result) => match result {
+                Ok(flags) => {
+                    let (model, task) = Model::new(flags);
+                    *self = State::Loaded(model);
+                    Task::none()
+                }
+                Err(err) => {
+                    *self = State::FailedToLoad(err);
+                    Task::none()
+                }
+            },
+            SuperMsg::LoadedMsg(msg) => match self {
+                State::Loaded(model) => model.update(msg).map(|m| SuperMsg::LoadedMsg(m)),
+                _ => Task::none(),
+            },
+        }
+    }
+
+    fn view(&self) -> Element<SuperMsg> {
+        match self {
+            State::Loading => w::text("Loading...").into(),
+            State::Loaded(model) => Model::view(model).map(|msg| SuperMsg::LoadedMsg(msg)),
+            State::FailedToLoad(err) => w::text(format!("Error: {}", err.to_nice_error())).into(),
+        }
+    }
+}
+
 struct Model {
-    prompt: String,
+    prompt_field: String,
+    identity_field: String,
     prompt_response: PromptResponse,
+    memory_fields: Vec<w::text_editor::Content>,
     worker: Worker,
     error: Option<Error>,
 }
@@ -24,7 +93,13 @@ struct Model {
 impl Model {
     pub fn to_storage(&self) -> Storage {
         Storage {
-            prompt: self.prompt.clone(),
+            prompt: self.prompt_field.clone(),
+            memories: self
+                .memory_fields
+                .iter()
+                .map(|editor_content| editor_content.text())
+                .collect(),
+            identity_field: self.identity_field.clone(),
         }
     }
 }
@@ -35,9 +110,13 @@ enum PromptResponse {
     Error(open_ai::CompletionError),
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 struct Storage {
     prompt: String,
+    #[serde(default)]
+    memories: Vec<String>,
+    #[serde(default)]
+    identity_field: String,
 }
 
 impl Storage {
@@ -77,10 +156,13 @@ impl Storage {
     pub fn default() -> Self {
         Storage {
             prompt: String::new(),
+            memories: Vec::new(),
+            identity_field: String::new(),
         }
     }
 }
 
+#[derive(Debug)]
 struct Flags {
     worker: Worker,
     storage: Storage,
@@ -90,9 +172,16 @@ struct Flags {
 enum Msg {
     PromptFieldChanged(String),
     ClickedSubmitPrompt,
+    ClickedAddMemory,
     SubmissionResult(Result<String, open_ai::CompletionError>),
+    MemoryUpdated {
+        index: usize,
+        action: w::text_editor::Action,
+    },
+    IdentityFieldChanged(String),
 }
 
+#[derive(Debug)]
 pub enum Error {
     IcedRunError(iced::Error),
     WorkerInitError(worker::InitError),
@@ -121,43 +210,50 @@ impl NiceDisplay for Error {
     }
 }
 
-impl Application for Model {
-    type Executor = iced::executor::Default;
-    type Message = Msg;
-    type Theme = Theme;
-    type Flags = Flags;
+impl Model {
+    // type Executor = iced::executor::Default;
+    // type Message = Msg;
+    // type Theme = Theme;
+    // type Flags = Flags;
 
-    fn new(flags: Self::Flags) -> (Self, Command<Self::Message>) {
+    fn new(flags: Flags) -> (Self, Task<Msg>) {
         let model = Model {
-            prompt: flags.storage.prompt,
-            worker: flags.worker,
+            prompt_field: flags.storage.prompt,
+            identity_field: flags.storage.identity_field,
             prompt_response: PromptResponse::Ready,
+            memory_fields: flags
+                .storage
+                .memories
+                .iter()
+                .map(|content_str| w::text_editor::Content::with_text(content_str))
+                .collect(),
+            worker: flags.worker,
             error: None,
         };
 
-        (model, Command::none())
+        (model, Task::none())
     }
 
     fn title(&self) -> String {
         "Arizona 2 Admin".to_string()
     }
 
-    fn update(&mut self, message: Self::Message) -> Command<Self::Message> {
+    fn update(&mut self, message: Msg) -> Task<Msg> {
         match message {
             Msg::PromptFieldChanged(field) => {
-                self.prompt = field;
+                self.prompt_field = field;
 
                 if let Err(err) = self.to_storage().save_to_file_system() {
                     self.error = Some(err);
                 }
 
-                Command::none()
+                Task::none()
             }
             Msg::ClickedSubmitPrompt => {
                 let open_ai_key = self.worker.open_ai_key.clone();
                 let reqwest_client = self.worker.reqwest_client.clone();
-                Command::perform(
-                    submit_prompt(open_ai_key, reqwest_client, self.prompt.clone()),
+                Task::perform(
+                    submit_prompt(open_ai_key, reqwest_client, self.prompt_field.clone()),
                     Msg::SubmissionResult,
                 )
             }
@@ -167,7 +263,38 @@ impl Application for Model {
                     Err(err) => PromptResponse::Error(err.clone()),
                 };
 
-                Command::none()
+                Task::none()
+            }
+            Msg::ClickedAddMemory => {
+                self.memory_fields.push(w::text_editor::Content::new());
+
+                // Save the updated memories to the file system
+                if let Err(err) = self.to_storage().save_to_file_system() {
+                    self.error = Some(err);
+                }
+
+                Task::none()
+            }
+            Msg::MemoryUpdated { index, action } => {
+                if let Some(memory) = self.memory_fields.get_mut(index) {
+                    memory.perform(action);
+
+                    // Save the updated memories to the file system
+                    if let Err(err) = self.to_storage().save_to_file_system() {
+                        self.error = Some(err);
+                    }
+                }
+
+                Task::none()
+            }
+            Msg::IdentityFieldChanged(new_field) => {
+                self.identity_field = new_field;
+
+                if let Err(err) = self.to_storage().save_to_file_system() {
+                    self.error = Some(err);
+                }
+
+                Task::none()
             }
         }
     }
@@ -181,11 +308,27 @@ impl Application for Model {
             }
         };
 
+        let mut memories_children: Vec<Element<_>> = vec![];
+
+        for (i, memory) in self.memory_fields.iter().enumerate() {
+            let memories_editor = w::text_editor(memory).on_action(move |act| Msg::MemoryUpdated {
+                index: i,
+                action: act,
+            });
+
+            memories_children.push(memories_editor.into());
+        }
+
         w::container(
             w::column![
                 "Prompt",
-                w::text_input("", &self.prompt).on_input(Msg::PromptFieldChanged),
+                w::text_input("", &self.prompt_field).on_input(Msg::PromptFieldChanged),
+                "Identity",
+                w::text_input("", &self.identity_field).on_input(Msg::IdentityFieldChanged),
                 prompt_response_view,
+                "Memories",
+                w::Column::with_children(memories_children).spacing(s::S4),
+                w::button("Add Memory").on_press(Msg::ClickedAddMemory),
                 w::button("Submit").on_press(Msg::ClickedSubmitPrompt)
             ]
             .spacing(s::S4),
@@ -226,15 +369,23 @@ async fn submit_prompt(
 }
 
 pub async fn run() -> Result<(), Error> {
-    let worker = Worker::new().map_err(Error::WorkerInitError)?;
+    // let worker = Worker::new().map_err(Error::WorkerInitError)?;
+    //
+    // let storage = Storage::read_from_file_system()?;
+    //
+    // let flags = Flags { worker, storage };
+    //
+    // let mut settings = iced::Settings::with_flags(flags);
+    //
+    // settings.default_font = Font::with_name("Fira Code");
+    //
+    // Model::run(settings).map_err(Error::IcedRunError)
+    // let iced_result = iced::application(Model::new, Model::update, Model::view)
+    //     // .title("Arizona 2 Admin")
+    //     .run();
 
-    let storage = Storage::read_from_file_system()?;
+    let iced_result =
+        iced::application(State::title, State::update, State::view).run_with(State::new);
 
-    let flags = Flags { worker, storage };
-
-    let mut settings = iced::Settings::with_flags(flags);
-
-    settings.default_font = Font::with_name("Fira Code");
-
-    Model::run(settings).map_err(Error::IcedRunError)
+    iced_result.map_err(Error::IcedRunError)
 }

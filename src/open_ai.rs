@@ -50,11 +50,6 @@ impl History {
     }
 }
 
-struct ChatResponse {
-    created: u64,
-    content: String,
-}
-
 pub struct Completion {
     model: String,
     history: History,

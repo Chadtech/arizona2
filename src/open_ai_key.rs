@@ -1,6 +1,6 @@
 use std::env::VarError;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct OpenAiKey {
     key: String,
 }

@@ -2,12 +2,13 @@ use std::env::VarError;
 
 use crate::{nice_display::NiceDisplay, open_ai_key::OpenAiKey};
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Worker {
     pub open_ai_key: OpenAiKey,
     pub reqwest_client: reqwest::Client,
 }
 
+#[derive(Debug)]
 pub enum InitError {
     OpenAiKey(VarError),
 }
