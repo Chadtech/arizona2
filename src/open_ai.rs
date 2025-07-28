@@ -5,7 +5,7 @@ pub enum Model {
 }
 
 pub enum Role {
-    Developer,
+    System,
     User,
     Assistant,
 }
@@ -13,7 +13,7 @@ pub enum Role {
 impl Role {
     fn to_str(&self) -> &str {
         match self {
-            Role::Developer => "developer",
+            Role::System => "system",
             Role::User => "user",
             Role::Assistant => "assistant",
         }
