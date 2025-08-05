@@ -5,6 +5,7 @@ mod migrations;
 mod nice_display;
 mod open_ai;
 mod open_ai_key;
+mod person_actions;
 mod worker;
 
 use crate::nice_display::NiceDisplay;

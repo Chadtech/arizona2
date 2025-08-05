@@ -50,9 +50,128 @@ impl History {
     }
 }
 
+pub enum Tool {
+    FunctionCall(ToolFunction),
+}
+
+pub struct ToolFunction {
+    pub name: String,
+    pub description: String,
+    pub parameters: Vec<ToolFunctionParameter>,
+}
+
+impl ToolFunction {
+    pub fn new(name: String, description: String, parameters: Vec<ToolFunctionParameter>) -> Self {
+        Self {
+            name,
+            description,
+            parameters,
+        }
+    }
+}
+
+impl Into<Tool> for ToolFunction {
+    fn into(self) -> Tool {
+        Tool::FunctionCall(self)
+    }
+}
+
+impl Tool {
+    pub fn to_json(&self) -> serde_json::Value {
+        match self {
+            Tool::FunctionCall(func) => {
+                let mut properties = serde_json::json!({});
+
+                for param in &func.parameters {
+                    match param {
+                        ToolFunctionParameter::StringParam {
+                            name,
+                            description,
+                            required,
+                        } => {
+                            properties[name] = serde_json::json!({
+                                "type": "string",
+                                "description": description,
+                            });
+                        }
+                        ToolFunctionParameter::ArrayParam {
+                            name,
+                            description,
+                            item_type,
+                            required,
+                        } => {
+                            let item_type_str = match item_type {
+                                ArrayParamItemType::String => "string",
+                            };
+                            properties[name] = serde_json::json!({
+                                "type": "array",
+                                "items": { "type": item_type_str },
+                                "description": description,
+                            });
+                        }
+                    }
+                }
+
+                serde_json::json!({
+                    "type": "function",
+                    "function": {
+                        "name": func.name,
+                        "description": func.description,
+                        "parameters": serde_json::json!({
+                            "type": "object",
+                            "properties": properties,
+                            "required": func.parameters.iter().filter_map(|param| {
+                                if param.required() {
+                                    Some(param.name())
+                                } else {
+                                    None
+                                }
+                            }).collect::<Vec<_>>(),
+                        }),
+                    },
+                })
+            }
+        }
+    }
+}
+
+pub enum ToolFunctionParameter {
+    StringParam {
+        name: String,
+        description: String,
+        required: bool,
+    },
+    ArrayParam {
+        name: String,
+        description: String,
+        item_type: ArrayParamItemType,
+        required: bool,
+    },
+}
+
+impl ToolFunctionParameter {
+    pub fn required(&self) -> bool {
+        match *self {
+            ToolFunctionParameter::StringParam { required, .. } => required,
+            ToolFunctionParameter::ArrayParam { required, .. } => required,
+        }
+    }
+    pub fn name(&self) -> &str {
+        match self {
+            ToolFunctionParameter::StringParam { name, .. } => name,
+            ToolFunctionParameter::ArrayParam { name, .. } => name,
+        }
+    }
+}
+
+pub enum ArrayParamItemType {
+    String,
+}
+
 pub struct Completion {
     model: String,
     history: History,
+    tool_call: Vec<Tool>,
 }
 
 #[derive(Debug, Clone)]
@@ -88,6 +207,7 @@ impl Completion {
         Self {
             model: model_str,
             history: History::new(),
+            tool_call: vec![],
         }
     }
 
@@ -96,20 +216,33 @@ impl Completion {
         self
     }
 
+    pub fn add_tool_call(&mut self, tool: Tool) -> &mut Self {
+        self.tool_call.push(tool);
+        self
+    }
+
     pub async fn send_request(
         &self,
         open_ai_key: &OpenAiKey,
         client: reqwest::Client,
     ) -> Result<String, CompletionError> {
-        let body = serde_json::json!({
+        let mut body = serde_json::json!({
             "model": self.model,
             "messages": self.history.messages.iter().map(|msg| {
                 serde_json::json!({
                     "role": msg.role.to_str(),
                     "content": msg.content,
                 })
-            }).collect::<Vec<_>>(),
+            }).collect::<Vec<_>>()
         });
+
+        if !self.tool_call.is_empty() {
+            body["tools"] = self
+                .tool_call
+                .iter()
+                .map(|tool| tool.to_json())
+                .collect::<serde_json::Value>();
+        }
 
         let res = client
             .post("https://api.openai.com/v1/chat/completions")

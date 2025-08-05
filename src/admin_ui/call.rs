@@ -1,6 +1,6 @@
-use crate::open_ai;
 use crate::open_ai::Role;
 use crate::open_ai_key::OpenAiKey;
+use crate::{open_ai, person_actions};
 
 pub async fn submit_prompt(
     open_ai_key: OpenAiKey,
@@ -20,10 +20,11 @@ pub async fn submit_reaction(
     memories: Vec<String>,
     person_identity: String,
     situation: String,
+    state_of_mind: String,
 ) -> Result<String, open_ai::CompletionError> {
     let mut completion = open_ai::Completion::new(open_ai::Model::Gpt4p1);
 
-    completion.add_message(Role::System, "You are a person simulation framework. You have deep insights into the human mind and are very good at predicting people's reactions. When given a description of a person and some of their recent memories, respond as the person would in the given situation.");
+    completion.add_message(Role::System, "You are a person simulation framework. You have deep insights into the human mind and are very good at predicting people's reactions. When given a description of a person, their state of mind, and some of their recent memories, respond as the person would in the given situation.");
 
     let memories_list = memories
         .iter()
@@ -38,7 +39,14 @@ pub async fn submit_reaction(
         format!("Person identity: {}", person_identity).as_str(),
     );
 
+    completion.add_message(
+        Role::User,
+        format!("State of Mind: {}", state_of_mind).as_str(),
+    );
+
     completion.add_message(Role::User, format!("Situation: {}", situation).as_str());
+
+    completion.add_tool_call(person_actions::PersonActionKind::Say.to_open_ai_tool());
 
     let response = completion
         .send_request(&open_ai_key, reqwest::Client::new())

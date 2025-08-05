@@ -20,6 +20,7 @@ struct Model {
     prompt_response: PromptResponse,
     memory_fields: Vec<w::text_editor::Content>,
     situation_field: String,
+    state_of_mind_field: String,
     reaction_response: PromptResponse,
     tab: Tab,
     worker: Worker,
@@ -37,6 +38,7 @@ impl Model {
                 .collect(),
             identity_field: self.identity_field.clone(),
             situation_field: self.situation_field.clone(),
+            state_of_mind_field: self.state_of_mind_field.clone(),
             tab: self.tab.clone(),
         }
     }
@@ -59,6 +61,8 @@ struct Storage {
     tab: Tab,
     #[serde(default)]
     situation_field: String,
+    #[serde(default)]
+    state_of_mind_field: String,
 }
 
 impl Storage {
@@ -102,6 +106,7 @@ impl Storage {
             identity_field: String::new(),
             tab: Tab::default(),
             situation_field: String::new(),
+            state_of_mind_field: String::new(),
         }
     }
 }
@@ -161,6 +166,7 @@ enum Msg {
     TabSelected(Tab),
     ClickedSubmitReaction,
     SituationFieldChanged(String),
+    StateOfMindFieldChanged(String),
     ReactionSubmissionResult(Result<String, open_ai::CompletionError>),
 }
 
@@ -206,6 +212,7 @@ impl Model {
                 .map(|content_str| w::text_editor::Content::with_text(content_str))
                 .collect(),
             situation_field: flags.storage.situation_field,
+            state_of_mind_field: flags.storage.state_of_mind_field,
             reaction_response: PromptResponse::Ready,
             tab: flags.storage.tab,
             worker: flags.worker,
@@ -296,14 +303,24 @@ impl Model {
                     .collect();
                 let person_identity = self.identity_field.clone();
                 let situation = self.situation_field.clone();
+                let state_of_mind = self.state_of_mind_field.clone();
 
                 Task::perform(
-                    call::submit_reaction(open_ai_key, memories, person_identity, situation),
+                    call::submit_reaction(open_ai_key, memories, person_identity, situation, state_of_mind),
                     Msg::ReactionSubmissionResult,
                 )
             }
             Msg::SituationFieldChanged(new_field) => {
                 self.situation_field = new_field;
+
+                if let Err(err) = self.to_storage().save_to_file_system() {
+                    self.error = Some(err);
+                }
+
+                Task::none()
+            }
+            Msg::StateOfMindFieldChanged(new_field) => {
+                self.state_of_mind_field = new_field;
 
                 if let Err(err) = self.to_storage().save_to_file_system() {
                     self.error = Some(err);
@@ -377,6 +394,9 @@ impl Model {
                 w::text("Situation"),
                 w::text_input("Situation", &self.situation_field)
                     .on_input(|field| { Msg::SituationFieldChanged(field) }),
+                w::text("State of Mind"),
+                w::text_input("State of Mind", &self.state_of_mind_field)
+                    .on_input(|field| { Msg::StateOfMindFieldChanged(field) }),
                 w::button("Submit Reaction").on_press(Msg::ClickedSubmitReaction),
             ]
             .spacing(s::S4),
