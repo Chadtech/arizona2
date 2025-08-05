@@ -109,6 +109,16 @@ impl Tool {
                                 "description": description,
                             });
                         }
+                        ToolFunctionParameter::IntegerParam {
+                            name,
+                            description,
+                            required,
+                        } => {
+                            properties[name] = serde_json::json!({
+                                "type": "integer",
+                                "description": description,
+                            });
+                        }
                     }
                 }
 
@@ -147,6 +157,11 @@ pub enum ToolFunctionParameter {
         item_type: ArrayParamItemType,
         required: bool,
     },
+    IntegerParam {
+        name: String,
+        description: String,
+        required: bool,
+    },
 }
 
 impl ToolFunctionParameter {
@@ -154,12 +169,14 @@ impl ToolFunctionParameter {
         match *self {
             ToolFunctionParameter::StringParam { required, .. } => required,
             ToolFunctionParameter::ArrayParam { required, .. } => required,
+            ToolFunctionParameter::IntegerParam { required, .. } => required,
         }
     }
     pub fn name(&self) -> &str {
         match self {
             ToolFunctionParameter::StringParam { name, .. } => name,
             ToolFunctionParameter::ArrayParam { name, .. } => name,
+            ToolFunctionParameter::IntegerParam { name, .. } => name,
         }
     }
 }

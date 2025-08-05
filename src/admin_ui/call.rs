@@ -47,6 +47,7 @@ pub async fn submit_reaction(
     completion.add_message(Role::User, format!("Situation: {}", situation).as_str());
 
     completion.add_tool_call(person_actions::PersonActionKind::Say.to_open_ai_tool());
+    completion.add_tool_call(person_actions::PersonActionKind::Wait.to_open_ai_tool());
 
     let response = completion
         .send_request(&open_ai_key, reqwest::Client::new())
