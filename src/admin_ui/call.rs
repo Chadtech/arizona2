@@ -1,18 +1,20 @@
-use crate::open_ai::Role;
+use crate::open_ai::completion::{Completion, CompletionError};
+use crate::open_ai::role::Role;
 use crate::open_ai_key::OpenAiKey;
+use crate::person_actions::PersonAction;
 use crate::{open_ai, person_actions};
 
 pub async fn submit_prompt(
     open_ai_key: OpenAiKey,
     client: reqwest::Client,
     prompt: String,
-) -> Result<String, open_ai::CompletionError> {
-    let response = open_ai::Completion::new(open_ai::Model::Gpt4p1)
-        .add_message(open_ai::Role::User, prompt.as_str())
+) -> Result<String, CompletionError> {
+    let response = Completion::new(open_ai::model::Model::Gpt4p1)
+        .add_message(Role::User, prompt.as_str())
         .send_request(&open_ai_key, client)
         .await?;
 
-    Ok(response)
+    response.as_message().map_err(Into::into)
 }
 
 pub async fn submit_reaction(
@@ -21,8 +23,8 @@ pub async fn submit_reaction(
     person_identity: String,
     situation: String,
     state_of_mind: String,
-) -> Result<String, open_ai::CompletionError> {
-    let mut completion = open_ai::Completion::new(open_ai::Model::Gpt4p1);
+) -> Result<Vec<PersonAction>, CompletionError> {
+    let mut completion = Completion::new(open_ai::model::Model::Gpt4p1);
 
     completion.add_message(Role::System, "You are a person simulation framework. You have deep insights into the human mind and are very good at predicting people's reactions. When given a description of a person, their state of mind, and some of their recent memories, respond as the person would in the given situation.");
 
@@ -53,5 +55,13 @@ pub async fn submit_reaction(
         .send_request(&open_ai_key, reqwest::Client::new())
         .await?;
 
-    Ok(response)
+    let tool_calls = response.as_tool_calls().map_err(Into::into)?;
+
+    let person_actions = tool_calls
+        .into_iter()
+        .map(|tool_call| PersonAction::from_open_ai_tool_call(tool_call))
+        .collect::<Result<Vec<PersonAction>, person_actions::PersonActionError>>()
+        .map_err(Into::into)?;
+
+    Ok(person_actions)
 }

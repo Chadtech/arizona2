@@ -3,6 +3,8 @@ mod style;
 
 use self::style as s;
 use crate::nice_display::NiceDisplay;
+use crate::open_ai::completion::CompletionError;
+use crate::person_actions::PersonAction;
 use crate::worker::Worker;
 use crate::{open_ai, worker};
 use iced;
@@ -17,11 +19,11 @@ const STORAGE_FILE_PATH: &str = "storage.json";
 struct Model {
     prompt_field: String,
     identity_field: String,
-    prompt_response: PromptResponse,
+    prompt_status: PromptStatus,
     memory_fields: Vec<w::text_editor::Content>,
     situation_field: String,
     state_of_mind_field: String,
-    reaction_response: PromptResponse,
+    reaction_status: ReactionStatus,
     tab: Tab,
     worker: Worker,
     error: Option<Error>,
@@ -44,10 +46,16 @@ impl Model {
     }
 }
 
-enum PromptResponse {
+enum PromptStatus {
     Ready,
     Response(String),
-    Error(open_ai::CompletionError),
+    Error(CompletionError),
+}
+
+enum ReactionStatus {
+    Ready,
+    Response(Vec<PersonAction>),
+    Error(CompletionError),
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -157,7 +165,7 @@ enum Msg {
     PromptFieldChanged(String),
     ClickedSubmitPrompt,
     ClickedAddMemory,
-    SubmissionResult(Result<String, open_ai::CompletionError>),
+    SubmissionResult(Result<String, CompletionError>),
     MemoryUpdated {
         index: usize,
         action: w::text_editor::Action,
@@ -167,7 +175,7 @@ enum Msg {
     ClickedSubmitReaction,
     SituationFieldChanged(String),
     StateOfMindFieldChanged(String),
-    ReactionSubmissionResult(Result<String, open_ai::CompletionError>),
+    ReactionSubmissionResult(Result<Vec<PersonAction>, CompletionError>),
 }
 
 #[derive(Debug)]
@@ -204,7 +212,7 @@ impl Model {
         let model = Model {
             prompt_field: flags.storage.prompt,
             identity_field: flags.storage.identity_field,
-            prompt_response: PromptResponse::Ready,
+            prompt_status: PromptStatus::Ready,
             memory_fields: flags
                 .storage
                 .memories
@@ -213,7 +221,7 @@ impl Model {
                 .collect(),
             situation_field: flags.storage.situation_field,
             state_of_mind_field: flags.storage.state_of_mind_field,
-            reaction_response: PromptResponse::Ready,
+            reaction_status: ReactionStatus::Ready,
             tab: flags.storage.tab,
             worker: flags.worker,
             error: None,
@@ -246,9 +254,9 @@ impl Model {
                 )
             }
             Msg::SubmissionResult(result) => {
-                self.prompt_response = match result {
-                    Ok(response) => PromptResponse::Response(response.clone()),
-                    Err(err) => PromptResponse::Error(err.clone()),
+                self.prompt_status = match result {
+                    Ok(response) => PromptStatus::Response(response.clone()),
+                    Err(err) => PromptStatus::Error(err.clone()),
                 };
 
                 Task::none()
@@ -306,7 +314,13 @@ impl Model {
                 let state_of_mind = self.state_of_mind_field.clone();
 
                 Task::perform(
-                    call::submit_reaction(open_ai_key, memories, person_identity, situation, state_of_mind),
+                    call::submit_reaction(
+                        open_ai_key,
+                        memories,
+                        person_identity,
+                        situation,
+                        state_of_mind,
+                    ),
                     Msg::ReactionSubmissionResult,
                 )
             }
@@ -329,10 +343,9 @@ impl Model {
                 Task::none()
             }
             Msg::ReactionSubmissionResult(result) => {
-                dbg!(&result);
-                self.reaction_response = match result {
-                    Ok(response) => PromptResponse::Response(response.clone()),
-                    Err(err) => PromptResponse::Error(err.clone()),
+                self.reaction_status = match result {
+                    Ok(response) => ReactionStatus::Response(response.clone()),
+                    Err(err) => ReactionStatus::Error(err.clone()),
                 };
 
                 Task::none()
@@ -369,12 +382,12 @@ impl Model {
 
         let tab_content = match self.tab {
             Tab::Prompt => {
-                let prompt_response_view: Element<Msg> = match &self.prompt_response {
-                    PromptResponse::Ready => w::Column::new().into(),
-                    PromptResponse::Response(response) => {
+                let prompt_response_view: Element<Msg> = match &self.prompt_status {
+                    PromptStatus::Ready => w::Column::new().into(),
+                    PromptStatus::Response(response) => {
                         w::text(format!("Response: {}", response)).into()
                     }
-                    PromptResponse::Error(err) => {
+                    PromptStatus::Error(err) => {
                         w::text(format!("Error: {}", err.to_nice_error().to_string())).into()
                     }
                 };
@@ -385,24 +398,47 @@ impl Model {
                     prompt_response_view,
                 ]
             }
-            Tab::Reaction => w::column![
-                w::text("Identity"),
-                w::text_input("Identity", &self.identity_field).on_input(Msg::IdentityFieldChanged),
-                w::text("Memories"),
-                w::Column::with_children(memories_children).spacing(s::S4),
-                w::button("Add Memory").on_press(Msg::ClickedAddMemory),
-                w::text("Situation"),
-                w::text_input("Situation", &self.situation_field)
-                    .on_input(|field| { Msg::SituationFieldChanged(field) }),
-                w::text("State of Mind"),
-                w::text_input("State of Mind", &self.state_of_mind_field)
-                    .on_input(|field| { Msg::StateOfMindFieldChanged(field) }),
-                w::button("Submit Reaction").on_press(Msg::ClickedSubmitReaction),
-            ]
-            .spacing(s::S4),
+            Tab::Reaction => {
+                let reaction_response_view: Element<Msg> = match &self.reaction_status {
+                    ReactionStatus::Ready => w::Column::new().into(),
+                    ReactionStatus::Response(response) => {
+                        w::Column::with_children(
+                            response
+                                .iter()
+                                .map(|action| w::text(format!("Action: {:#?}", action)).into())
+                                .collect::<Vec<_>>(),
+                        )
+                        .into()
+                        // w::text(format!("Response: {}", response)).into()
+                    }
+                    ReactionStatus::Error(err) => {
+                        w::text(format!("Error: {}", err.to_nice_error().to_string())).into()
+                    }
+                };
+
+                w::column![
+                    w::text("Identity"),
+                    w::text_input("Identity", &self.identity_field)
+                        .on_input(Msg::IdentityFieldChanged),
+                    w::text("Memories"),
+                    w::Column::with_children(memories_children).spacing(s::S4),
+                    w::button("Add Memory").on_press(Msg::ClickedAddMemory),
+                    w::text("Situation"),
+                    w::text_input("Situation", &self.situation_field)
+                        .on_input(|field| { Msg::SituationFieldChanged(field) }),
+                    w::text("State of Mind"),
+                    w::text_input("State of Mind", &self.state_of_mind_field)
+                        .on_input(|field| { Msg::StateOfMindFieldChanged(field) }),
+                    w::button("Submit Reaction").on_press(Msg::ClickedSubmitReaction),
+                    reaction_response_view,
+                ]
+                .spacing(s::S4)
+            }
         };
 
-        w::container(w::column![tab_row, tab_content.spacing(s::S4)].spacing(s::S4))
+        let scrollable_content = w::scrollable(tab_content.spacing(s::S4));
+
+        w::container(w::column![tab_row, scrollable_content].spacing(s::S4))
             .padding(s::S4)
             .into()
     }
