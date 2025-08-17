@@ -6,6 +6,7 @@ pub struct Config {
     pub password: String,
 }
 
+#[derive(Debug)]
 pub enum ConfigError {
     ReadingPassword(dotenv::Error),
     ReadingHost(dotenv::Error),

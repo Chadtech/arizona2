@@ -1,18 +1,23 @@
 mod call;
+mod new_identity_page;
+mod new_person_page;
 mod style;
 
 use self::style as s;
+use crate::capability::person_identity::{NewPersonIdentity, PersonIdentityCapability};
+use crate::domain::person_identity_uuid::PersonIdentityUuid;
 use crate::nice_display::NiceDisplay;
 use crate::open_ai::completion::CompletionError;
 use crate::person_actions::PersonAction;
+use crate::worker;
 use crate::worker::Worker;
-use crate::{open_ai, worker};
 use iced;
 use iced::{widget as w, Color, Element, Task, Theme};
 use serde::{Deserialize, Serialize};
 use std::fs::File;
 use std::io::Write;
 use std::path::Path;
+use std::sync::Arc;
 
 const STORAGE_FILE_PATH: &str = "storage.json";
 
@@ -24,8 +29,9 @@ struct Model {
     situation_field: String,
     state_of_mind_field: String,
     reaction_status: ReactionStatus,
+    new_identity_page: new_identity_page::Model,
     tab: Tab,
-    worker: Worker,
+    worker: Arc<Worker>,
     error: Option<Error>,
 }
 
@@ -41,6 +47,7 @@ impl Model {
             identity_field: self.identity_field.clone(),
             situation_field: self.situation_field.clone(),
             state_of_mind_field: self.state_of_mind_field.clone(),
+            new_identity: self.new_identity_page.to_storage(),
             tab: self.tab.clone(),
         }
     }
@@ -71,6 +78,8 @@ struct Storage {
     situation_field: String,
     #[serde(default)]
     state_of_mind_field: String,
+    #[serde(default)]
+    new_identity: new_identity_page::Storage,
 }
 
 impl Storage {
@@ -115,6 +124,7 @@ impl Storage {
             tab: Tab::default(),
             situation_field: String::new(),
             state_of_mind_field: String::new(),
+            new_identity: new_identity_page::Storage::default(),
         }
     }
 }
@@ -123,6 +133,7 @@ impl Storage {
 enum Tab {
     Prompt,
     Reaction,
+    Identity,
 }
 
 impl Tab {
@@ -130,11 +141,12 @@ impl Tab {
         match self {
             Tab::Prompt => "Prompt".to_string(),
             Tab::Reaction => "Reaction".to_string(),
+            Tab::Identity => "Identity".to_string(),
         }
     }
 
     pub fn all() -> Vec<Tab> {
-        vec![Tab::Prompt, Tab::Reaction]
+        vec![Tab::Prompt, Tab::Reaction, Tab::Identity]
     }
 }
 
@@ -152,7 +164,7 @@ struct Flags {
 
 impl Flags {
     async fn get() -> Result<Self, Error> {
-        let worker = Worker::new().map_err(Error::WorkerInitError)?;
+        let worker = Worker::new().await.map_err(Error::WorkerInitError)?;
 
         let storage = Storage::read_from_file_system()?;
 
@@ -176,6 +188,7 @@ enum Msg {
     SituationFieldChanged(String),
     StateOfMindFieldChanged(String),
     ReactionSubmissionResult(Result<Vec<PersonAction>, CompletionError>),
+    NewIdentityPageMsg(new_identity_page::Msg),
 }
 
 #[derive(Debug)]
@@ -221,9 +234,10 @@ impl Model {
                 .collect(),
             situation_field: flags.storage.situation_field,
             state_of_mind_field: flags.storage.state_of_mind_field,
+            new_identity_page: new_identity_page::Model::new(&flags.storage.new_identity),
             reaction_status: ReactionStatus::Ready,
             tab: flags.storage.tab,
-            worker: flags.worker,
+            worker: Arc::new(flags.worker),
             error: None,
         };
 
@@ -350,6 +364,15 @@ impl Model {
 
                 Task::none()
             }
+            Msg::NewIdentityPageMsg(sub_msg) => {
+                let task = self.new_identity_page.update(self.worker.clone(), sub_msg);
+
+                if let Err(err) = self.to_storage().save_to_file_system() {
+                    self.error = Some(err);
+                }
+
+                task.map(Msg::NewIdentityPageMsg)
+            }
         }
     }
 
@@ -380,7 +403,7 @@ impl Model {
 
         let tab_row = w::Row::with_children(tabs).spacing(s::S4);
 
-        let tab_content = match self.tab {
+        let tab_content: Element<Msg> = match self.tab {
             Tab::Prompt => {
                 let prompt_response_view: Element<Msg> = match &self.prompt_status {
                     PromptStatus::Ready => w::Column::new().into(),
@@ -397,6 +420,7 @@ impl Model {
                     w::button("Submit").on_press(Msg::ClickedSubmitPrompt),
                     prompt_response_view,
                 ]
+                .into()
             }
             Tab::Reaction => {
                 let reaction_response_view: Element<Msg> = match &self.reaction_status {
@@ -433,10 +457,12 @@ impl Model {
                     reaction_response_view,
                 ]
                 .spacing(s::S4)
+                .into()
             }
+            Tab::Identity => self.new_identity_page.view().map(Msg::NewIdentityPageMsg),
         };
 
-        let scrollable_content = w::scrollable(tab_content.spacing(s::S4));
+        let scrollable_content = w::scrollable(tab_content);
 
         w::container(w::column![tab_row, scrollable_content].spacing(s::S4))
             .padding(s::S4)
@@ -459,6 +485,13 @@ impl Model {
             },
         )
     }
+}
+
+async fn create_new_identity(
+    worker: &Worker,
+    new_identity: NewPersonIdentity,
+) -> Result<PersonIdentityUuid, String> {
+    worker.create_person_identity(new_identity).await
 }
 
 pub async fn run() -> Result<(), Error> {

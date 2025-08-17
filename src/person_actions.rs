@@ -2,8 +2,6 @@ use crate::open_ai::completion::CompletionError;
 use crate::open_ai::tool::ToolFunctionParameter;
 use crate::open_ai::tool_call::ToolCall;
 use crate::{nice_display::NiceDisplay, open_ai};
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
 
 pub enum PersonActionKind {
     Say,
@@ -21,12 +19,12 @@ impl PersonActionKind {
         match self {
             PersonActionKind::Say => {
                 let parameters = vec![
-                    open_ai::tool::ToolFunctionParameter::StringParam {
+                    ToolFunctionParameter::StringParam {
                         name: "comment".to_string(),
                         description: "The comment to say".to_string(),
                         required: true,
                     },
-                    open_ai::tool::ToolFunctionParameter::ArrayParam {
+                    ToolFunctionParameter::ArrayParam {
                         name: "recipients".to_string(),
                         description: "The recipients of the comment".to_string(),
                         item_type: open_ai::tool::ArrayParamItemType::String,
@@ -42,11 +40,18 @@ impl PersonActionKind {
                 }
             }
             PersonActionKind::Wait => {
-                let parameters = vec![ToolFunctionParameter::IntegerParam {
-                    name: "duration".to_string(),
-                    description: "The duration to wait in millisoconds".to_string(),
-                    required: true,
-                }];
+                let parameters = vec![
+                    ToolFunctionParameter::IntegerParam {
+                        name: "duration".to_string(),
+                        description: "The duration to wait in millisoconds".to_string(),
+                        required: true,
+                    },
+                    ToolFunctionParameter::StringParam {
+                        name: "and_then".to_string(),
+                        description: "The action to perform after waiting".to_string(),
+                        required: false,
+                    },
+                ];
 
                 open_ai::tool::ToolFunction {
                     name: self.to_name(),
@@ -70,6 +75,7 @@ pub enum PersonAction {
     },
     Wait {
         duration: u64,
+        and_then: Option<String>,
     },
 }
 
@@ -177,34 +183,50 @@ impl PersonAction {
                 }
             }
             "wait" => {
-                let duration: u64 = tool_call
-                    .arguments
-                    .into_iter()
-                    .map(|(key, value)| {
-                        if key == "duration" {
-                            value
-                                .as_u64()
-                                .ok_or_else(|| PersonActionError::UnexpectedType {
+                let mut maybe_duration: Option<u64> = None;
+
+                let mut and_then: Option<String> = None;
+
+                for (key, value) in tool_call.arguments {
+                    match key.as_str() {
+                        "duration" => {
+                            if let Some(dur) = value.as_u64() {
+                                maybe_duration = Some(dur);
+                            } else {
+                                Err(PersonActionError::UnexpectedType {
                                     action_name: tool_call_name.clone(),
                                     parameter_name: "duration".to_string(),
                                     wanted_type: "u64".to_string(),
-                                })
-                        } else {
+                                })?
+                            }
+                        }
+                        "and_then" => {
+                            if let Some(s) = value.as_str() {
+                                and_then = Some(s.to_string());
+                            } else {
+                                Err(PersonActionError::UnexpectedType {
+                                    action_name: tool_call_name.clone(),
+                                    parameter_name: "and_then".to_string(),
+                                    wanted_type: "String".to_string(),
+                                })?
+                            }
+                        }
+                        _ => {
                             Err(PersonActionError::UnrecongizedParameter {
                                 action_name: tool_call_name.clone(),
                                 parameter_name: key,
-                            })
+                            })?;
                         }
-                    })
-                    .collect::<Result<Vec<u64>, PersonActionError>>()?
-                    .first()
-                    .cloned()
-                    .ok_or_else(|| PersonActionError::ParameterMissing {
+                    }
+                }
+
+                let duration =
+                    maybe_duration.ok_or_else(|| PersonActionError::ParameterMissing {
                         action_name: tool_call_name.clone(),
                         parameter_name: "duration".to_string(),
                     })?;
 
-                Ok(PersonAction::Wait { duration })
+                Ok(PersonAction::Wait { duration, and_then })
             }
             _ => Err(PersonActionError::UnrecognizedAction {
                 action_name: tool_call_name,
