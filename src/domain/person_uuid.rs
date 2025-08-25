@@ -1,9 +1,9 @@
 use uuid::Uuid;
 
 #[derive(Debug, Clone)]
-pub struct PersonIdentityUuid(Uuid);
+pub struct PersonUuid(Uuid);
 
-impl PersonIdentityUuid {
+impl PersonUuid {
     pub fn from_str(s: &str) -> Result<Self, uuid::Error> {
         Uuid::parse_str(s).map(Self)
     }
@@ -12,12 +12,12 @@ impl PersonIdentityUuid {
         Self(u)
     }
 
-    pub fn to_uuid(&self) -> Uuid {
-        self.0
-    }
-
     pub fn to_string(&self) -> String {
         self.0.to_string()
+    }
+
+    pub fn to_uuid(&self) -> Uuid {
+        self.0
     }
 
     pub fn new() -> Self {

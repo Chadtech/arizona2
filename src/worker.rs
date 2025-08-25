@@ -1,3 +1,4 @@
+mod person_capability;
 mod person_identity_capability;
 
 use crate::{db, nice_display::NiceDisplay, open_ai_key::OpenAiKey};

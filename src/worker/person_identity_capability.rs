@@ -12,12 +12,13 @@ impl PersonIdentityCapability for Worker {
     ) -> Result<PersonIdentityUuid, String> {
         let ret = sqlx::query!(
             r#"
-                INSERT INTO person_identity (person_uuid, identity)
-                SELECT person.uuid, $1::TEXT
+                INSERT INTO person_identity (uuid, person_uuid, identity)
+                SELECT $1::UUID, person.uuid, $2::TEXT
                 FROM person
-                WHERE name = $2::TEXT
+                WHERE name = $3::TEXT
                 RETURNING uuid;
             "#,
+            new_person_identity.person_identity_uuid.to_uuid(),
             new_person_identity.identity,
             new_person_identity.person_name
         )

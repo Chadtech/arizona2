@@ -1,5 +1,5 @@
-use crate::admin_ui::{create_new_identity, s};
-use crate::capability::person_identity::NewPersonIdentity;
+use crate::admin_ui::s;
+use crate::capability::person_identity::{NewPersonIdentity, PersonIdentityCapability};
 use crate::domain::person_identity_uuid::PersonIdentityUuid;
 use crate::worker::Worker;
 use iced::{widget as w, Element, Task};
@@ -9,6 +9,14 @@ use std::sync::Arc;
 pub struct Model {
     name_field: String,
     identity_field: String,
+    status: Status,
+}
+
+enum Status {
+    Ready,
+    CreatingIdentity,
+    Done,
+    ErrorCreatingIdentity(String),
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -41,6 +49,7 @@ impl Model {
         Self {
             identity_field: storage.identity_field.clone(),
             name_field: storage.name_field.clone(),
+            status: Status::Ready,
         }
     }
     pub fn to_storage(&self) -> Storage {
@@ -62,6 +71,7 @@ impl Model {
             }
             Msg::ClickedAddIdentity => {
                 let new_identity = NewPersonIdentity {
+                    person_identity_uuid: PersonIdentityUuid::new(),
                     identity: self.identity_field.clone(),
                     person_name: self.name_field.clone(),
                 };
@@ -71,7 +81,10 @@ impl Model {
                 )
             }
             Msg::IdentityCreated(result) => {
-                dbg!(&result);
+                self.status = match result {
+                    Ok(_) => Status::Done,
+                    Err(err) => Status::ErrorCreatingIdentity(err),
+                };
                 Task::none()
             }
         }
@@ -79,12 +92,28 @@ impl Model {
     pub fn view(&self) -> Element<Msg> {
         w::column![
             w::text("Person Name"),
-            w::text_input("Person Name", &self.name_field).on_input(Msg::NameFieldChanged),
+            w::text_input("", &self.name_field).on_input(Msg::NameFieldChanged),
             w::text("New Identity"),
-            w::text_input("New Identity", &self.identity_field).on_input(Msg::IdentityFieldChanged),
+            w::text_input("", &self.identity_field).on_input(Msg::IdentityFieldChanged),
             w::button("Add Identity").on_press(Msg::ClickedAddIdentity),
+            status_view(&self.status),
         ]
         .spacing(s::S4)
         .into()
     }
+}
+
+fn status_view(status: &Status) -> Element<Msg> {
+    match status {
+        Status::Ready => w::text("Ready").into(),
+        Status::CreatingIdentity => w::text("Creating identity...").into(),
+        Status::Done => w::text("Identity created successfully!").into(),
+        Status::ErrorCreatingIdentity(err) => w::text(format!("Error: {}", err)).into(),
+    }
+}
+async fn create_new_identity(
+    worker: &Worker,
+    new_identity: NewPersonIdentity,
+) -> Result<PersonIdentityUuid, String> {
+    worker.create_person_identity(new_identity).await
 }

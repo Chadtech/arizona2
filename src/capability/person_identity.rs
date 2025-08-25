@@ -3,6 +3,7 @@ use async_trait::async_trait;
 use crate::domain::person_identity_uuid::PersonIdentityUuid;
 
 pub struct NewPersonIdentity {
+    pub person_identity_uuid: PersonIdentityUuid,
     pub person_name: String,
     pub identity: String,
 }

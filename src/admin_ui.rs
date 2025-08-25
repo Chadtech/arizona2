@@ -4,8 +4,7 @@ mod new_person_page;
 mod style;
 
 use self::style as s;
-use crate::capability::person_identity::{NewPersonIdentity, PersonIdentityCapability};
-use crate::domain::person_identity_uuid::PersonIdentityUuid;
+use crate::capability::person_identity::PersonIdentityCapability;
 use crate::nice_display::NiceDisplay;
 use crate::open_ai::completion::CompletionError;
 use crate::person_actions::PersonAction;
@@ -30,6 +29,7 @@ struct Model {
     state_of_mind_field: String,
     reaction_status: ReactionStatus,
     new_identity_page: new_identity_page::Model,
+    new_person_page: new_person_page::Model,
     tab: Tab,
     worker: Arc<Worker>,
     error: Option<Error>,
@@ -48,6 +48,7 @@ impl Model {
             situation_field: self.situation_field.clone(),
             state_of_mind_field: self.state_of_mind_field.clone(),
             new_identity: self.new_identity_page.to_storage(),
+            new_person: self.new_person_page.to_storage(),
             tab: self.tab.clone(),
         }
     }
@@ -80,6 +81,8 @@ struct Storage {
     state_of_mind_field: String,
     #[serde(default)]
     new_identity: new_identity_page::Storage,
+    #[serde(default)]
+    new_person: new_person_page::Storage,
 }
 
 impl Storage {
@@ -125,6 +128,7 @@ impl Storage {
             situation_field: String::new(),
             state_of_mind_field: String::new(),
             new_identity: new_identity_page::Storage::default(),
+            new_person: new_person_page::Storage::default(),
         }
     }
 }
@@ -134,6 +138,7 @@ enum Tab {
     Prompt,
     Reaction,
     Identity,
+    Person,
 }
 
 impl Tab {
@@ -142,11 +147,12 @@ impl Tab {
             Tab::Prompt => "Prompt".to_string(),
             Tab::Reaction => "Reaction".to_string(),
             Tab::Identity => "Identity".to_string(),
+            Tab::Person => "Person".to_string(),
         }
     }
 
     pub fn all() -> Vec<Tab> {
-        vec![Tab::Prompt, Tab::Reaction, Tab::Identity]
+        vec![Tab::Prompt, Tab::Reaction, Tab::Identity, Tab::Person]
     }
 }
 
@@ -189,6 +195,7 @@ enum Msg {
     StateOfMindFieldChanged(String),
     ReactionSubmissionResult(Result<Vec<PersonAction>, CompletionError>),
     NewIdentityPageMsg(new_identity_page::Msg),
+    NewPersonPageMsg(new_person_page::Msg),
 }
 
 #[derive(Debug)]
@@ -235,6 +242,7 @@ impl Model {
             situation_field: flags.storage.situation_field,
             state_of_mind_field: flags.storage.state_of_mind_field,
             new_identity_page: new_identity_page::Model::new(&flags.storage.new_identity),
+            new_person_page: new_person_page::Model::new(&flags.storage.new_person),
             reaction_status: ReactionStatus::Ready,
             tab: flags.storage.tab,
             worker: Arc::new(flags.worker),
@@ -373,6 +381,15 @@ impl Model {
 
                 task.map(Msg::NewIdentityPageMsg)
             }
+            Msg::NewPersonPageMsg(sub_msg) => {
+                let task = self.new_person_page.update(self.worker.clone(), sub_msg);
+
+                if let Err(err) = self.to_storage().save_to_file_system() {
+                    self.error = Some(err);
+                }
+
+                task.map(Msg::NewPersonPageMsg)
+            }
         }
     }
 
@@ -460,6 +477,7 @@ impl Model {
                 .into()
             }
             Tab::Identity => self.new_identity_page.view().map(Msg::NewIdentityPageMsg),
+            Tab::Person => self.new_person_page.view().map(Msg::NewPersonPageMsg),
         };
 
         let scrollable_content = w::scrollable(tab_content);
@@ -485,13 +503,6 @@ impl Model {
             },
         )
     }
-}
-
-async fn create_new_identity(
-    worker: &Worker,
-    new_identity: NewPersonIdentity,
-) -> Result<PersonIdentityUuid, String> {
-    worker.create_person_identity(new_identity).await
 }
 
 pub async fn run() -> Result<(), Error> {
