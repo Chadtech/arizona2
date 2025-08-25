@@ -1,4 +1,5 @@
 mod call;
+mod memory_page;
 mod new_identity_page;
 mod new_person_page;
 mod style;
@@ -30,6 +31,7 @@ struct Model {
     reaction_status: ReactionStatus,
     new_identity_page: new_identity_page::Model,
     new_person_page: new_person_page::Model,
+    memory_page: memory_page::Model,
     tab: Tab,
     worker: Arc<Worker>,
     error: Option<Error>,
@@ -49,6 +51,7 @@ impl Model {
             state_of_mind_field: self.state_of_mind_field.clone(),
             new_identity: self.new_identity_page.to_storage(),
             new_person: self.new_person_page.to_storage(),
+            memory: self.memory_page.to_storage(),
             tab: self.tab.clone(),
         }
     }
@@ -83,6 +86,8 @@ struct Storage {
     new_identity: new_identity_page::Storage,
     #[serde(default)]
     new_person: new_person_page::Storage,
+    #[serde(default)]
+    memory: memory_page::Storage,
 }
 
 impl Storage {
@@ -129,6 +134,7 @@ impl Storage {
             state_of_mind_field: String::new(),
             new_identity: new_identity_page::Storage::default(),
             new_person: new_person_page::Storage::default(),
+            memory: memory_page::Storage::default(),
         }
     }
 }
@@ -139,6 +145,7 @@ enum Tab {
     Reaction,
     Identity,
     Person,
+    Memory,
 }
 
 impl Tab {
@@ -148,11 +155,18 @@ impl Tab {
             Tab::Reaction => "Reaction".to_string(),
             Tab::Identity => "Identity".to_string(),
             Tab::Person => "Person".to_string(),
+            Tab::Memory => "Memory".to_string(),
         }
     }
 
     pub fn all() -> Vec<Tab> {
-        vec![Tab::Prompt, Tab::Reaction, Tab::Identity, Tab::Person]
+        vec![
+            Tab::Prompt,
+            Tab::Reaction,
+            Tab::Identity,
+            Tab::Person,
+            Tab::Memory,
+        ]
     }
 }
 
@@ -196,6 +210,7 @@ enum Msg {
     ReactionSubmissionResult(Result<Vec<PersonAction>, CompletionError>),
     NewIdentityPageMsg(new_identity_page::Msg),
     NewPersonPageMsg(new_person_page::Msg),
+    MemoryPageMsg(memory_page::Msg),
 }
 
 #[derive(Debug)]
@@ -243,6 +258,7 @@ impl Model {
             state_of_mind_field: flags.storage.state_of_mind_field,
             new_identity_page: new_identity_page::Model::new(&flags.storage.new_identity),
             new_person_page: new_person_page::Model::new(&flags.storage.new_person),
+            memory_page: memory_page::Model::new(&flags.storage.memory),
             reaction_status: ReactionStatus::Ready,
             tab: flags.storage.tab,
             worker: Arc::new(flags.worker),
@@ -390,6 +406,15 @@ impl Model {
 
                 task.map(Msg::NewPersonPageMsg)
             }
+            Msg::MemoryPageMsg(sub_msg) => {
+                let task = self.memory_page.update(self.worker.clone(), sub_msg);
+
+                if let Err(err) = self.to_storage().save_to_file_system() {
+                    self.error = Some(err);
+                }
+
+                task.map(Msg::MemoryPageMsg)
+            }
         }
     }
 
@@ -478,6 +503,7 @@ impl Model {
             }
             Tab::Identity => self.new_identity_page.view().map(Msg::NewIdentityPageMsg),
             Tab::Person => self.new_person_page.view().map(Msg::NewPersonPageMsg),
+            Tab::Memory => self.memory_page.view().map(Msg::MemoryPageMsg),
         };
 
         let scrollable_content = w::scrollable(tab_content);
