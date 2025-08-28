@@ -5,7 +5,6 @@ mod new_person_page;
 mod style;
 
 use self::style as s;
-use crate::capability::person_identity::PersonIdentityCapability;
 use crate::nice_display::NiceDisplay;
 use crate::open_ai::completion::CompletionError;
 use crate::person_actions::PersonAction;

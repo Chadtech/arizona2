@@ -13,7 +13,7 @@ impl PersonCapability for Worker {
                 RETURNING uuid;
             "#,
             new_person.person_uuid.to_uuid(),
-            new_person.person_name
+            new_person.person_name.to_string()
         )
         .fetch_one(&self.sqlx)
         .await

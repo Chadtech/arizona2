@@ -1,9 +1,9 @@
-use crate::domain::person_uuid::PersonUuid;
+use crate::domain::{person_name::PersonName, person_uuid::PersonUuid};
 use async_trait::async_trait;
 
 pub struct NewPerson {
     pub person_uuid: PersonUuid,
-    pub person_name: String,
+    pub person_name: PersonName,
 }
 
 #[async_trait]

@@ -2,6 +2,7 @@ use crate::admin_ui::s;
 use crate::capability::person::{NewPerson, PersonCapability};
 use crate::capability::person_identity::{NewPersonIdentity, PersonIdentityCapability};
 use crate::domain::person_identity_uuid::PersonIdentityUuid;
+use crate::domain::person_name::PersonName;
 use crate::domain::person_uuid::PersonUuid;
 use crate::worker::Worker;
 use iced::{widget as w, Element, Task};
@@ -16,7 +17,7 @@ pub struct Model {
 
 enum Status {
     Ready,
-    CreatingPerson { identity: String, name: String },
+    CreatingPerson,
     CreatingIdentity,
     Done,
     ErrorCreatingPerson(String),
@@ -74,27 +75,22 @@ impl Model {
                 self.name_field = value;
                 Task::none()
             }
-            Msg::ClickedCreatePerson => {
-                // match self.status {
-                //     Status::Ready => {
-                self.status = Status::CreatingPerson {
-                    identity: self.identity_field.clone(),
-                    name: self.name_field.clone(),
-                };
+            Msg::ClickedCreatePerson => match self.status {
+                Status::Ready => {
+                    self.status = Status::CreatingPerson;
 
-                let new_person = NewPerson {
-                    person_name: self.name_field.clone(),
-                    person_uuid: PersonUuid::new(),
-                };
+                    let new_person = NewPerson {
+                        person_name: PersonName::from_string(self.name_field.clone()),
+                        person_uuid: PersonUuid::new(),
+                    };
 
-                Task::perform(
-                    async move { create_new_person(&worker, new_person).await },
-                    Msg::PersonCreated,
-                )
-                //     }
-                //     _ => Task::none(),
-                // }
-            }
+                    Task::perform(
+                        async move { create_new_person(&worker, new_person).await },
+                        Msg::PersonCreated,
+                    )
+                }
+                _ => Task::none(),
+            },
             Msg::PersonCreated(result) => match result {
                 Ok(_) => {
                     self.status = Status::CreatingIdentity;

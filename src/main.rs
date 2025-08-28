@@ -1,5 +1,4 @@
 mod admin_ui;
-mod az2_error;
 mod capability;
 mod db;
 mod domain;

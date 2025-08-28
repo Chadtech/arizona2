@@ -1,10 +1,12 @@
+mod memory_capability;
 mod person_capability;
 mod person_identity_capability;
 
 use crate::{db, nice_display::NiceDisplay, open_ai_key::OpenAiKey};
-use sqlx::postgres::PgPoolOptions;
+use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use sqlx::Postgres;
 use std::env::VarError;
+use std::time::Duration;
 
 #[derive(Clone, Debug)]
 pub struct Worker {
@@ -18,6 +20,7 @@ pub enum InitError {
     OpenAiKey(VarError),
     DbConfig(db::ConfigError),
     PoolConnection(sqlx::Error),
+    PoolAcquire(sqlx::Error),
 }
 
 impl NiceDisplay for InitError {
@@ -29,6 +32,12 @@ impl NiceDisplay for InitError {
             }
             InitError::PoolConnection(err) => {
                 format!("Error connecting to the database pool\n{}", err)
+            }
+            InitError::PoolAcquire(err) => {
+                format!(
+                    "Error acquiring a database connection from the pool\n{}",
+                    err
+                )
             }
         }
     }
@@ -49,11 +58,19 @@ impl Worker {
             );
 
             PgPoolOptions::new()
-                .max_connections(20)
-                .connect(postgres_conn_url.as_str())
+                .min_connections(2)
+                .idle_timeout(Duration::from_secs(600))
+                .max_connections(19)
+                .test_before_acquire(true)
+                .connect(&postgres_conn_url)
                 .await
                 .map_err(InitError::PoolConnection)?
         };
+
+        sqlx::query("SELECT 1")
+            .execute(&sqlx_pool)
+            .await
+            .map_err(InitError::PoolAcquire)?;
 
         Ok(Worker {
             open_ai_key,

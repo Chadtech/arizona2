@@ -1,3 +1,4 @@
-pub mod person_identity;
+pub mod memory_uuid;
 pub mod person_identity_uuid;
+pub mod person_name;
 pub mod person_uuid;

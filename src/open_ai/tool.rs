@@ -74,7 +74,7 @@ impl Tool {
                         ToolFunctionParameter::StringParam {
                             name,
                             description,
-                            required,
+                            required: _,
                         } => {
                             properties[name] = serde_json::json!({
                                 "type": "string",
@@ -85,7 +85,7 @@ impl Tool {
                             name,
                             description,
                             item_type,
-                            required,
+                            required: _,
                         } => {
                             let item_type_str = match item_type {
                                 ArrayParamItemType::String => "string",
@@ -99,7 +99,7 @@ impl Tool {
                         ToolFunctionParameter::IntegerParam {
                             name,
                             description,
-                            required,
+                            required: _,
                         } => {
                             properties[name] = serde_json::json!({
                                 "type": "integer",

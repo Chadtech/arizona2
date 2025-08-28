@@ -1,0 +1,30 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                INSERT INTO memory (uuid, person_uuid, content, embedding)\n                VALUES ($1::UUID, (SELECT person.uuid FROM person WHERE name = $2::TEXT), $3::TEXT, $4)\n                RETURNING uuid;\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "uuid",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        {
+          "Custom": {
+            "name": "vector",
+            "kind": "Simple"
+          }
+        }
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "19119a84ef8fe745d4fa1771737f0c7f5bae30e786e0b78ef802f9ec69b9830c"
+}

@@ -70,11 +70,14 @@ impl Model {
                 Task::none()
             }
             Msg::ClickedAddIdentity => {
+                self.status = Status::CreatingIdentity;
+
                 let new_identity = NewPersonIdentity {
                     person_identity_uuid: PersonIdentityUuid::new(),
                     identity: self.identity_field.clone(),
                     person_name: self.name_field.clone(),
                 };
+
                 Task::perform(
                     async move { create_new_identity(&worker, new_identity).await },
                     Msg::IdentityCreated,
