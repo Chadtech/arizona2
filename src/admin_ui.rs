@@ -210,6 +210,7 @@ enum Msg {
     NewIdentityPageMsg(new_identity_page::Msg),
     NewPersonPageMsg(new_person_page::Msg),
     MemoryPageMsg(memory_page::Msg),
+    WarmedUpDb,
 }
 
 #[derive(Debug)]
@@ -264,7 +265,14 @@ impl Model {
             error: None,
         };
 
-        (model, Task::none())
+        let worker2 = model.worker.clone();
+
+        (
+            model,
+            Task::perform(async move { worker2.warm_up_db_connection().await }, |_| {
+                Msg::WarmedUpDb
+            }),
+        )
     }
 
     fn title(&self) -> String {
@@ -414,6 +422,7 @@ impl Model {
 
                 task.map(Msg::MemoryPageMsg)
             }
+            Msg::WarmedUpDb => Task::none(),
         }
     }
 

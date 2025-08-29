@@ -52,6 +52,10 @@ impl NiceDisplay for Error {
 
 #[actix_web::main]
 async fn main() -> Result<(), String> {
+    tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::ERROR)
+        .init();
+
     nice_main()
         .await
         .map_err(|err| err.to_nice_error().to_string())

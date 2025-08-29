@@ -3,7 +3,7 @@ mod person_capability;
 mod person_identity_capability;
 
 use crate::{db, nice_display::NiceDisplay, open_ai_key::OpenAiKey};
-use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
+use sqlx::postgres::PgPoolOptions;
 use sqlx::Postgres;
 use std::env::VarError;
 use std::time::Duration;
@@ -77,5 +77,13 @@ impl Worker {
             reqwest_client: reqwest::Client::new(),
             sqlx: sqlx_pool,
         })
+    }
+
+    pub async fn warm_up_db_connection(&self) -> Result<(), String> {
+        sqlx::query("SELECT 1")
+            .execute(&self.sqlx)
+            .await
+            .map_err(|err| err.to_string())?;
+        Ok(())
     }
 }

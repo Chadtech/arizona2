@@ -1,5 +1,5 @@
 use crate::nice_display::NiceDisplay;
-use crate::open_ai_key::{self, OpenAiKey};
+use crate::open_ai_key::OpenAiKey;
 
 pub struct EmbeddingRequest {
     content: String,
