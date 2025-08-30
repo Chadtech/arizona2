@@ -1,6 +1,7 @@
 mod memory_capability;
 mod person_capability;
 mod person_identity_capability;
+mod state_of_mind_capability;
 
 use crate::{db, nice_display::NiceDisplay, open_ai_key::OpenAiKey};
 use sqlx::postgres::PgPoolOptions;
