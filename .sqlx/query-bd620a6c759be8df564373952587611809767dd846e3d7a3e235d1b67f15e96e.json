@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                INSERT INTO state_of_mind (uuid, person_uuid, content)\n                SELECT $1::UUID, person.uuid, $2::TEXT\n                FROM person\n                WHERE name = $3::TEXT\n                RETURNING uuid;\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "uuid",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "bd620a6c759be8df564373952587611809767dd846e3d7a3e235d1b67f15e96e"
+}
