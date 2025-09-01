@@ -1,3 +1,5 @@
+#[derive(Debug, Clone)]
+
 pub struct SceneUuid(uuid::Uuid);
 
 impl SceneUuid {

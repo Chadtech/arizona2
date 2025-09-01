@@ -2,6 +2,7 @@ mod call;
 mod memory_page;
 mod new_identity_page;
 mod new_person_page;
+mod scene_page;
 mod state_of_mind_page;
 mod style;
 
@@ -33,6 +34,7 @@ struct Model {
     new_person_page: new_person_page::Model,
     memory_page: memory_page::Model,
     state_of_mind_page: state_of_mind_page::Model,
+    scene_page: scene_page::Model,
     tab: Tab,
     worker: Arc<Worker>,
     error: Option<Error>,
@@ -54,6 +56,7 @@ impl Model {
             new_person: self.new_person_page.to_storage(),
             memory: self.memory_page.to_storage(),
             state_of_mind: self.state_of_mind_page.to_storage(),
+            scene: self.scene_page.to_storage(),
             tab: self.tab.clone(),
         }
     }
@@ -92,6 +95,8 @@ struct Storage {
     memory: memory_page::Storage,
     #[serde(default)]
     state_of_mind: state_of_mind_page::Storage,
+    #[serde(default)]
+    scene: scene_page::Storage,
 }
 
 impl Storage {
@@ -140,6 +145,7 @@ impl Storage {
             new_person: new_person_page::Storage::default(),
             memory: memory_page::Storage::default(),
             state_of_mind: state_of_mind_page::Storage::default(),
+            scene: scene_page::Storage::default(),
         }
     }
 }
@@ -152,6 +158,7 @@ enum Tab {
     Person,
     Memory,
     StateOfMind,
+    Scene,
 }
 
 impl Tab {
@@ -163,6 +170,7 @@ impl Tab {
             Tab::Person => "Person".to_string(),
             Tab::Memory => "Memory".to_string(),
             Tab::StateOfMind => "State of Mind".to_string(),
+            Tab::Scene => "Scene".to_string(),
         }
     }
 
@@ -174,6 +182,7 @@ impl Tab {
             Tab::Person,
             Tab::Memory,
             Tab::StateOfMind,
+            Tab::Scene,
         ]
     }
 }
@@ -220,6 +229,7 @@ enum Msg {
     NewPersonPageMsg(new_person_page::Msg),
     MemoryPageMsg(memory_page::Msg),
     StateOfMindPageMsg(state_of_mind_page::Msg),
+    SceneMsg(scene_page::Msg),
     WarmedUpDb,
 }
 
@@ -269,6 +279,7 @@ impl Model {
             new_identity_page: new_identity_page::Model::new(&flags.storage.new_identity),
             new_person_page: new_person_page::Model::new(&flags.storage.new_person),
             memory_page: memory_page::Model::new(&flags.storage.memory),
+            scene_page: scene_page::Model::new(&flags.storage.scene),
             reaction_status: ReactionStatus::Ready,
             tab: flags.storage.tab,
             worker: Arc::new(flags.worker),
@@ -443,6 +454,15 @@ impl Model {
 
                 task.map(Msg::StateOfMindPageMsg)
             }
+            Msg::SceneMsg(sub_msg) => {
+                let task = self.scene_page.update(self.worker.clone(), sub_msg);
+
+                if let Err(err) = self.to_storage().save_to_file_system() {
+                    self.error = Some(err);
+                }
+
+                task.map(Msg::SceneMsg)
+            }
         }
     }
 
@@ -533,6 +553,7 @@ impl Model {
             Tab::Person => self.new_person_page.view().map(Msg::NewPersonPageMsg),
             Tab::Memory => self.memory_page.view().map(Msg::MemoryPageMsg),
             Tab::StateOfMind => self.state_of_mind_page.view().map(Msg::StateOfMindPageMsg),
+            Tab::Scene => self.scene_page.view().map(Msg::SceneMsg),
         };
 
         let scrollable_content = w::scrollable(tab_content);

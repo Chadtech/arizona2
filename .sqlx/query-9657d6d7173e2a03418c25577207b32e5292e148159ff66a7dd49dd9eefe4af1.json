@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                INSERT INTO scene_snapshot (scene_uuid, description)\n                VALUES ($1::UUID, $2::TEXT);\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "9657d6d7173e2a03418c25577207b32e5292e148159ff66a7dd49dd9eefe4af1"
+}

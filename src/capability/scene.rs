@@ -4,6 +4,7 @@ use async_trait::async_trait;
 
 pub struct NewScene {
     pub name: String,
+    pub description: String,
 }
 
 pub struct NewSceneSnapshot {
@@ -28,5 +29,5 @@ pub trait SceneCapability {
         &self,
         new_scene_snapshot: NewSceneSnapshot,
     ) -> Result<(), String>;
-    async fn get_scene_description(&self, scene_uuid: SceneUuid) -> Result<String, String>;g
+    async fn get_scene_description(&self, scene_uuid: SceneUuid) -> Result<String, String>;
 }

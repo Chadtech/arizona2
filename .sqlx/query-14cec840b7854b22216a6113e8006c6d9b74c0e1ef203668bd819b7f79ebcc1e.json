@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n\t\t\t\tINSERT INTO scene (uuid, name)\n\t\t\t\tVALUES ($1::UUID, $2::TEXT)\n\t\t\t\tRETURNING uuid;\n\t\t\t",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "uuid",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "14cec840b7854b22216a6113e8006c6d9b74c0e1ef203668bd819b7f79ebcc1e"
+}
