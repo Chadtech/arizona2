@@ -1,4 +1,6 @@
-use crate::capability::scene::{NewScene, NewSceneSnapshot, SceneCapability};
+use crate::capability::scene::{
+    CurrentScene, NewScene, NewSceneSnapshot, Scene, SceneCapability, SceneParticipant,
+};
 use crate::domain::person_name::PersonName;
 use crate::domain::scene_participant_uuid::SceneParticipantUuid;
 use crate::domain::scene_uuid::SceneUuid;
@@ -38,7 +40,32 @@ impl SceneCapability for Worker {
         scene_uuid: SceneUuid,
         person_name: PersonName,
     ) -> Result<SceneParticipantUuid, String> {
-        todo!()
+        let persons_current_scene = self.get_persons_current_scene(person_name.clone()).await?;
+
+        if let Some(current_scene) = persons_current_scene {
+            self.remove_person_from_scene(current_scene.scene_uuid, person_name.clone())
+                .await?;
+        }
+
+        let rec = sqlx::query!(
+            r#"
+                INSERT INTO scene_participant (uuid, scene_uuid, person_uuid)
+                SELECT $1::UUID, $2::UUID, person.uuid
+                FROM person
+                WHERE person.name = $3::TEXT
+                RETURNING uuid;
+            "#,
+            SceneParticipantUuid::new().to_uuid(),
+            scene_uuid.to_uuid(),
+            person_name.to_string(),
+        )
+        .fetch_one(&self.sqlx)
+        .await
+        .map_err(|err| format!("Error adding person to scene: {}", err))?;
+
+        let ret = SceneParticipantUuid::from_uuid(rec.uuid);
+
+        Ok(ret)
     }
 
     async fn remove_person_from_scene(
@@ -46,7 +73,51 @@ impl SceneCapability for Worker {
         scene_uuid: SceneUuid,
         person_name: PersonName,
     ) -> Result<SceneParticipantUuid, String> {
-        todo!()
+        let rec = sqlx::query!(
+            r#"
+                UPDATE scene_participant
+                SET left_at = NOW()
+                WHERE scene_participant.scene_uuid = $1::UUID
+                  AND scene_participant.person_uuid = (SELECT person.uuid FROM person WHERE person.name = $2::TEXT)
+                  AND scene_participant.left_at IS NULL
+                RETURNING uuid;
+            "#,
+            scene_uuid.to_uuid(),
+            person_name.to_string(),
+        )
+        .fetch_one(&self.sqlx)
+        .await
+        .map_err(|err| format!("Error removing person from scene: {}", err))?;
+
+        let ret = SceneParticipantUuid::from_uuid(rec.uuid);
+
+        Ok(ret)
+    }
+
+    async fn get_persons_current_scene(
+        &self,
+        person_name: PersonName,
+    ) -> Result<Option<CurrentScene>, String> {
+        let maybe_ret = sqlx::query_as!(
+            CurrentScene,
+            r#"
+                SELECT
+                    scene.uuid AS scene_uuid,
+                    scene_participant.uuid AS scene_participant_uuid
+                FROM scene_participant
+                JOIN scene ON scene_participant.scene_uuid = scene.uuid
+                JOIN person ON scene_participant.person_uuid = person.uuid
+                WHERE person.name = $1::TEXT AND scene_participant.left_at IS NULL
+                ORDER BY scene_participant.joined_at DESC
+                LIMIT 1;
+            "#,
+            person_name.to_string(),
+        )
+        .fetch_optional(&self.sqlx)
+        .await
+        .map_err(|err| format!("Error fetching person's current scene: {}", err))?;
+
+        Ok(maybe_ret)
     }
 
     async fn create_scene_snapshot(
@@ -68,7 +139,47 @@ impl SceneCapability for Worker {
         Ok(())
     }
 
-    async fn get_scene_description(&self, scene_uuid: SceneUuid) -> Result<String, String> {
-        todo!()
+    async fn get_scene_from_name(&self, scene_name: String) -> Result<Option<Scene>, String> {
+        let maybe_ret = sqlx::query_as!(
+            Scene,
+            r#"
+                SELECT
+                    scene.uuid,
+                    scene.name,
+                    scene_snapshot.description
+                FROM scene
+                LEFT JOIN scene_snapshot ON scene.uuid = scene_snapshot.scene_uuid
+                WHERE scene.name = $1::TEXT
+                ORDER BY scene.uuid, scene_snapshot.created_at DESC;
+            "#,
+            scene_name,
+        )
+        .fetch_optional(&self.sqlx)
+        .await
+        .map_err(|err| format!("Error fetching scene by name: {}", err))?;
+
+        Ok(maybe_ret)
+    }
+
+    async fn get_scene_participants(
+        &self,
+        scene_uuid: &SceneUuid,
+    ) -> Result<Vec<SceneParticipant>, String> {
+        let participants = sqlx::query_as!(
+            SceneParticipant,
+            r#"
+                SELECT
+                    person.name AS person_name
+                FROM scene_participant
+                JOIN person ON scene_participant.person_uuid = person.uuid
+                WHERE scene_participant.scene_uuid = $1::UUID AND scene_participant.left_at IS NULL;
+            "#,
+            scene_uuid.to_uuid(),
+        )
+        .fetch_all(&self.sqlx)
+        .await
+        .map_err(|err| format!("Error fetching scene participants: {}", err))?;
+
+        Ok(participants)
     }
 }

@@ -1,3 +1,4 @@
+mod job_capability;
 mod memory_capability;
 mod person_capability;
 mod person_identity_capability;

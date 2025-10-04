@@ -1,9 +1,7 @@
 use crate::capability::person::{NewPerson, PersonCapability};
 use crate::domain::person_uuid::PersonUuid;
 use crate::worker::Worker;
-use async_trait::async_trait;
 
-#[async_trait]
 impl PersonCapability for Worker {
     async fn create_person(&self, new_person: NewPerson) -> Result<PersonUuid, String> {
         let ret = sqlx::query!(

@@ -1,3 +1,4 @@
+#[derive(Debug, Clone)]
 pub struct SceneParticipantUuid(uuid::Uuid);
 
 impl SceneParticipantUuid {
@@ -9,5 +10,11 @@ impl SceneParticipantUuid {
     }
     pub fn from_uuid(uuid: uuid::Uuid) -> Self {
         SceneParticipantUuid(uuid)
+    }
+}
+
+impl From<uuid::Uuid> for SceneParticipantUuid {
+    fn from(value: uuid::Uuid) -> Self {
+        SceneParticipantUuid(value)
     }
 }

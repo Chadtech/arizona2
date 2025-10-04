@@ -13,3 +13,9 @@ impl SceneUuid {
         SceneUuid(uuid)
     }
 }
+
+impl From<uuid::Uuid> for SceneUuid {
+    fn from(value: uuid::Uuid) -> Self {
+        SceneUuid(value)
+    }
+}

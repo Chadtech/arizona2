@@ -1,3 +1,4 @@
+#[derive(Debug, Clone)]
 pub struct PersonName(String);
 
 impl PersonName {
@@ -7,5 +8,11 @@ impl PersonName {
 
     pub fn to_string(&self) -> &str {
         &self.0
+    }
+}
+
+impl From<String> for PersonName {
+    fn from(value: String) -> Self {
+        PersonName(value)
     }
 }
