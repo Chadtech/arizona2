@@ -1,0 +1,34 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                SELECT\n                    scene.uuid,\n                    scene.name,\n                    scene_snapshot.description\n                FROM scene\n                LEFT JOIN scene_snapshot ON scene.uuid = scene_snapshot.scene_uuid\n                WHERE scene.name = $1::TEXT\n                ORDER BY scene.uuid, scene_snapshot.created_at DESC;\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "uuid",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "description",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "1552d9f3ad499ae529bb498d52b79e3a684c16574b21421d713e56b52dda134d"
+}

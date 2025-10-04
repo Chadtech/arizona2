@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n\t\t\t\tINSERT INTO job (uuid, name)\n\t\t\t\tVALUES ($1::UUID, $2::TEXT);\n\t\t\t",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "5f3065d5e628b378473a4409e56298286505fb3b46f0796c6a4d6c0c11e09db4"
+}

@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                INSERT INTO scene_participant (uuid, scene_uuid, person_uuid)\n                SELECT $1::UUID, $2::UUID, person.uuid\n                FROM person\n                WHERE person.name = $3::TEXT\n                RETURNING uuid;\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "uuid",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "59df7c7248fc0cf4ecd9805a06e8eae4851a82e0f137c85219dfb83049cf29fd"
+}
