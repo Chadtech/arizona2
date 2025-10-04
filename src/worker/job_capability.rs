@@ -3,6 +3,7 @@ use crate::domain::job::{Job, JobKind};
 use crate::domain::job_uuid::JobUuid;
 use crate::nice_display::NiceDisplay;
 use crate::worker::Worker;
+use sqlx::Row;
 
 impl JobCapability for Worker {
     async fn unshift_job(&self, job: JobKind) -> Result<(), String> {
@@ -73,5 +74,33 @@ impl JobCapability for Worker {
                 Ok(Some(job))
             }
         }
+    }
+
+    async fn recent_jobs(&self, limit: i64) -> Result<Vec<Job>, String> {
+        let rows = sqlx::query(
+            r#"
+                SELECT uuid, name
+                FROM job
+                ORDER BY created_at DESC
+                LIMIT $1
+            "#
+        )
+        .bind(limit)
+        .fetch_all(&self.sqlx)
+        .await
+        .map_err(|err| format!("Error fetching recent jobs: {}", err))?;
+
+        let mut jobs = Vec::with_capacity(rows.len());
+        for row in rows {
+            // Use dynamic row getters to avoid requiring `sqlx::query!` offline preparation
+            let uuid: uuid::Uuid = row.try_get::<uuid::Uuid, _>("uuid").map_err(|err| format!("Error reading uuid from row: {}", err))?;
+            let name: String = row.try_get::<String, _>("name").map_err(|err| format!("Error reading name from row: {}", err))?;
+            let job = Job::parse(JobUuid::from_uuid(uuid), name).map_err(|err| {
+                format!("Error parsing job\n{}", err.to_nice_error().to_string())
+            })?;
+            jobs.push(job);
+        }
+
+        Ok(jobs)
     }
 }
