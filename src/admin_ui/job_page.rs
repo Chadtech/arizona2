@@ -1,4 +1,6 @@
 use super::s;
+use crate::capability::job::JobCapability;
+use crate::domain::job::JobKind;
 use crate::worker::Worker;
 use iced::{widget as w, Element, Task};
 use serde::{Deserialize, Serialize};
@@ -13,6 +15,9 @@ pub struct Model {
 
 enum Status {
     Ready,
+    AddingPing,
+    AddPingOk,
+    AddPingErr(String),
 }
 
 #[derive(Debug, Clone)]
@@ -20,6 +25,8 @@ pub enum Msg {
     // Placeholder message variants for future interactions
     ClickedRefresh,
     Refreshed,
+    ClickedAddPing,
+    AddedPing(Result<(), String>),
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -37,21 +44,35 @@ impl Model {
     }
 
     pub fn view(&self) -> Element<Msg> {
-        let status_view: Element<Msg> = match self.status {
+        // Status message text
+        let status_view: Element<Msg> = match &self.status {
             Status::Ready => w::text("Ready").into(),
+            Status::AddingPing => w::text("Adding ping job...").into(),
+            Status::AddPingOk => w::text("Ping job enqueued").into(),
+            Status::AddPingErr(err) => w::text(format!("Failed to add ping job: {}", err)).into(),
+        };
+
+        // Disable the button while adding to prevent duplicates
+        let add_button = match self.status {
+            Status::AddingPing => w::button("Adding..."),
+            _ => w::button("Add Ping Job").on_press(Msg::ClickedAddPing),
         };
 
         w::column![
             w::text("Jobs"),
             w::text("This is a placeholder for the Jobs page."),
-            w::button("Refresh").on_press(Msg::ClickedRefresh),
+            w::row![
+                add_button,
+                w::button("Refresh").on_press(Msg::ClickedRefresh),
+            ]
+            .spacing(s::S4),
             status_view
         ]
         .spacing(s::S4)
         .into()
     }
 
-    pub fn update(&mut self, _worker: Arc<Worker>, msg: Msg) -> Task<Msg> {
+    pub fn update(&mut self, worker: Arc<Worker>, msg: Msg) -> Task<Msg> {
         match msg {
             Msg::ClickedRefresh => {
                 // In the skeleton we just immediately yield a Refreshed message.
@@ -59,6 +80,22 @@ impl Model {
             }
             Msg::Refreshed => {
                 // No state changes yet; just a placeholder.
+                Task::none()
+            }
+            Msg::ClickedAddPing => {
+                self.status = Status::AddingPing;
+                let worker = worker.clone();
+                Task::perform(async move { worker.unshift_job(JobKind::Ping).await }, Msg::AddedPing)
+            }
+            Msg::AddedPing(res) => {
+                match res {
+                    Ok(()) => {
+                        self.status = Status::AddPingOk;
+                    }
+                    Err(err) => {
+                        self.status = Status::AddPingErr(err);
+                    }
+                }
                 Task::none()
             }
         }
