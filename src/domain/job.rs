@@ -2,11 +2,13 @@ use crate::nice_display::{NiceDisplay, NiceError};
 
 use super::job_uuid::JobUuid;
 
+#[derive(Debug, Clone)]
 pub struct Job {
     uuid: JobUuid,
     kind: JobKind,
 }
 
+#[derive(Debug, Clone)]
 pub enum JobKind {
     Ping,
 }
@@ -40,5 +42,22 @@ impl Job {
             }),
             _ => Err(ParseError::UnknownJobName(name)),
         }
+    }
+
+    // Public getters to allow UI to render job information
+    pub fn kind(&self) -> &JobKind {
+        &self.kind
+    }
+
+    pub fn uuid(&self) -> &JobUuid {
+        &self.uuid
+    }
+
+    pub fn to_info_string(&self) -> String {
+        format!(
+            "{}, uuid: {}",
+            self.kind.to_name(),
+            self.uuid.to_uuid().to_string()
+        )
     }
 }

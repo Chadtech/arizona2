@@ -1,5 +1,5 @@
 use uuid::Uuid;
-
+#[derive(Debug, Clone)]
 pub struct JobUuid(Uuid);
 
 impl JobUuid {

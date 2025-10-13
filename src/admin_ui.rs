@@ -194,6 +194,14 @@ impl Tab {
             Tab::Job,
         ]
     }
+
+    pub fn init_task(self, worker: &Arc<Worker>) -> Task<Msg> {
+        if self == Tab::Job {
+            Task::perform(job_page::get_jobs(worker.clone()), Msg::JobPageMsg)
+        } else {
+            Task::none()
+        }
+    }
 }
 
 impl Default for Tab {
@@ -274,6 +282,8 @@ impl NiceDisplay for Error {
 
 impl Model {
     fn new(flags: Flags) -> (Self, Task<Msg>) {
+        let tab = flags.storage.tab;
+
         let model = Model {
             prompt_field: flags.storage.prompt,
             identity_field: flags.storage.identity_field,
@@ -292,7 +302,7 @@ impl Model {
             scene_page: scene_page::Model::new(&flags.storage.scene),
             job_page: job_page::Model::new(&flags.storage.job),
             reaction_status: ReactionStatus::Ready,
-            tab: flags.storage.tab,
+            tab,
             worker: Arc::new(flags.worker),
             error: None,
             state_of_mind_page: state_of_mind_page::Model::new(&flags.storage.state_of_mind),
@@ -300,11 +310,16 @@ impl Model {
 
         let worker2 = model.worker.clone();
 
+        let tab_task = tab.init_task(&model.worker);
+
         (
             model,
-            Task::perform(async move { worker2.warm_up_db_connection().await }, |_| {
-                Msg::WarmedUpDb
-            }),
+            Task::batch(vec![
+                Task::perform(async move { worker2.warm_up_db_connection().await }, |_| {
+                    Msg::WarmedUpDb
+                }),
+                tab_task,
+            ]),
         )
     }
 
@@ -373,12 +388,11 @@ impl Model {
             Msg::TabSelected(tab) => {
                 self.tab = tab.clone();
 
-                // Save the updated tab to the file system
                 if let Err(err) = self.to_storage().save_to_file_system() {
                     self.error = Some(err);
                 }
 
-                Task::none()
+                self.tab.init_task(&self.worker)
             }
             Msg::ClickedSubmitReaction => {
                 let open_ai_key = self.worker.open_ai_key.clone();
