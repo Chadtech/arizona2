@@ -2,6 +2,7 @@ mod admin_ui;
 mod capability;
 mod db;
 mod domain;
+mod job_runner;
 mod migrations;
 mod nice_display;
 mod open_ai;
@@ -26,6 +27,7 @@ enum Cmd {
     NewMigration { migration_name: String },
     RunMigrations,
     AdminUi,
+    RunJobRunner,
 }
 
 enum Error {
@@ -34,6 +36,7 @@ enum Error {
     RunMigrations(migrations::RunError),
     EnvVars(dotenv::Error),
     AdminUi(admin_ui::Error),
+    JobRunner(job_runner::Error),
 }
 
 impl NiceDisplay for Error {
@@ -46,6 +49,7 @@ impl NiceDisplay for Error {
                 format!("Error loading environment variables: {}", err)
             }
             Error::AdminUi(err) => err.message(),
+            Error::JobRunner(err) => err.message(),
         }
     }
 }
@@ -73,6 +77,7 @@ async fn nice_main() -> Result<(), Error> {
             .map_err(Error::NewMigration),
         Cmd::RunMigrations => migrations::run().await.map_err(Error::RunMigrations),
         Cmd::AdminUi => admin_ui::run().await.map_err(Error::AdminUi),
+        Cmd::RunJobRunner => job_runner::run().await.map_err(Error::JobRunner),
     }
 }
 
