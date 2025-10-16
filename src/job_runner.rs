@@ -11,7 +11,6 @@ pub enum Error {
 
 pub enum RunJobError {
     FailedToPopJob(String),
-    FailedToMarkJobStarted(String),
     FailedToMarkJobFinished(String),
 }
 
@@ -31,12 +30,6 @@ impl NiceDisplay for RunJobError {
         match self {
             RunJobError::FailedToPopJob(err) => {
                 format!("Failed to pop next job\n{}", err)
-            }
-            RunJobError::FailedToMarkJobStarted(err) => {
-                format!(
-                    "I ran into the following problem trying to mark the job as started\n{}",
-                    err
-                )
             }
             RunJobError::FailedToMarkJobFinished(err) => {
                 format!(
@@ -68,10 +61,6 @@ async fn run_next_job<W: JobCapability>(worker: W) -> Result<(), RunJobError> {
         }
     };
 
-    worker
-        .mark_job_started(&job.uuid)
-        .await
-        .map_err(RunJobError::FailedToMarkJobStarted)?;
 
     match job.kind {
         JobKind::Ping => {

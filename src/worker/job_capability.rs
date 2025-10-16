@@ -25,7 +25,7 @@ impl JobCapability for Worker {
     }
 
     async fn pop_next_job(&self) -> Result<Option<PoppedJob>, String> {
-        let rec = sqlx::query!(
+        let maybe_rec = sqlx::query!(
             r#"
                 UPDATE job
                 SET started_at = NOW()
@@ -40,15 +40,14 @@ impl JobCapability for Worker {
                 RETURNING uuid;
             "#
         )
-        .fetch_one(&self.sqlx)
+        .fetch_optional(&self.sqlx)
         .await
         .map_err(|err| format!("Error setting started_at on job: {}", err))?;
 
-        dbg!(&rec);
-
-        if rec.uuid.is_nil() {
-            return Ok(None);
-        }
+        let rec = match maybe_rec {
+            None => return Ok(None),
+            Some(r) => r,
+        };
 
         let job_uuid = rec.uuid;
 
@@ -113,21 +112,7 @@ impl JobCapability for Worker {
         Ok(jobs)
     }
 
-    async fn mark_job_started(&self, job_uuid: &JobUuid) -> Result<(), String> {
-        sqlx::query!(
-            r#"
-                UPDATE job
-                SET started_at = NOW()
-                WHERE uuid = $1::UUID;
-            "#,
-            job_uuid.to_uuid()
-        )
-        .execute(&self.sqlx)
-        .await
-        .map_err(|err| format!("Error marking job as started: {}", err))?;
 
-        Ok(())
-    }
 
     async fn mark_job_finished(&self, job_uuid: &JobUuid) -> Result<(), String> {
         sqlx::query!(
