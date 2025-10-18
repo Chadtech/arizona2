@@ -61,7 +61,6 @@ async fn run_next_job<W: JobCapability>(worker: W) -> Result<(), RunJobError> {
         }
     };
 
-
     match job.kind {
         JobKind::Ping => {
             println!("Pong");
@@ -74,4 +73,89 @@ async fn run_next_job<W: JobCapability>(worker: W) -> Result<(), RunJobError> {
         .map_err(RunJobError::FailedToMarkJobFinished)?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::capability::job::JobCapability;
+    use crate::domain::job::{JobKind, PoppedJob};
+    use crate::domain::job_uuid::JobUuid;
+    use std::collections::HashSet;
+    use std::sync::Arc;
+    use tokio::sync::Mutex;
+
+    #[derive(Clone, Default)]
+    struct MockWorker {
+        state: Arc<Mutex<MockState>>,
+    }
+
+    #[derive(Default)]
+    struct MockState {
+        jobs: Vec<PoppedJob>,
+        finished_jobs: HashSet<JobUuid>,
+    }
+
+    impl MockWorker {
+        fn with_next_job(job: PoppedJob) -> Self {
+            Self {
+                state: Arc::new(Mutex::new(MockState {
+                    jobs: vec![job],
+                    finished_jobs: HashSet::new(),
+                })),
+            }
+        }
+        fn empty() -> Self {
+            Self::default()
+        }
+    }
+
+    impl JobCapability for MockWorker {
+        async fn unshift_job(&self, job_kind: JobKind) -> Result<(), String> {
+            let mut st = self.state.lock().await;
+            st.jobs.insert(
+                0,
+                PoppedJob {
+                    uuid: JobUuid::new(),
+                    kind: job_kind,
+                },
+            );
+            Ok(())
+        }
+        async fn pop_next_job(&self) -> Result<Option<PoppedJob>, String> {
+            let mut st = self.state.lock().await;
+            Ok(st.jobs.pop())
+        }
+        async fn recent_jobs(&self, _limit: i64) -> Result<Vec<crate::domain::job::Job>, String> {
+            Ok(vec![])
+        }
+        async fn mark_job_finished(&self, job_uuid: &JobUuid) -> Result<(), String> {
+            let mut st = self.state.lock().await;
+
+            st.finished_jobs.insert(job_uuid.clone());
+
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn returns_ok_when_no_job_available() {
+        let mock = MockWorker::empty();
+        let res = run_next_job(mock.clone()).await;
+        assert!(res.is_ok());
+    }
+
+    #[tokio::test]
+    async fn processes_ping_and_marks_finished() {
+        let job_uuid = JobUuid::test_id(0);
+        let popped = PoppedJob {
+            uuid: job_uuid.clone(),
+            kind: JobKind::Ping,
+        };
+        let mock = MockWorker::with_next_job(popped);
+        let res = run_next_job(mock.clone()).await;
+        assert!(res.is_ok());
+        let st = mock.state.lock().await;
+        assert!(st.finished_jobs.contains(&job_uuid));
+    }
 }

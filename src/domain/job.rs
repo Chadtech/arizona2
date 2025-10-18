@@ -1,12 +1,13 @@
-use crate::nice_display::{NiceDisplay, NiceError};
-
 use super::job_uuid::JobUuid;
+use crate::nice_display::{NiceDisplay, NiceError};
+use chrono::{DateTime, Utc};
+use std::fmt::Display;
 
 #[derive(Debug, Clone)]
 pub struct Job {
     uuid: JobUuid,
     kind: JobKind,
-    finished_at: Option<i64>,
+    finished_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Clone)]
@@ -40,8 +41,24 @@ impl JobKind {
     }
 }
 
+impl Display for JobUuid {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // write!(f, "{}", self.to_uuid().unwrap_or_default())
+        let str = match self {
+            JobUuid::Real(uuid) => uuid.to_string(),
+            JobUuid::Test(id) => id.to_string(),
+        };
+
+        write!(f, "{}", str)
+    }
+}
+
 impl Job {
-    pub fn parse(uuid: JobUuid, finished_at: Option<i64>, name: String) -> Result<Job, ParseError> {
+    pub fn parse(
+        uuid: JobUuid,
+        finished_at: Option<DateTime<Utc>>,
+        name: String,
+    ) -> Result<Job, ParseError> {
         let job_kid = JobKind::parse(name)?;
 
         Ok(Job {
@@ -63,10 +80,7 @@ impl Job {
     pub fn to_info_string(&self) -> String {
         let status_string = match self.finished_at {
             Some(ts) => {
-                let date: String = match chrono::DateTime::from_timestamp(ts, 0) {
-                    Some(dt) => dt.format("%Y-%m-%d %H:%M:%S").to_string(),
-                    None => "invalid date timestamp".to_string(),
-                };
+                let date: String = ts.format("%Y-%m-%d %H:%M:%S UTC").to_string();
                 format!("finished at {}", date)
             }
             None => "not started".to_string(),
@@ -75,7 +89,7 @@ impl Job {
         format!(
             "{}, uuid: {}, {}",
             self.kind.to_name(),
-            self.uuid.to_uuid().to_string(),
+            self.uuid.to_string(),
             status_string
         )
     }

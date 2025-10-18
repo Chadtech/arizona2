@@ -3,8 +3,9 @@ use crate::domain::job::{Job, JobKind, PoppedJob};
 use crate::domain::job_uuid::JobUuid;
 use crate::nice_display::NiceDisplay;
 use crate::worker::Worker;
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use sqlx::Row;
+use std::time;
 
 impl JobCapability for Worker {
     async fn unshift_job(&self, job: JobKind) -> Result<(), String> {
@@ -14,7 +15,7 @@ impl JobCapability for Worker {
 				INSERT INTO job (uuid, name)
 				VALUES ($1::UUID, $2::TEXT);
 			"#,
-            job_uuid.to_uuid(),
+            job_uuid.to_uuid()?,
             job.to_name()
         )
         .execute(&self.sqlx)
@@ -95,14 +96,14 @@ impl JobCapability for Worker {
             let uuid: uuid::Uuid = row
                 .try_get::<uuid::Uuid, _>("uuid")
                 .map_err(|err| format!("Error reading uuid from row: {}", err))?;
+
             let name: String = row
                 .try_get::<String, _>("name")
                 .map_err(|err| format!("Error reading name from row: {}", err))?;
 
             let finished_at = row
-                .try_get::<Option<chrono::DateTime<Utc>>, _>("finished_at")
-                .map_err(|err| format!("Error reading finished_at from row: {}", err))?
-                .map(|dt| dt.timestamp());
+                .try_get::<Option<DateTime<Utc>>, _>("finished_at")
+                .map_err(|err| format!("Error reading finished_at from row: {}", err))?;
 
             let job = Job::parse(JobUuid::from_uuid(uuid), finished_at, name)
                 .map_err(|err| format!("Error parsing job\n{}", err.to_nice_error().to_string()))?;
@@ -112,8 +113,6 @@ impl JobCapability for Worker {
         Ok(jobs)
     }
 
-
-
     async fn mark_job_finished(&self, job_uuid: &JobUuid) -> Result<(), String> {
         sqlx::query!(
             r#"
@@ -121,7 +120,7 @@ impl JobCapability for Worker {
                 SET finished_at = NOW()
                 WHERE uuid = $1::UUID;
             "#,
-            job_uuid.to_uuid()
+            job_uuid.to_uuid()?
         )
         .execute(&self.sqlx)
         .await

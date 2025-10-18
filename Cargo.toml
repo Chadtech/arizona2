@@ -20,3 +20,4 @@ reqwest = { version = "0.12", features = ["blocking", "json", "rustls-tls"] }
 pgvector = { version = "0.4", features = ["postgres"] }
 tracing-subscriber = "0.3"
 tracing = "0.1"
+time = "0.3.41"
