@@ -1,6 +1,7 @@
 mod call;
 mod job_page;
 mod memory_page;
+mod messages_page;
 mod new_identity_page;
 mod new_person_page;
 mod scene_page;
@@ -34,6 +35,7 @@ struct Model {
     new_identity_page: new_identity_page::Model,
     new_person_page: new_person_page::Model,
     memory_page: memory_page::Model,
+    messages_page: messages_page::Model,
     state_of_mind_page: state_of_mind_page::Model,
     scene_page: scene_page::Model,
     job_page: job_page::Model,
@@ -57,6 +59,7 @@ impl Model {
             new_identity: self.new_identity_page.to_storage(),
             new_person: self.new_person_page.to_storage(),
             memory: self.memory_page.to_storage(),
+            messages: self.messages_page.to_storage(),
             state_of_mind: self.state_of_mind_page.to_storage(),
             scene: self.scene_page.to_storage(),
             job: self.job_page.to_storage(),
@@ -96,6 +99,8 @@ struct Storage {
     new_person: new_person_page::Storage,
     #[serde(default)]
     memory: memory_page::Storage,
+    #[serde(default)]
+    messages: messages_page::Storage,
     #[serde(default)]
     state_of_mind: state_of_mind_page::Storage,
     #[serde(default)]
@@ -149,6 +154,7 @@ impl Storage {
             new_identity: new_identity_page::Storage::default(),
             new_person: new_person_page::Storage::default(),
             memory: memory_page::Storage::default(),
+            messages: messages_page::Storage::default(),
             state_of_mind: state_of_mind_page::Storage::default(),
             scene: scene_page::Storage::default(),
             job: job_page::Storage::default(),
@@ -163,6 +169,7 @@ enum Tab {
     Identity,
     Person,
     Memory,
+    Messages,
     StateOfMind,
     Scene,
     Job,
@@ -176,6 +183,7 @@ impl Tab {
             Tab::Identity => "Identity".to_string(),
             Tab::Person => "Person".to_string(),
             Tab::Memory => "Memory".to_string(),
+            Tab::Messages => "Messages".to_string(),
             Tab::StateOfMind => "State of Mind".to_string(),
             Tab::Scene => "Scene".to_string(),
             Tab::Job => "Job".to_string(),
@@ -189,6 +197,7 @@ impl Tab {
             Tab::Identity,
             Tab::Person,
             Tab::Memory,
+            Tab::Messages,
             Tab::StateOfMind,
             Tab::Scene,
             Tab::Job,
@@ -245,6 +254,7 @@ enum Msg {
     NewIdentityPageMsg(new_identity_page::Msg),
     NewPersonPageMsg(new_person_page::Msg),
     MemoryPageMsg(memory_page::Msg),
+    MessagesPageMsg(messages_page::Msg),
     StateOfMindPageMsg(state_of_mind_page::Msg),
     SceneMsg(scene_page::Msg),
     JobPageMsg(job_page::Msg),
@@ -299,6 +309,7 @@ impl Model {
             new_identity_page: new_identity_page::Model::new(&flags.storage.new_identity),
             new_person_page: new_person_page::Model::new(&flags.storage.new_person),
             memory_page: memory_page::Model::new(&flags.storage.memory),
+            messages_page: messages_page::Model::new(&flags.storage.messages),
             scene_page: scene_page::Model::new(&flags.storage.scene),
             job_page: job_page::Model::new(&flags.storage.job),
             reaction_status: ReactionStatus::Ready,
@@ -469,6 +480,15 @@ impl Model {
 
                 task.map(Msg::MemoryPageMsg)
             }
+            Msg::MessagesPageMsg(sub_msg) => {
+                let task = self.messages_page.update(self.worker.clone(), sub_msg);
+
+                if let Err(err) = self.to_storage().save_to_file_system() {
+                    self.error = Some(err);
+                }
+
+                task.map(Msg::MessagesPageMsg)
+            }
             Msg::WarmedUpDb => Task::none(),
             Msg::StateOfMindPageMsg(msg) => {
                 let task = self.state_of_mind_page.update(self.worker.clone(), msg);
@@ -586,6 +606,7 @@ impl Model {
             Tab::Identity => self.new_identity_page.view().map(Msg::NewIdentityPageMsg),
             Tab::Person => self.new_person_page.view().map(Msg::NewPersonPageMsg),
             Tab::Memory => self.memory_page.view().map(Msg::MemoryPageMsg),
+            Tab::Messages => self.messages_page.view().map(Msg::MessagesPageMsg),
             Tab::StateOfMind => self.state_of_mind_page.view().map(Msg::StateOfMindPageMsg),
             Tab::Scene => self.scene_page.view().map(Msg::SceneMsg),
             Tab::Job => self.job_page.view().map(Msg::JobPageMsg),
