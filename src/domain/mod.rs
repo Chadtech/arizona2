@@ -1,6 +1,8 @@
 pub mod job;
 pub mod job_uuid;
 pub mod memory_uuid;
+pub mod message;
+pub mod message_uuid;
 pub mod person_identity_uuid;
 pub mod person_name;
 pub mod person_uuid;
