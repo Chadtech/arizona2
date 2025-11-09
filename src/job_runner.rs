@@ -1,5 +1,7 @@
 use crate::capability::job::JobCapability;
+use crate::capability::message::{MessageCapability, NewMessage};
 use crate::domain::job::{JobKind, PoppedJob};
+use crate::domain::message::{MessageRecipient, MessageSender};
 use crate::nice_display::NiceDisplay;
 use crate::worker;
 use crate::worker::Worker;
@@ -12,6 +14,7 @@ pub enum Error {
 pub enum RunJobError {
     FailedToPopJob(String),
     FailedToMarkJobFinished(String),
+    FailedToSendMessage(String),
 }
 
 impl NiceDisplay for Error {
@@ -37,6 +40,9 @@ impl NiceDisplay for RunJobError {
                     err
                 )
             }
+            RunJobError::FailedToSendMessage(err) => {
+                format!("Failed to send message\n{}", err)
+            }
         }
     }
 }
@@ -49,7 +55,7 @@ pub async fn run() -> Result<(), Error> {
     }
 }
 
-async fn run_next_job<W: JobCapability>(worker: W) -> Result<(), RunJobError> {
+async fn run_next_job<W: JobCapability + MessageCapability>(worker: W) -> Result<(), RunJobError> {
     let job = match worker
         .pop_next_job()
         .await
@@ -66,7 +72,16 @@ async fn run_next_job<W: JobCapability>(worker: W) -> Result<(), RunJobError> {
             println!("Pong");
         }
         JobKind::SendMessageToScene(job_data) => {
-            // TODO implement sending message to scene
+            let new_message = NewMessage {
+                sender: job_data.sender,
+                recipient: MessageRecipient::Scene(job_data.scene_uuid),
+                content: job_data.content,
+            };
+
+            worker
+                .send_message(new_message)
+                .await
+                .map_err(RunJobError::FailedToSendMessage)?;
         }
     }
 
