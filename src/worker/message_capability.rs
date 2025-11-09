@@ -3,9 +3,7 @@ use crate::domain::message::{Message, MessageRecipient, MessageSender};
 use crate::domain::message_uuid::MessageUuid;
 use crate::domain::person_uuid::PersonUuid;
 use crate::worker::Worker;
-use async_trait::async_trait;
 
-#[async_trait]
 impl MessageCapability for Worker {
     async fn send_message(&self, new_message: NewMessage) -> Result<MessageUuid, String> {
         let message_uuid = MessageUuid::new();
@@ -75,5 +73,47 @@ impl MessageCapability for Worker {
             .collect();
 
         Ok(messages)
+    }
+
+    async fn get_message_by_uuid(
+        &self,
+        message_uuid: &MessageUuid,
+    ) -> Result<Option<Message>, String> {
+        let row = sqlx::query!(
+            r#"
+                SELECT uuid, sender_person_uuid, receiver_person_uuid, scene_uuid, content, sent_at, read_at, message_type
+                FROM message
+                WHERE uuid = $1::UUID
+            "#,
+            message_uuid.to_uuid()
+        )
+        .fetch_optional(&self.sqlx)
+        .await
+        .map_err(|err| format!("Error fetching message by uuid: {}", err))?;
+
+        match row {
+            Some(row) => {
+                let recipient = if let Some(scene_uuid) = row.scene_uuid {
+                    MessageRecipient::Scene(crate::domain::scene_uuid::SceneUuid::from_uuid(scene_uuid))
+                } else if let Some(receiver_uuid) = row.receiver_person_uuid {
+                    MessageRecipient::Person(PersonUuid::from_uuid(receiver_uuid))
+                } else {
+                    MessageRecipient::RealWorldPerson
+                };
+
+                Ok(Some(Message {
+                    uuid: MessageUuid::from_uuid(row.uuid),
+                    sender: match row.sender_person_uuid {
+                        Some(uuid) => MessageSender::AiPerson(PersonUuid::from_uuid(uuid)),
+                        None => MessageSender::RealWorldUser,
+                    },
+                    recipient,
+                    content: row.content,
+                    sent_at: row.sent_at,
+                    read_at: row.read_at,
+                }))
+            }
+            None => Ok(None),
+        }
     }
 }

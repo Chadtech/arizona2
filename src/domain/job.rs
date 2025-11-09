@@ -1,9 +1,11 @@
+pub mod process_message;
 mod send_message_to_scene;
 
 use super::job_uuid::JobUuid;
 use crate::domain::job::send_message_to_scene::SendMessageToSceneJob;
 use crate::nice_display::{NiceDisplay, NiceError};
 use chrono::{DateTime, Utc};
+use process_message::ProcessMessageJob;
 use serde_json;
 use serde_json::Value;
 use std::fmt::Display;
@@ -25,6 +27,7 @@ pub struct PoppedJob {
 pub enum JobKind {
     Ping,
     SendMessageToScene(SendMessageToSceneJob),
+    ProcessMessage(ProcessMessageJob),
 }
 
 pub enum ParseError {
@@ -58,6 +61,7 @@ impl JobKind {
         match self {
             JobKind::Ping => "ping".to_string(),
             JobKind::SendMessageToScene(_) => "send message to scene".to_string(),
+            JobKind::ProcessMessage(_) => "process message".to_string(),
         }
     }
 }

@@ -1,6 +1,6 @@
 use crate::capability::job::JobCapability;
 use crate::capability::message::{MessageCapability, NewMessage};
-use crate::domain::job::{JobKind, PoppedJob};
+use crate::domain::job::{process_message, JobKind, PoppedJob};
 use crate::domain::message::{MessageRecipient, MessageSender};
 use crate::nice_display::NiceDisplay;
 use crate::worker;
@@ -15,6 +15,7 @@ pub enum RunJobError {
     FailedToPopJob(String),
     FailedToMarkJobFinished(String),
     FailedToSendMessage(String),
+    ProcessMessageError(process_message::Error),
 }
 
 impl NiceDisplay for Error {
@@ -42,6 +43,9 @@ impl NiceDisplay for RunJobError {
             }
             RunJobError::FailedToSendMessage(err) => {
                 format!("Failed to send message\n{}", err)
+            }
+            RunJobError::ProcessMessageError(err) => {
+                format!("Failed to process message job\n{}", err.message())
             }
         }
     }
@@ -83,6 +87,12 @@ async fn run_next_job<W: JobCapability + MessageCapability>(worker: W) -> Result
                 .await
                 .map_err(RunJobError::FailedToSendMessage)?;
         }
+        JobKind::ProcessMessage(process_message_job) => {
+            process_message_job
+                .run(&worker)
+                .await
+                .map_err(RunJobError::ProcessMessageError)?;
+        }
     }
 
     worker
@@ -97,8 +107,12 @@ async fn run_next_job<W: JobCapability + MessageCapability>(worker: W) -> Result
 mod tests {
     use super::*;
     use crate::capability::job::JobCapability;
+    use crate::capability::message::MessageCapability;
     use crate::domain::job::{JobKind, PoppedJob};
     use crate::domain::job_uuid::JobUuid;
+    use crate::domain::message::Message;
+    use crate::domain::message_uuid::MessageUuid;
+    use crate::domain::scene_uuid::SceneUuid;
     use std::collections::HashSet;
     use std::sync::Arc;
     use tokio::sync::Mutex;
@@ -112,6 +126,7 @@ mod tests {
     struct MockState {
         jobs: Vec<PoppedJob>,
         finished_jobs: HashSet<JobUuid>,
+        sent_messages: Vec<NewMessage>,
     }
 
     impl MockWorker {
@@ -120,11 +135,34 @@ mod tests {
                 state: Arc::new(Mutex::new(MockState {
                     jobs: vec![job],
                     finished_jobs: HashSet::new(),
+                    sent_messages: Vec::new(),
                 })),
             }
         }
         fn empty() -> Self {
             Self::default()
+        }
+    }
+
+    impl MessageCapability for MockWorker {
+        async fn send_message(&self, new_message: NewMessage) -> Result<MessageUuid, String> {
+            let mut st = self.state.lock().await;
+            st.sent_messages.push(new_message);
+            Ok(MessageUuid::new())
+        }
+
+        async fn get_messages_in_scene(
+            &self,
+            _scene_uuid: &SceneUuid,
+        ) -> Result<Vec<Message>, String> {
+            Ok(vec![])
+        }
+
+        async fn get_message_by_uuid(
+            &self,
+            _message_uuid: &MessageUuid,
+        ) -> Result<Option<Message>, String> {
+            Ok(None)
         }
     }
 
