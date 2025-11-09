@@ -1,6 +1,11 @@
+mod send_message_to_scene;
+
 use super::job_uuid::JobUuid;
+use crate::domain::job::send_message_to_scene::SendMessageToSceneJob;
 use crate::nice_display::{NiceDisplay, NiceError};
 use chrono::{DateTime, Utc};
+use serde_json;
+use serde_json::Value;
 use std::fmt::Display;
 
 #[derive(Debug, Clone)]
@@ -19,16 +24,31 @@ pub struct PoppedJob {
 #[derive(Debug, Clone)]
 pub enum JobKind {
     Ping,
+    SendMessageToScene(SendMessageToSceneJob),
 }
 
 pub enum ParseError {
     UnknownJobName(String),
+    NoJobDataForJobThatReuiresIt { job_name: String },
+    FailedToParseJobData { job_name: String, details: String },
 }
 
 impl NiceDisplay for ParseError {
     fn message(&self) -> String {
         match self {
             ParseError::UnknownJobName(name) => format!("Unknown job name: {}", name),
+            ParseError::NoJobDataForJobThatReuiresIt { job_name } => {
+                format!(
+                    "No job data provided for a \"{}\" job that requires it",
+                    job_name
+                )
+            }
+            ParseError::FailedToParseJobData { job_name, details } => {
+                format!(
+                    "Failed to parse job data for a \"{}\" job\n\n{}",
+                    job_name, details
+                )
+            }
         }
     }
 }
@@ -37,13 +57,13 @@ impl JobKind {
     pub fn to_name(&self) -> String {
         match self {
             JobKind::Ping => "ping".to_string(),
+            JobKind::SendMessageToScene(_) => "send message to scene".to_string(),
         }
     }
 }
 
 impl Display for JobUuid {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        // write!(f, "{}", self.to_uuid().unwrap_or_default())
         let str = match self {
             JobUuid::Real(uuid) => uuid.to_string(),
             JobUuid::Test(id) => id.to_string(),
@@ -58,12 +78,13 @@ impl Job {
         uuid: JobUuid,
         finished_at: Option<DateTime<Utc>>,
         name: String,
+        maybe_data: Option<serde_json::Value>,
     ) -> Result<Job, ParseError> {
-        let job_kid = JobKind::parse(name)?;
+        let job_kind = JobKind::parse(name, maybe_data)?;
 
         Ok(Job {
             uuid,
-            kind: job_kid,
+            kind: job_kind,
             finished_at,
         })
     }
@@ -96,8 +117,12 @@ impl Job {
 }
 
 impl PoppedJob {
-    pub fn parse(uuid: JobUuid, name: String) -> Result<PoppedJob, ParseError> {
-        let job_kid = JobKind::parse(name)?;
+    pub fn parse(
+        uuid: JobUuid,
+        name: String,
+        maybe_data: Option<serde_json::Value>,
+    ) -> Result<PoppedJob, ParseError> {
+        let job_kid = JobKind::parse(name, maybe_data)?;
 
         Ok(PoppedJob {
             uuid,
@@ -107,9 +132,26 @@ impl PoppedJob {
 }
 
 impl JobKind {
-    pub fn parse(name: String) -> Result<JobKind, ParseError> {
+    pub fn parse(
+        name: String,
+        maybe_data: Option<serde_json::Value>,
+    ) -> Result<JobKind, ParseError> {
         match name.as_str() {
             "ping" => Ok(JobKind::Ping),
+            "send message" => match maybe_data {
+                None => Err(ParseError::NoJobDataForJobThatReuiresIt { job_name: name }),
+                Some(data) => {
+                    let job: SendMessageToSceneJob =
+                        serde_json::from_value(data).map_err(|error| {
+                            ParseError::FailedToParseJobData {
+                                job_name: name.clone(),
+                                details: error.to_string(),
+                            }
+                        })?;
+
+                    Ok(JobKind::SendMessageToScene(job))
+                }
+            },
             _ => Err(ParseError::UnknownJobName(name)),
         }
     }

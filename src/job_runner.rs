@@ -65,6 +65,9 @@ async fn run_next_job<W: JobCapability>(worker: W) -> Result<(), RunJobError> {
         JobKind::Ping => {
             println!("Pong");
         }
+        JobKind::SendMessageToScene(job_data) => {
+            // TODO implement sending message to scene
+        }
     }
 
     worker

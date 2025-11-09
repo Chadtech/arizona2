@@ -54,7 +54,7 @@ impl JobCapability for Worker {
 
         let maybe_job_ret = sqlx::query!(
             r#"
-                SELECT name
+                SELECT name, data
                 FROM job
                 WHERE uuid = $1::UUID;
             "#,
@@ -67,9 +67,11 @@ impl JobCapability for Worker {
         match maybe_job_ret {
             None => Ok(None),
             Some(ret_rec) => {
-                let job = PoppedJob::parse(JobUuid::from_uuid(job_uuid), ret_rec.name).map_err(
-                    |err| format!("Error parsing job\n{}", err.to_nice_error().to_string()),
-                )?;
+                let job =
+                    PoppedJob::parse(JobUuid::from_uuid(job_uuid), ret_rec.name, ret_rec.data)
+                        .map_err(|err| {
+                            format!("Error parsing job\n{}", err.to_nice_error().to_string())
+                        })?;
 
                 Ok(Some(job))
             }
@@ -79,7 +81,7 @@ impl JobCapability for Worker {
     async fn recent_jobs(&self, limit: i64) -> Result<Vec<Job>, String> {
         let rows = sqlx::query(
             r#"
-                SELECT uuid, name, finished_at
+                SELECT uuid, name, finished_at, data
                 FROM job
                 ORDER BY created_at DESC
                 LIMIT $1
@@ -105,7 +107,11 @@ impl JobCapability for Worker {
                 .try_get::<Option<DateTime<Utc>>, _>("finished_at")
                 .map_err(|err| format!("Error reading finished_at from row: {}", err))?;
 
-            let job = Job::parse(JobUuid::from_uuid(uuid), finished_at, name)
+            let job_data: Option<serde_json::Value> = row
+                .try_get::<Option<serde_json::Value>, _>("data")
+                .map_err(|err| format!("Error reading job data from row: {}", err))?;
+
+            let job = Job::parse(JobUuid::from_uuid(uuid), finished_at, name, job_data)
                 .map_err(|err| format!("Error parsing job\n{}", err.to_nice_error().to_string()))?;
             jobs.push(job);
         }

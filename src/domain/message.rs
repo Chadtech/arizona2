@@ -17,5 +17,5 @@ pub struct Message {
 pub enum MessageRecipient {
     Person(PersonUuid),
     Scene(SceneUuid),
-    User, // Message to the actual user (Chad)
+    RealWorldPerson, // Message to the actual user (Chad)
 }
