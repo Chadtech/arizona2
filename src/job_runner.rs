@@ -1,5 +1,6 @@
 use crate::capability::job::JobCapability;
 use crate::capability::message::{MessageCapability, NewMessage};
+use crate::capability::scene::SceneCapability;
 use crate::domain::job::{process_message, JobKind, PoppedJob};
 use crate::domain::message::{MessageRecipient, MessageSender};
 use crate::nice_display::NiceDisplay;
@@ -59,7 +60,9 @@ pub async fn run() -> Result<(), Error> {
     }
 }
 
-async fn run_next_job<W: JobCapability + MessageCapability>(worker: W) -> Result<(), RunJobError> {
+async fn run_next_job<W: JobCapability + MessageCapability + SceneCapability>(
+    worker: W,
+) -> Result<(), RunJobError> {
     let job = match worker
         .pop_next_job()
         .await
@@ -106,12 +109,16 @@ async fn run_next_job<W: JobCapability + MessageCapability>(worker: W) -> Result
 #[cfg(test)]
 mod tests {
     use super::*;
+    use async_trait::async_trait;
     use crate::capability::job::JobCapability;
     use crate::capability::message::MessageCapability;
+    use crate::capability::scene::{CurrentScene, NewScene, NewSceneSnapshot, Scene, SceneCapability, SceneParticipant};
     use crate::domain::job::{JobKind, PoppedJob};
     use crate::domain::job_uuid::JobUuid;
     use crate::domain::message::Message;
     use crate::domain::message_uuid::MessageUuid;
+    use crate::domain::person_name::PersonName;
+    use crate::domain::scene_participant_uuid::SceneParticipantUuid;
     use crate::domain::scene_uuid::SceneUuid;
     use std::collections::HashSet;
     use std::sync::Arc;
@@ -191,6 +198,54 @@ mod tests {
             st.finished_jobs.insert(job_uuid.clone());
 
             Ok(())
+        }
+    }
+
+    #[async_trait]
+    impl SceneCapability for MockWorker {
+        async fn create_scene(&self, _new_scene: NewScene) -> Result<SceneUuid, String> {
+            Ok(SceneUuid::new())
+        }
+
+        async fn add_person_to_scene(
+            &self,
+            _scene_uuid: SceneUuid,
+            _person_name: PersonName,
+        ) -> Result<SceneParticipantUuid, String> {
+            Ok(SceneParticipantUuid::new())
+        }
+
+        async fn remove_person_from_scene(
+            &self,
+            _scene_uuid: SceneUuid,
+            _person_name: PersonName,
+        ) -> Result<SceneParticipantUuid, String> {
+            Ok(SceneParticipantUuid::new())
+        }
+
+        async fn get_persons_current_scene(
+            &self,
+            _person_name: PersonName,
+        ) -> Result<Option<CurrentScene>, String> {
+            Ok(None)
+        }
+
+        async fn create_scene_snapshot(
+            &self,
+            _new_scene_snapshot: NewSceneSnapshot,
+        ) -> Result<(), String> {
+            Ok(())
+        }
+
+        async fn get_scene_from_name(&self, _scene_name: String) -> Result<Option<Scene>, String> {
+            Ok(None)
+        }
+
+        async fn get_scene_participants(
+            &self,
+            _scene_uuid: &SceneUuid,
+        ) -> Result<Vec<SceneParticipant>, String> {
+            Ok(vec![])
         }
     }
 

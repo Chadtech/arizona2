@@ -8,7 +8,7 @@ CREATE EXTENSION IF NOT EXISTS vector;
 CREATE TABLE IF NOT EXISTS message
 (
     uuid                 UUID PRIMARY KEY,
-    sender_person_uuid   UUID        NOT NULL,
+    sender_person_uuid   UUID,
     receiver_person_uuid UUID,
     content              TEXT        NOT NULL,
     scene_uuid           UUID,
@@ -25,19 +25,19 @@ CREATE TABLE IF NOT EXISTS message
     CONSTRAINT check_direct_message CHECK (
         message_type != 'direct' OR
         (receiver_person_uuid IS NOT NULL AND scene_uuid IS NULL)
-    ),
+        ),
 
     -- Ensure 'scene_broadcast' messages have a scene and no specific receiver
     CONSTRAINT check_scene_broadcast CHECK (
         message_type != 'scene_broadcast' OR
         (scene_uuid IS NOT NULL AND receiver_person_uuid IS NULL)
-    ),
+        ),
 
     -- Ensure 'to_user' messages have no receiver and no scene
     CONSTRAINT check_to_user CHECK (
         message_type != 'to_user' OR
         (receiver_person_uuid IS NULL AND scene_uuid IS NULL)
-    )
+        )
 );
 
 -- Foreign key: sender must be a person
@@ -49,9 +49,9 @@ $$
                        WHERE conname = 'message_fk_sender_person') THEN
             ALTER TABLE message
                 ADD CONSTRAINT message_fk_sender_person
-                FOREIGN KEY (sender_person_uuid)
-                REFERENCES person (uuid)
-                ON DELETE CASCADE;
+                    FOREIGN KEY (sender_person_uuid)
+                        REFERENCES person (uuid)
+                        ON DELETE CASCADE;
         END IF;
     END
 $$;
@@ -65,9 +65,9 @@ $$
                        WHERE conname = 'message_fk_receiver_person') THEN
             ALTER TABLE message
                 ADD CONSTRAINT message_fk_receiver_person
-                FOREIGN KEY (receiver_person_uuid)
-                REFERENCES person (uuid)
-                ON DELETE CASCADE;
+                    FOREIGN KEY (receiver_person_uuid)
+                        REFERENCES person (uuid)
+                        ON DELETE CASCADE;
         END IF;
     END
 $$;
@@ -81,9 +81,9 @@ $$
                        WHERE conname = 'message_fk_scene') THEN
             ALTER TABLE message
                 ADD CONSTRAINT message_fk_scene
-                FOREIGN KEY (scene_uuid)
-                REFERENCES scene (uuid)
-                ON DELETE CASCADE;
+                    FOREIGN KEY (scene_uuid)
+                        REFERENCES scene (uuid)
+                        ON DELETE CASCADE;
         END IF;
     END
 $$;
