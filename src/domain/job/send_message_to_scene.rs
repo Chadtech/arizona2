@@ -47,7 +47,7 @@ impl NiceDisplay for Error {
 }
 
 impl SendMessageToSceneJob {
-    pub async fn run<W: SceneCapability>(self, worker: W) -> Result<(), Error> {
+    pub async fn run<W: SceneCapability>(self, worker: &W) -> Result<(), Error> {
         let mut participants = worker
             .get_scene_participants(&self.scene_uuid)
             .await

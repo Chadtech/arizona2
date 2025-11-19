@@ -59,16 +59,6 @@ impl ProcessMessageJob {
             MessageRecipient::Person(_person_uuid) => {
                 todo!("Process message to AI person");
             }
-            MessageRecipient::Scene(scene_uuid) => {
-                let participants =
-                    worker
-                        .get_scene_participants(&scene_uuid)
-                        .await
-                        .map_err(|err| Error::FailedToGetSceneParticipants {
-                            scene_uuid,
-                            details: err,
-                        })?;
-            }
             MessageRecipient::RealWorldPerson => {
                 // Process message to real-world user
             }

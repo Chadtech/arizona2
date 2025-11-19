@@ -1,5 +1,5 @@
 pub mod process_message;
-mod send_message_to_scene;
+pub mod send_message_to_scene;
 
 use super::job_uuid::JobUuid;
 use crate::domain::job::send_message_to_scene::SendMessageToSceneJob;
@@ -7,7 +7,6 @@ use crate::nice_display::{NiceDisplay, NiceError};
 use chrono::{DateTime, Utc};
 use process_message::ProcessMessageJob;
 use serde_json;
-use serde_json::Value;
 use std::fmt::Display;
 
 #[derive(Debug, Clone)]

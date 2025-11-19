@@ -9,6 +9,7 @@ pub struct Message {
     pub uuid: MessageUuid,
     pub sender: MessageSender,
     pub recipient: MessageRecipient,
+    pub scene_uuid: Option<SceneUuid>,
     pub content: String,
     pub sent_at: DateTime<Utc>,
     pub read_at: Option<DateTime<Utc>>,
@@ -23,6 +24,5 @@ pub enum MessageSender {
 #[derive(Debug, Clone)]
 pub enum MessageRecipient {
     Person(PersonUuid),
-    Scene(SceneUuid),
     RealWorldPerson, // Message to the actual user (Chad)
 }

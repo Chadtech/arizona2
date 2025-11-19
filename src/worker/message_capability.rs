@@ -2,16 +2,18 @@ use crate::capability::message::{MessageCapability, NewMessage};
 use crate::domain::message::{Message, MessageRecipient, MessageSender};
 use crate::domain::message_uuid::MessageUuid;
 use crate::domain::person_uuid::PersonUuid;
+use crate::domain::scene_uuid::SceneUuid;
 use crate::worker::Worker;
 
 impl MessageCapability for Worker {
     async fn send_message(&self, new_message: NewMessage) -> Result<MessageUuid, String> {
         let message_uuid = MessageUuid::new();
 
-        let (message_type, receiver_uuid, scene_uuid) = match new_message.recipient {
-            MessageRecipient::Person(receiver) => ("direct", Some(receiver.to_uuid()), None),
-            MessageRecipient::Scene(scene) => ("scene_broadcast", None, Some(scene.to_uuid())),
-            MessageRecipient::RealWorldPerson => ("to_user", None, None),
+        let scene_uuid = new_message.scene_uuid.map(|s| s.to_uuid());
+
+        let receiver_uuid = match new_message.recipient {
+            MessageRecipient::Person(receiver) => Some(receiver.to_uuid()),
+            MessageRecipient::RealWorldPerson => None,
         };
 
         let sender_uuid = match new_message.sender {
@@ -21,15 +23,14 @@ impl MessageCapability for Worker {
 
         sqlx::query!(
             r#"
-                INSERT INTO message (uuid, sender_person_uuid, receiver_person_uuid, scene_uuid, content, message_type)
-                VALUES ($1::UUID, $2::UUID, $3::UUID, $4::UUID, $5::TEXT, $6::TEXT)
+                INSERT INTO message (uuid, sender_person_uuid, receiver_person_uuid, scene_uuid, content)
+                VALUES ($1::UUID, $2::UUID, $3::UUID, $4::UUID, $5::TEXT)
             "#,
             message_uuid.to_uuid(),
             sender_uuid,
             receiver_uuid,
             scene_uuid,
             new_message.content,
-            message_type
         )
         .execute(&self.sqlx)
         .await
@@ -63,9 +64,14 @@ impl MessageCapability for Worker {
                     Some(uuid) => MessageSender::AiPerson(PersonUuid::from_uuid(uuid)),
                     None => MessageSender::RealWorldUser,
                 },
-                recipient: MessageRecipient::Scene(
-                    crate::domain::scene_uuid::SceneUuid::from_uuid(row.scene_uuid.unwrap()),
-                ),
+                recipient: match row.receiver_person_uuid {
+                    Some(uuid) => MessageRecipient::Person(PersonUuid::from_uuid(uuid)),
+                    None => MessageRecipient::RealWorldPerson,
+                },
+                scene_uuid: match row.scene_uuid {
+                    Some(uuid) => Some(SceneUuid::from_uuid(uuid)),
+                    None => None,
+                },
                 content: row.content,
                 sent_at: row.sent_at,
                 read_at: row.read_at,
@@ -81,7 +87,7 @@ impl MessageCapability for Worker {
     ) -> Result<Option<Message>, String> {
         let row = sqlx::query!(
             r#"
-                SELECT uuid, sender_person_uuid, receiver_person_uuid, scene_uuid, content, sent_at, read_at, message_type
+                SELECT uuid, sender_person_uuid, receiver_person_uuid, scene_uuid, content, sent_at, read_at
                 FROM message
                 WHERE uuid = $1::UUID
             "#,
@@ -93,12 +99,9 @@ impl MessageCapability for Worker {
 
         match row {
             Some(row) => {
-                let recipient = if let Some(scene_uuid) = row.scene_uuid {
-                    MessageRecipient::Scene(crate::domain::scene_uuid::SceneUuid::from_uuid(scene_uuid))
-                } else if let Some(receiver_uuid) = row.receiver_person_uuid {
-                    MessageRecipient::Person(PersonUuid::from_uuid(receiver_uuid))
-                } else {
-                    MessageRecipient::RealWorldPerson
+                let recipient = match row.receiver_person_uuid {
+                    Some(uuid) => MessageRecipient::Person(PersonUuid::from_uuid(uuid)),
+                    None => MessageRecipient::RealWorldPerson,
                 };
 
                 Ok(Some(Message {
@@ -106,6 +109,10 @@ impl MessageCapability for Worker {
                     sender: match row.sender_person_uuid {
                         Some(uuid) => MessageSender::AiPerson(PersonUuid::from_uuid(uuid)),
                         None => MessageSender::RealWorldUser,
+                    },
+                    scene_uuid: match row.scene_uuid {
+                        Some(uuid) => Some(SceneUuid::from_uuid(uuid)),
+                        None => None,
                     },
                     recipient,
                     content: row.content,

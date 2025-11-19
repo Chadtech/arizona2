@@ -1,7 +1,7 @@
 use crate::capability::job::JobCapability;
 use crate::capability::message::{MessageCapability, NewMessage};
 use crate::capability::scene::SceneCapability;
-use crate::domain::job::{process_message, JobKind, PoppedJob};
+use crate::domain::job::{process_message, send_message_to_scene, JobKind, PoppedJob};
 use crate::domain::message::{MessageRecipient, MessageSender};
 use crate::nice_display::NiceDisplay;
 use crate::worker;
@@ -15,8 +15,8 @@ pub enum Error {
 pub enum RunJobError {
     FailedToPopJob(String),
     FailedToMarkJobFinished(String),
-    FailedToSendMessage(String),
     ProcessMessageError(process_message::Error),
+    SendMessageToSceneError(send_message_to_scene::Error),
 }
 
 impl NiceDisplay for Error {
@@ -42,11 +42,11 @@ impl NiceDisplay for RunJobError {
                     err
                 )
             }
-            RunJobError::FailedToSendMessage(err) => {
-                format!("Failed to send message\n{}", err)
-            }
             RunJobError::ProcessMessageError(err) => {
-                format!("Failed to process message job\n{}", err.message())
+                format!("Error processing message job\n{}", err.message())
+            }
+            RunJobError::SendMessageToSceneError(err) => {
+                format!("Error sending message to scene job\n{}", err.message())
             }
         }
     }
@@ -79,16 +79,20 @@ async fn run_next_job<W: JobCapability + MessageCapability + SceneCapability>(
             println!("Pong");
         }
         JobKind::SendMessageToScene(job_data) => {
-            let new_message = NewMessage {
-                sender: job_data.sender,
-                recipient: MessageRecipient::Scene(job_data.scene_uuid),
-                content: job_data.content,
-            };
-
-            worker
-                .send_message(new_message)
+            // let new_message = NewMessage {
+            //     sender: job_data.sender,
+            //     recipient: MessageRecipient::Scene(job_data.scene_uuid),
+            //     content: job_data.content,
+            // };
+            //
+            // worker
+            //     .send_message(new_message)
+            //     .await
+            //     .map_err(RunJobError::FailedToSendMessage)?;
+            job_data
+                .run(&worker)
                 .await
-                .map_err(RunJobError::FailedToSendMessage)?;
+                .map_err(RunJobError::SendMessageToSceneError)?;
         }
         JobKind::ProcessMessage(process_message_job) => {
             process_message_job
@@ -109,10 +113,11 @@ async fn run_next_job<W: JobCapability + MessageCapability + SceneCapability>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use async_trait::async_trait;
     use crate::capability::job::JobCapability;
     use crate::capability::message::MessageCapability;
-    use crate::capability::scene::{CurrentScene, NewScene, NewSceneSnapshot, Scene, SceneCapability, SceneParticipant};
+    use crate::capability::scene::{
+        CurrentScene, NewScene, NewSceneSnapshot, Scene, SceneCapability, SceneParticipant,
+    };
     use crate::domain::job::{JobKind, PoppedJob};
     use crate::domain::job_uuid::JobUuid;
     use crate::domain::message::Message;
@@ -120,6 +125,7 @@ mod tests {
     use crate::domain::person_name::PersonName;
     use crate::domain::scene_participant_uuid::SceneParticipantUuid;
     use crate::domain::scene_uuid::SceneUuid;
+    use async_trait::async_trait;
     use std::collections::HashSet;
     use std::sync::Arc;
     use tokio::sync::Mutex;
