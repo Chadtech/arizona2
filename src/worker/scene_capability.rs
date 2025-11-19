@@ -1,7 +1,9 @@
 use crate::capability::scene::{
     CurrentScene, NewScene, NewSceneSnapshot, Scene, SceneCapability, SceneParticipant,
 };
+use crate::domain::actor_uuid::ActorUuid;
 use crate::domain::person_name::PersonName;
+use crate::domain::person_uuid::PersonUuid;
 use crate::domain::scene_participant_uuid::SceneParticipantUuid;
 use crate::domain::scene_uuid::SceneUuid;
 use crate::worker::Worker;
@@ -165,11 +167,11 @@ impl SceneCapability for Worker {
         &self,
         scene_uuid: &SceneUuid,
     ) -> Result<Vec<SceneParticipant>, String> {
-        let participants = sqlx::query_as!(
-            SceneParticipant,
+        let participant_rows = sqlx::query!(
             r#"
                 SELECT
-                    person.name AS person_name
+                    person.name AS person_name,
+                    person.uuid AS person_uuid
                 FROM scene_participant
                 JOIN person ON scene_participant.person_uuid = person.uuid
                 WHERE scene_participant.scene_uuid = $1::UUID AND scene_participant.left_at IS NULL;
@@ -179,6 +181,17 @@ impl SceneCapability for Worker {
         .fetch_all(&self.sqlx)
         .await
         .map_err(|err| format!("Error fetching scene participants: {}", err))?;
+
+        let participants = participant_rows
+            .into_iter()
+            .map(|row| {
+                let person_uuid = PersonUuid::from_uuid(row.person_uuid);
+                SceneParticipant {
+                    person_name: PersonName::from_string(row.person_name),
+                    actor_uuid: ActorUuid::from_person_uuid(person_uuid),
+                }
+            })
+            .collect();
 
         Ok(participants)
     }

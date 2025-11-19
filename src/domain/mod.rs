@@ -1,3 +1,4 @@
+pub mod actor_uuid;
 pub mod job;
 pub mod job_uuid;
 pub mod memory_uuid;

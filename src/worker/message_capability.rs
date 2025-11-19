@@ -13,7 +13,7 @@ impl MessageCapability for Worker {
 
         let receiver_uuid = match new_message.recipient {
             MessageRecipient::Person(receiver) => Some(receiver.to_uuid()),
-            MessageRecipient::RealWorldPerson => None,
+            MessageRecipient::RealWorldUser => None,
         };
 
         let sender_uuid = match new_message.sender {
@@ -66,7 +66,7 @@ impl MessageCapability for Worker {
                 },
                 recipient: match row.receiver_person_uuid {
                     Some(uuid) => MessageRecipient::Person(PersonUuid::from_uuid(uuid)),
-                    None => MessageRecipient::RealWorldPerson,
+                    None => MessageRecipient::RealWorldUser,
                 },
                 scene_uuid: match row.scene_uuid {
                     Some(uuid) => Some(SceneUuid::from_uuid(uuid)),
@@ -101,7 +101,7 @@ impl MessageCapability for Worker {
             Some(row) => {
                 let recipient = match row.receiver_person_uuid {
                     Some(uuid) => MessageRecipient::Person(PersonUuid::from_uuid(uuid)),
-                    None => MessageRecipient::RealWorldPerson,
+                    None => MessageRecipient::RealWorldUser,
                 };
 
                 Ok(Some(Message {

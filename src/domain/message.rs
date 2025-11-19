@@ -1,6 +1,6 @@
-use super::message_uuid::MessageUuid;
 use super::person_uuid::PersonUuid;
 use super::scene_uuid::SceneUuid;
+use super::{actor_uuid::ActorUuid, message_uuid::MessageUuid};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
@@ -24,5 +24,14 @@ pub enum MessageSender {
 #[derive(Debug, Clone)]
 pub enum MessageRecipient {
     Person(PersonUuid),
-    RealWorldPerson, // Message to the actual user (Chad)
+    RealWorldUser, // Message to the actual user (Chad)
+}
+
+impl From<&ActorUuid> for MessageRecipient {
+    fn from(actor_uuid: &ActorUuid) -> Self {
+        match actor_uuid {
+            ActorUuid::AiPerson(person_uuid) => MessageRecipient::Person(person_uuid.clone()),
+            ActorUuid::RealWorldUser => MessageRecipient::RealWorldUser,
+        }
+    }
 }

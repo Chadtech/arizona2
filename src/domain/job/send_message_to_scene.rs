@@ -1,3 +1,10 @@
+use crate::capability::job::JobCapability;
+use crate::capability::message::{MessageCapability, NewMessage};
+use crate::domain::actor_uuid::ActorUuid;
+use crate::domain::job::process_message::ProcessMessageJob;
+use crate::domain::job::JobKind;
+use crate::domain::message::MessageRecipient;
+use crate::domain::message_uuid::MessageUuid;
 use crate::domain::scene_uuid::SceneUuid;
 use crate::nice_display::NiceDisplay;
 use crate::{capability::scene::SceneCapability, domain::message::MessageSender};
@@ -27,6 +34,14 @@ pub enum Error {
         scene_uuid: SceneUuid,
         details: String,
     },
+    FailedToSendMessage {
+        participant: ActorUuid,
+        details: String,
+    },
+    FailedToUnshiftJob {
+        message_uuid: MessageUuid,
+        details: String,
+    },
 }
 
 impl NiceDisplay for Error {
@@ -42,12 +57,35 @@ impl NiceDisplay for Error {
                     details
                 )
             }
+            Error::FailedToSendMessage {
+                participant,
+                details,
+            } => {
+                format!(
+                    "Failed to send message to participant {}: {}",
+                    participant.to_label(),
+                    details
+                )
+            }
+            Error::FailedToUnshiftJob {
+                message_uuid,
+                details,
+            } => {
+                format!(
+                    "Failed to unshift process message job for message {}: {}",
+                    message_uuid.to_uuid().to_string(),
+                    details
+                )
+            }
         }
     }
 }
 
 impl SendMessageToSceneJob {
-    pub async fn run<W: SceneCapability>(self, worker: &W) -> Result<(), Error> {
+    pub async fn run<W: SceneCapability + MessageCapability + JobCapability>(
+        self,
+        worker: &W,
+    ) -> Result<(), Error> {
         let mut participants = worker
             .get_scene_participants(&self.scene_uuid)
             .await
@@ -60,7 +98,33 @@ impl SendMessageToSceneJob {
         let mut rng = rand::rngs::SmallRng::seed_from_u64(self.random_seed.value());
         participants.shuffle(&mut rng);
 
-        // TODO: Create message records and ProcessMessage jobs for each participant
+        for participant in participants {
+            let new_message = NewMessage {
+                sender: self.sender.clone(),
+                recipient: MessageRecipient::from(&participant.actor_uuid),
+                content: self.content.clone(),
+                scene_uuid: Some(self.scene_uuid.clone()),
+            };
+
+            let message_uuid = worker.send_message(new_message).await.map_err(|err| {
+                Error::FailedToSendMessage {
+                    participant: participant.actor_uuid,
+                    details: err,
+                }
+            })?;
+
+            let process_message_job = ProcessMessageJob {
+                message_uuid: message_uuid.clone(),
+            };
+
+            worker
+                .unshift_job(JobKind::ProcessMessage(process_message_job))
+                .await
+                .map_err(|err| Error::FailedToUnshiftJob {
+                    message_uuid,
+                    details: err,
+                })?;
+        }
 
         Ok(())
     }

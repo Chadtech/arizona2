@@ -59,7 +59,7 @@ impl ProcessMessageJob {
             MessageRecipient::Person(_person_uuid) => {
                 todo!("Process message to AI person");
             }
-            MessageRecipient::RealWorldPerson => {
+            MessageRecipient::RealWorldUser => {
                 // Process message to real-world user
             }
         }

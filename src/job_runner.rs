@@ -79,16 +79,6 @@ async fn run_next_job<W: JobCapability + MessageCapability + SceneCapability>(
             println!("Pong");
         }
         JobKind::SendMessageToScene(job_data) => {
-            // let new_message = NewMessage {
-            //     sender: job_data.sender,
-            //     recipient: MessageRecipient::Scene(job_data.scene_uuid),
-            //     content: job_data.content,
-            // };
-            //
-            // worker
-            //     .send_message(new_message)
-            //     .await
-            //     .map_err(RunJobError::FailedToSendMessage)?;
             job_data
                 .run(&worker)
                 .await

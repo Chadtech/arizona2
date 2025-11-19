@@ -1,3 +1,4 @@
+use crate::domain::actor_uuid::ActorUuid;
 use crate::domain::scene_participant_uuid::SceneParticipantUuid;
 use crate::domain::{person_name::PersonName, scene_uuid::SceneUuid};
 use async_trait::async_trait;
@@ -22,6 +23,7 @@ pub struct Scene {
 #[derive(Debug, Clone)]
 pub struct SceneParticipant {
     pub person_name: PersonName,
+    pub actor_uuid: ActorUuid,
 }
 
 pub struct CurrentScene {

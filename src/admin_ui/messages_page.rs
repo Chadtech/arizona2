@@ -1,4 +1,6 @@
 use super::s;
+use crate::capability::scene::SceneCapability;
+use crate::domain::scene_uuid::SceneUuid;
 use crate::worker::Worker;
 use iced::{widget as w, Element, Length, Task};
 use serde::{Deserialize, Serialize};
@@ -10,13 +12,29 @@ pub struct Model {
     selected_person_2: Option<String>,
 
     // For scene-based conversation view
-    selected_scene: Option<String>,
+    scene_name_input: String,
+    scene_load_status: SceneLoadStatus,
 
     // View mode toggle
     view_mode: ViewMode,
 
     // Status for loading messages
     messages_status: MessagesStatus,
+}
+
+#[derive(Debug, Clone)]
+pub struct LoadedScene {
+    pub uuid: SceneUuid,
+    pub name: String,
+    pub description: Option<String>,
+}
+
+enum SceneLoadStatus {
+    Ready,
+    Loading,
+    Loaded(LoadedScene),
+    NotFound(String), // Scene name that wasn't found
+    Error(String),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -50,7 +68,9 @@ pub enum Msg {
     ViewModeChanged(ViewMode),
     Person1Selected(String),
     Person2Selected(String),
-    SceneSelected(String),
+    SceneNameInputChanged(String),
+    LoadScene,
+    SceneLoaded(Result<Option<LoadedScene>, String>),
     LoadMessages,
     MessagesLoaded(Result<Vec<Message>, String>),
 }
@@ -62,7 +82,7 @@ pub struct Storage {
     #[serde(default)]
     selected_person_2: Option<String>,
     #[serde(default)]
-    selected_scene: Option<String>,
+    scene_name_input: String,
     #[serde(default)]
     view_mode: ViewMode,
 }
@@ -72,7 +92,7 @@ impl Default for Storage {
         Self {
             selected_person_1: None,
             selected_person_2: None,
-            selected_scene: None,
+            scene_name_input: String::new(),
             view_mode: ViewMode::default(),
         }
     }
@@ -83,13 +103,14 @@ impl Model {
         Self {
             selected_person_1: storage.selected_person_1.clone(),
             selected_person_2: storage.selected_person_2.clone(),
-            selected_scene: storage.selected_scene.clone(),
+            scene_name_input: storage.scene_name_input.clone(),
+            scene_load_status: SceneLoadStatus::Ready,
             view_mode: storage.view_mode,
             messages_status: MessagesStatus::Ready,
         }
     }
 
-    pub fn update(&mut self, _worker: Arc<Worker>, msg: Msg) -> Task<Msg> {
+    pub fn update(&mut self, worker: Arc<Worker>, msg: Msg) -> Task<Msg> {
         match msg {
             Msg::ViewModeChanged(mode) => {
                 self.view_mode = mode;
@@ -103,8 +124,36 @@ impl Model {
                 self.selected_person_2 = Some(person);
                 Task::none()
             }
-            Msg::SceneSelected(scene) => {
-                self.selected_scene = Some(scene);
+            Msg::SceneNameInputChanged(name) => {
+                self.scene_name_input = name;
+                self.scene_load_status = SceneLoadStatus::Ready;
+                Task::none()
+            }
+            Msg::LoadScene => {
+                self.scene_load_status = SceneLoadStatus::Loading;
+                let scene_name = self.scene_name_input.clone();
+                Task::perform(
+                    async move {
+                        worker
+                            .get_scene_from_name(scene_name.clone())
+                            .await
+                            .map(|opt_scene| {
+                                opt_scene.map(|scene| LoadedScene {
+                                    uuid: scene.uuid,
+                                    name: scene.name,
+                                    description: scene.description,
+                                })
+                            })
+                    },
+                    Msg::SceneLoaded,
+                )
+            }
+            Msg::SceneLoaded(result) => {
+                self.scene_load_status = match result {
+                    Ok(Some(scene)) => SceneLoadStatus::Loaded(scene),
+                    Ok(None) => SceneLoadStatus::NotFound(self.scene_name_input.clone()),
+                    Err(err) => SceneLoadStatus::Error(err),
+                };
                 Task::none()
             }
             Msg::LoadMessages => {
@@ -184,15 +233,29 @@ impl Model {
     }
 
     fn view_scene(&self) -> Element<Msg> {
-        let scene_section = w::column![
-            w::text("Scene"),
-            w::text_input(
-                "Enter scene name",
-                self.selected_scene.as_deref().unwrap_or("")
-            )
-            .on_input(Msg::SceneSelected),
+        let scene_input = w::row![
+            w::text_input("Enter scene name", &self.scene_name_input)
+                .on_input(Msg::SceneNameInputChanged),
+            w::button("Load Scene").on_press(Msg::LoadScene),
         ]
         .spacing(s::S1);
+
+        let scene_status = match &self.scene_load_status {
+            SceneLoadStatus::Ready => w::text(""),
+            SceneLoadStatus::Loading => w::text("Loading scene..."),
+            SceneLoadStatus::Loaded(scene) => w::text(format!(
+                "Loaded: {} (UUID: {})",
+                scene.name,
+                scene.uuid.to_uuid()
+            )),
+            SceneLoadStatus::NotFound(name) => {
+                w::text(format!("Scene '{}' not found", name))
+            }
+            SceneLoadStatus::Error(err) => w::text(format!("Error: {}", err)),
+        };
+
+        let scene_section = w::column![w::text("Scene"), scene_input, scene_status]
+            .spacing(s::S1);
 
         let messages_view = self.view_messages();
 
@@ -235,7 +298,7 @@ impl Model {
         Storage {
             selected_person_1: self.selected_person_1.clone(),
             selected_person_2: self.selected_person_2.clone(),
-            selected_scene: self.selected_scene.clone(),
+            scene_name_input: self.scene_name_input.clone(),
             view_mode: self.view_mode,
         }
     }
