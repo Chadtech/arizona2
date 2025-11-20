@@ -197,7 +197,7 @@ impl Model {
         }
     }
 
-    pub fn view(&self) -> Element<Msg> {
+    pub fn view(&self) -> Element<'_, Msg> {
         w::column![
             new_scene_view(&self),
             w::text("Look Up Scene"),
@@ -280,7 +280,7 @@ impl Model {
     }
 }
 
-fn scene_look_up_view(scene_look_up: &LookUpScene) -> Element<SceneLookUpMsg> {
+fn scene_look_up_view(scene_look_up: &LookUpScene) -> Element<'_, SceneLookUpMsg> {
     let look_up_view = match scene_look_up {
         LookUpScene::Ready => w::text("Ready to look up scene").into(),
         LookUpScene::LookingUpScene => w::text("Looking up scene...").into(),
@@ -293,7 +293,7 @@ fn scene_look_up_view(scene_look_up: &LookUpScene) -> Element<SceneLookUpMsg> {
     w::column![look_up_view].spacing(s::S4).into()
 }
 
-fn scene_loaded_view(scene_model: &SceneModel) -> Element<SceneLookUpMsg> {
+fn scene_loaded_view(scene_model: &SceneModel) -> Element<'_, SceneLookUpMsg> {
     let description = scene_model
         .scene_snapshot
         .clone()
@@ -345,7 +345,7 @@ fn scene_loaded_view(scene_model: &SceneModel) -> Element<SceneLookUpMsg> {
     .into()
 }
 
-fn new_scene_view(model: &Model) -> Element<Msg> {
+fn new_scene_view(model: &Model) -> Element<'_, Msg> {
     w::column![
         w::text("Scene Name"),
         w::text_input("", &model.new_scene_name).on_input(Msg::NewSceneNameChanged),
@@ -358,7 +358,7 @@ fn new_scene_view(model: &Model) -> Element<Msg> {
     .into()
 }
 
-fn scene_creation_status_view(status: &NewSceneStatus) -> Element<Msg> {
+fn scene_creation_status_view(status: &NewSceneStatus) -> Element<'_, Msg> {
     match status {
         NewSceneStatus::Ready => w::text("Ready").into(),
         NewSceneStatus::CreatingScene => w::text("Creating scene...").into(),

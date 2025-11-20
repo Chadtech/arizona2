@@ -85,7 +85,7 @@ impl Model {
         }
     }
 
-    pub fn view(&self) -> Element<Msg> {
+    pub fn view(&self) -> Element<'_, Msg> {
         // Status message text
         let status_view: Element<Msg> = match &self.add_ping_status {
             AddPingStatus::Ready => w::text("Ready").into(),

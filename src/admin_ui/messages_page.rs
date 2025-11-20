@@ -171,7 +171,7 @@ impl Model {
         }
     }
 
-    pub fn view(&self) -> Element<Msg> {
+    pub fn view(&self) -> Element<'_, Msg> {
         let mode_selector = w::row![
             w::radio(
                 "Direct Message",
@@ -203,7 +203,7 @@ impl Model {
         .into()
     }
 
-    fn view_direct_message(&self) -> Element<Msg> {
+    fn view_direct_message(&self) -> Element<'_, Msg> {
         let person1_section = w::column![
             w::text("Person 1"),
             w::text_input(
@@ -232,7 +232,7 @@ impl Model {
             .into()
     }
 
-    fn view_scene(&self) -> Element<Msg> {
+    fn view_scene(&self) -> Element<'_, Msg> {
         let scene_input = w::row![
             w::text_input("Enter scene name", &self.scene_name_input)
                 .on_input(Msg::SceneNameInputChanged),
@@ -265,7 +265,7 @@ impl Model {
             .into()
     }
 
-    fn view_messages(&self) -> Element<Msg> {
+    fn view_messages(&self) -> Element<'_, Msg> {
         match &self.messages_status {
             MessagesStatus::Ready => {
                 w::column![

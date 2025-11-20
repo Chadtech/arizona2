@@ -5,7 +5,6 @@ use crate::nice_display::NiceDisplay;
 use crate::worker::Worker;
 use chrono::{DateTime, Utc};
 use sqlx::Row;
-use std::time;
 
 impl JobCapability for Worker {
     async fn unshift_job(&self, job: JobKind) -> Result<(), String> {

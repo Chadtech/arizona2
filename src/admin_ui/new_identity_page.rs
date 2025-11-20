@@ -92,7 +92,7 @@ impl Model {
             }
         }
     }
-    pub fn view(&self) -> Element<Msg> {
+    pub fn view(&self) -> Element<'_, Msg> {
         w::column![
             w::text("Person Name"),
             w::text_input("", &self.name_field).on_input(Msg::NameFieldChanged),
@@ -106,7 +106,7 @@ impl Model {
     }
 }
 
-fn status_view(status: &Status) -> Element<Msg> {
+fn status_view(status: &Status) -> Element<'_, Msg> {
     match status {
         Status::Ready => w::text("Ready").into(),
         Status::CreatingIdentity => w::text("Creating identity...").into(),

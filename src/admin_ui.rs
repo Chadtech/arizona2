@@ -5,6 +5,7 @@ mod messages_page;
 mod new_identity_page;
 mod new_person_page;
 mod scene_page;
+mod scene_timeline;
 mod state_of_mind_page;
 mod style;
 
@@ -520,7 +521,7 @@ impl Model {
         }
     }
 
-    fn view(&self) -> Element<Msg> {
+    fn view(&self) -> Element<'_, Msg> {
         let mut memories_children: Vec<Element<_>> = vec![];
 
         for (i, memory) in self.memory_fields.iter().enumerate() {

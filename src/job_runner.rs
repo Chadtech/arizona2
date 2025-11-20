@@ -1,8 +1,7 @@
 use crate::capability::job::JobCapability;
-use crate::capability::message::{MessageCapability, NewMessage};
+use crate::capability::message::MessageCapability;
 use crate::capability::scene::SceneCapability;
-use crate::domain::job::{process_message, send_message_to_scene, JobKind, PoppedJob};
-use crate::domain::message::{MessageRecipient, MessageSender};
+use crate::domain::job::{process_message, send_message_to_scene, JobKind};
 use crate::nice_display::NiceDisplay;
 use crate::worker;
 use crate::worker::Worker;
