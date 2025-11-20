@@ -1,5 +1,7 @@
 use super::s;
-use crate::capability::scene::SceneCapability;
+use crate::capability::message::MessageCapability;
+use crate::capability::scene::{Scene, SceneCapability};
+use crate::domain::message::Message;
 use crate::domain::scene_uuid::SceneUuid;
 use crate::worker::Worker;
 use iced::{widget as w, Element, Length, Task};
@@ -17,9 +19,6 @@ pub struct Model {
 
     // View mode toggle
     view_mode: ViewMode,
-
-    // Status for loading messages
-    messages_status: MessagesStatus,
 }
 
 #[derive(Debug, Clone)]
@@ -27,6 +26,7 @@ pub struct LoadedScene {
     pub uuid: SceneUuid,
     pub name: String,
     pub description: Option<String>,
+    pub messages: MessagesStatus,
 }
 
 enum SceneLoadStatus {
@@ -49,18 +49,11 @@ impl Default for ViewMode {
     }
 }
 
+#[derive(Debug, Clone)]
 enum MessagesStatus {
-    Ready,
     Loading,
     Loaded(Vec<Message>),
     Error(String),
-}
-
-#[derive(Debug, Clone)]
-pub struct Message {
-    // Placeholder structure for messages
-    pub content: String,
-    pub sender: String,
 }
 
 #[derive(Debug, Clone)]
@@ -70,8 +63,7 @@ pub enum Msg {
     Person2Selected(String),
     SceneNameInputChanged(String),
     LoadScene,
-    SceneLoaded(Result<Option<LoadedScene>, String>),
-    LoadMessages,
+    SceneLoaded(Result<Option<Scene>, String>),
     MessagesLoaded(Result<Vec<Message>, String>),
 }
 
@@ -106,7 +98,6 @@ impl Model {
             scene_name_input: storage.scene_name_input.clone(),
             scene_load_status: SceneLoadStatus::Ready,
             view_mode: storage.view_mode,
-            messages_status: MessagesStatus::Ready,
         }
     }
 
@@ -133,39 +124,47 @@ impl Model {
                 self.scene_load_status = SceneLoadStatus::Loading;
                 let scene_name = self.scene_name_input.clone();
                 Task::perform(
-                    async move {
-                        worker
-                            .get_scene_from_name(scene_name.clone())
-                            .await
-                            .map(|opt_scene| {
-                                opt_scene.map(|scene| LoadedScene {
-                                    uuid: scene.uuid,
-                                    name: scene.name,
-                                    description: scene.description,
-                                })
-                            })
-                    },
+                    async move { worker.get_scene_from_name(scene_name.clone()).await },
                     Msg::SceneLoaded,
                 )
             }
-            Msg::SceneLoaded(result) => {
-                self.scene_load_status = match result {
-                    Ok(Some(scene)) => SceneLoadStatus::Loaded(scene),
-                    Ok(None) => SceneLoadStatus::NotFound(self.scene_name_input.clone()),
-                    Err(err) => SceneLoadStatus::Error(err),
-                };
-                Task::none()
-            }
-            Msg::LoadMessages => {
-                self.messages_status = MessagesStatus::Loading;
-                // TODO: Implement actual message loading from database
-                Task::none()
-            }
-            Msg::MessagesLoaded(result) => {
-                self.messages_status = match result {
-                    Ok(messages) => MessagesStatus::Loaded(messages),
-                    Err(err) => MessagesStatus::Error(err),
-                };
+            Msg::SceneLoaded(result) => match result {
+                Ok(Some(scene)) => {
+                    let scene_uuid = scene.uuid.clone();
+
+                    let loaded_scene = LoadedScene {
+                        uuid: scene.uuid,
+                        name: scene.name,
+                        description: scene.description,
+                        messages: MessagesStatus::Loading,
+                    };
+
+                    self.scene_load_status = SceneLoadStatus::Loaded(loaded_scene);
+
+                    Task::perform(
+                        async move { worker.get_messages_in_scene(&scene_uuid).await },
+                        Msg::MessagesLoaded,
+                    )
+                }
+                Ok(None) => {
+                    self.scene_load_status =
+                        SceneLoadStatus::NotFound(self.scene_name_input.clone());
+
+                    Task::none()
+                }
+                Err(err) => {
+                    self.scene_load_status = SceneLoadStatus::Error(err);
+
+                    Task::none()
+                }
+            },
+            Msg::MessagesLoaded(res) => {
+                if let SceneLoadStatus::Loaded(loaded_scene) = &mut self.scene_load_status {
+                    loaded_scene.messages = match res {
+                        Ok(messages) => MessagesStatus::Loaded(messages),
+                        Err(err) => MessagesStatus::Error(err),
+                    };
+                }
                 Task::none()
             }
         }
@@ -193,14 +192,10 @@ impl Model {
             ViewMode::Scene => self.view_scene(),
         };
 
-        w::column![
-            w::text("Messages").size(24),
-            mode_selector,
-            content_view
-        ]
-        .spacing(s::S4)
-        .width(Length::Fill)
-        .into()
+        w::column![w::text("Messages").size(24), mode_selector, content_view]
+            .spacing(s::S4)
+            .width(Length::Fill)
+            .into()
     }
 
     fn view_direct_message(&self) -> Element<'_, Msg> {
@@ -224,7 +219,8 @@ impl Model {
         ]
         .spacing(s::S1);
 
-        let messages_view = self.view_messages();
+        // let messages_view = self.view_messages();
+        let messages_view = w::text("WIP - messages view");
 
         w::column![person1_section, person2_section, messages_view]
             .spacing(s::S4)
@@ -240,58 +236,30 @@ impl Model {
         ]
         .spacing(s::S1);
 
-        let scene_status = match &self.scene_load_status {
-            SceneLoadStatus::Ready => w::text(""),
-            SceneLoadStatus::Loading => w::text("Loading scene..."),
-            SceneLoadStatus::Loaded(scene) => w::text(format!(
-                "Loaded: {} (UUID: {})",
-                scene.name,
-                scene.uuid.to_uuid()
-            )),
+        let scene_status: Element<'_, Msg> = match &self.scene_load_status {
+            SceneLoadStatus::Ready => w::text("").into(),
+            SceneLoadStatus::Loading => w::text("Loading scene...").into(),
+            SceneLoadStatus::Loaded(scene) => w::column![
+                w::text(format!(
+                    "Loaded: {} (UUID: {})",
+                    scene.name,
+                    scene.uuid.to_uuid()
+                )),
+                view_messages(&scene.messages)
+            ]
+            .into(),
             SceneLoadStatus::NotFound(name) => {
-                w::text(format!("Scene '{}' not found", name))
+                w::text(format!("Scene '{}' not found", name)).into()
             }
-            SceneLoadStatus::Error(err) => w::text(format!("Error: {}", err)),
+            SceneLoadStatus::Error(err) => w::text(format!("Error: {}", err)).into(),
         };
 
-        let scene_section = w::column![w::text("Scene"), scene_input, scene_status]
-            .spacing(s::S1);
+        let scene_section = w::column![w::text("Scene"), scene_input, scene_status].spacing(s::S1);
 
-        let messages_view = self.view_messages();
-
-        w::column![scene_section, messages_view]
+        w::column![scene_section]
             .spacing(s::S4)
             .width(Length::Fill)
             .into()
-    }
-
-    fn view_messages(&self) -> Element<'_, Msg> {
-        match &self.messages_status {
-            MessagesStatus::Ready => {
-                w::column![
-                    w::text("Select people or a scene to view messages"),
-                    w::button("Load Messages").on_press(Msg::LoadMessages)
-                ]
-                .spacing(s::S1)
-                .into()
-            }
-            MessagesStatus::Loading => w::text("Loading messages...").into(),
-            MessagesStatus::Loaded(messages) => {
-                if messages.is_empty() {
-                    w::text("No messages found").into()
-                } else {
-                    let message_list = messages.iter().fold(w::column![], |col, msg| {
-                        col.push(w::text(format!("{}: {}", msg.sender, msg.content)))
-                    });
-
-                    w::scrollable(message_list)
-                        .width(Length::Fill)
-                        .height(Length::Fill)
-                        .into()
-                }
-            }
-            MessagesStatus::Error(err) => w::text(format!("Error: {}", err)).into(),
-        }
     }
 
     pub fn to_storage(&self) -> Storage {
@@ -301,5 +269,30 @@ impl Model {
             scene_name_input: self.scene_name_input.clone(),
             view_mode: self.view_mode,
         }
+    }
+}
+
+fn view_messages(messages_status: &MessagesStatus) -> Element<'_, Msg> {
+    match &messages_status {
+        MessagesStatus::Loading => w::text("Loading messages...").into(),
+        MessagesStatus::Loaded(messages) => {
+            if messages.is_empty() {
+                w::text("No messages found").into()
+            } else {
+                let message_list = messages.iter().fold(w::column![], |col, msg| {
+                    col.push(w::text(format!(
+                        "{}: {}",
+                        msg.sender.to_string(),
+                        msg.content
+                    )))
+                });
+
+                w::scrollable(message_list)
+                    .width(Length::Fill)
+                    .height(Length::Fill)
+                    .into()
+            }
+        }
+        MessagesStatus::Error(err) => w::text(format!("Error: {}", err)).into(),
     }
 }

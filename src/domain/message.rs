@@ -21,6 +21,15 @@ pub enum MessageSender {
     RealWorldUser, // Represents Chad or other real users
 }
 
+impl MessageSender {
+    pub fn to_string(&self) -> String {
+        match self {
+            MessageSender::AiPerson(person_uuid) => format!("AI Person {}", person_uuid.to_uuid()),
+            MessageSender::RealWorldUser => "Real World User".to_string(),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum MessageRecipient {
     Person(PersonUuid),
