@@ -22,7 +22,7 @@ pub struct Model {
 }
 
 #[derive(Debug, Clone)]
-pub struct LoadedScene {
+pub struct LoadedSceneModel {
     pub uuid: SceneUuid,
     pub name: String,
     pub description: Option<String>,
@@ -32,7 +32,7 @@ pub struct LoadedScene {
 enum SceneLoadStatus {
     Ready,
     Loading,
-    Loaded(LoadedScene),
+    Loaded(LoadedSceneModel),
     NotFound(String), // Scene name that wasn't found
     Error(String),
 }
@@ -132,7 +132,7 @@ impl Model {
                 Ok(Some(scene)) => {
                     let scene_uuid = scene.uuid.clone();
 
-                    let loaded_scene = LoadedScene {
+                    let loaded_scene = LoadedSceneModel {
                         uuid: scene.uuid,
                         name: scene.name,
                         description: scene.description,
