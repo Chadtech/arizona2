@@ -63,6 +63,22 @@ impl JobKind {
             JobKind::ProcessMessage(_) => "process message".to_string(),
         }
     }
+
+    pub fn to_data(&self) -> Result<Option<serde_json::Value>, String> {
+        match self {
+            JobKind::Ping => Ok(None),
+            JobKind::SendMessageToScene(job) => {
+                let data = serde_json::to_value(job)
+                    .map_err(|err| format!("Failed to serialize SendMessageToSceneJob: {}", err))?;
+                Ok(Some(data))
+            }
+            JobKind::ProcessMessage(job) => {
+                let data = serde_json::to_value(job)
+                    .map_err(|err| format!("Failed to serialize ProcessMessageJob: {}", err))?;
+                Ok(Some(data))
+            }
+        }
+    }
 }
 
 impl Display for JobUuid {

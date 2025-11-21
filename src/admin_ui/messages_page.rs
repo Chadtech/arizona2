@@ -1,7 +1,10 @@
 use super::s;
+use crate::capability::job::JobCapability;
 use crate::capability::message::MessageCapability;
 use crate::capability::scene::{Scene, SceneCapability};
-use crate::domain::message::Message;
+use crate::domain::job::send_message_to_scene::{RandomSeed, SendMessageToSceneJob};
+use crate::domain::job::JobKind;
+use crate::domain::message::{Message, MessageSender};
 use crate::domain::scene_uuid::SceneUuid;
 use crate::worker::Worker;
 use iced::{widget as w, Element, Length, Task};
@@ -16,6 +19,10 @@ pub struct Model {
     // For scene-based conversation view
     scene_name_input: String,
     scene_load_status: SceneLoadStatus,
+
+    // Message composition
+    message_input: String,
+    send_status: SendStatus,
 
     // View mode toggle
     view_mode: ViewMode,
@@ -57,6 +64,14 @@ enum MessagesStatus {
 }
 
 #[derive(Debug, Clone)]
+enum SendStatus {
+    Ready,
+    Sending,
+    Sent,
+    Error(String),
+}
+
+#[derive(Debug, Clone)]
 pub enum Msg {
     ViewModeChanged(ViewMode),
     Person1Selected(String),
@@ -65,6 +80,9 @@ pub enum Msg {
     LoadScene,
     SceneLoaded(Result<Option<Scene>, String>),
     MessagesLoaded(Result<Vec<Message>, String>),
+    MessageInputChanged(String),
+    SubmitMessage,
+    MessageSent(Result<(), String>),
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -97,6 +115,8 @@ impl Model {
             selected_person_2: storage.selected_person_2.clone(),
             scene_name_input: storage.scene_name_input.clone(),
             scene_load_status: SceneLoadStatus::Ready,
+            message_input: String::new(),
+            send_status: SendStatus::Ready,
             view_mode: storage.view_mode,
         }
     }
@@ -164,6 +184,63 @@ impl Model {
                         Ok(messages) => MessagesStatus::Loaded(messages),
                         Err(err) => MessagesStatus::Error(err),
                     };
+                }
+                Task::none()
+            }
+            Msg::MessageInputChanged(content) => {
+                self.message_input = content;
+                self.send_status = SendStatus::Ready;
+                Task::none()
+            }
+            Msg::SubmitMessage => {
+                // Only allow sending if we have a loaded scene and message content
+                if let SceneLoadStatus::Loaded(scene) = &self.scene_load_status {
+                    if self.message_input.trim().is_empty() {
+                        return Task::none();
+                    }
+
+                    let job = SendMessageToSceneJob {
+                        sender: MessageSender::RealWorldUser,
+                        scene_uuid: scene.uuid.clone(),
+                        content: self.message_input.clone(),
+                        random_seed: RandomSeed::new(rand::random()),
+                    };
+
+                    self.send_status = SendStatus::Sending;
+
+                    Task::perform(
+                        async move {
+                            worker.unshift_job(JobKind::SendMessageToScene(job)).await
+                        },
+                        Msg::MessageSent,
+                    )
+                } else {
+                    Task::none()
+                }
+            }
+            Msg::MessageSent(result) => {
+                match result {
+                    Ok(_) => {
+                        self.send_status = SendStatus::Sent;
+                        self.message_input.clear();
+
+                        // Reload messages after a brief moment to show the newly sent message
+                        if let SceneLoadStatus::Loaded(scene) = &mut self.scene_load_status {
+                            scene.messages = MessagesStatus::Loading;
+                            let scene_uuid = scene.uuid.clone();
+                            return Task::perform(
+                                async move {
+                                    // Small delay to allow the job to process
+                                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                                    worker.get_messages_in_scene(&scene_uuid).await
+                                },
+                                Msg::MessagesLoaded,
+                            );
+                        }
+                    }
+                    Err(err) => {
+                        self.send_status = SendStatus::Error(err);
+                    }
                 }
                 Task::none()
             }
@@ -239,15 +316,21 @@ impl Model {
         let scene_status: Element<'_, Msg> = match &self.scene_load_status {
             SceneLoadStatus::Ready => w::text("").into(),
             SceneLoadStatus::Loading => w::text("Loading scene...").into(),
-            SceneLoadStatus::Loaded(scene) => w::column![
-                w::text(format!(
-                    "Loaded: {} (UUID: {})",
-                    scene.name,
-                    scene.uuid.to_uuid()
-                )),
-                view_messages(&scene.messages)
-            ]
-            .into(),
+            SceneLoadStatus::Loaded(scene) => {
+                let message_composer = self.view_message_composer();
+
+                w::column![
+                    w::text(format!(
+                        "Loaded: {} (UUID: {})",
+                        scene.name,
+                        scene.uuid.to_uuid()
+                    )),
+                    view_messages(&scene.messages),
+                    message_composer
+                ]
+                .spacing(s::S4)
+                .into()
+            }
             SceneLoadStatus::NotFound(name) => {
                 w::text(format!("Scene '{}' not found", name)).into()
             }
@@ -260,6 +343,35 @@ impl Model {
             .spacing(s::S4)
             .width(Length::Fill)
             .into()
+    }
+
+    fn view_message_composer(&self) -> Element<'_, Msg> {
+        let input = w::text_input("Type your message...", &self.message_input)
+            .on_input(Msg::MessageInputChanged)
+            .on_submit(Msg::SubmitMessage)
+            .width(Length::Fill);
+
+        let send_button = match &self.send_status {
+            SendStatus::Ready | SendStatus::Sent => {
+                w::button("Send").on_press(Msg::SubmitMessage)
+            }
+            SendStatus::Sending => w::button("Sending..."),
+            SendStatus::Error(_) => w::button("Send").on_press(Msg::SubmitMessage),
+        };
+
+        let status_text: Element<'_, Msg> = match &self.send_status {
+            SendStatus::Ready => w::text("").into(),
+            SendStatus::Sending => w::text("Sending...").into(),
+            SendStatus::Sent => w::text("Message sent!").into(),
+            SendStatus::Error(err) => w::text(format!("Error: {}", err)).into(),
+        };
+
+        w::column![
+            w::row![input, send_button].spacing(s::S1),
+            status_text
+        ]
+        .spacing(s::S1)
+        .into()
     }
 
     pub fn to_storage(&self) -> Storage {

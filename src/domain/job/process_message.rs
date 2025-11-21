@@ -4,8 +4,9 @@ use crate::{
     domain::{message_uuid::MessageUuid, scene_uuid::SceneUuid},
     nice_display::NiceDisplay,
 };
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProcessMessageJob {
     pub message_uuid: MessageUuid,
 }

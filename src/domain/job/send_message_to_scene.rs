@@ -24,6 +24,10 @@ pub struct SendMessageToSceneJob {
 pub struct RandomSeed(u64);
 
 impl RandomSeed {
+    pub fn new(seed: u64) -> Self {
+        Self(seed)
+    }
+
     pub fn value(&self) -> u64 {
         self.0
     }

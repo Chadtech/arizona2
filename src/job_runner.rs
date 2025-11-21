@@ -103,7 +103,7 @@ async fn run_next_job<W: JobCapability + MessageCapability + SceneCapability>(
 mod tests {
     use super::*;
     use crate::capability::job::JobCapability;
-    use crate::capability::message::MessageCapability;
+    use crate::capability::message::{MessageCapability, NewMessage};
     use crate::capability::scene::{
         CurrentScene, NewScene, NewSceneSnapshot, Scene, SceneCapability, SceneParticipant,
     };

@@ -9,13 +9,17 @@ use sqlx::Row;
 impl JobCapability for Worker {
     async fn unshift_job(&self, job: JobKind) -> Result<(), String> {
         let job_uuid = JobUuid::new();
+        let job_name = job.to_name();
+        let job_data = job.to_data()?;
+
         sqlx::query!(
             r#"
-				INSERT INTO job (uuid, name)
-				VALUES ($1::UUID, $2::TEXT);
+				INSERT INTO job (uuid, name, data)
+				VALUES ($1::UUID, $2::TEXT, $3::JSONB);
 			"#,
             job_uuid.to_uuid()?,
-            job.to_name()
+            job_name,
+            job_data
         )
         .execute(&self.sqlx)
         .await
