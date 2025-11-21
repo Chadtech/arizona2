@@ -139,6 +139,19 @@ impl JobCapability for Worker {
     }
 
     async fn mark_job_failed(&self, job_uuid: &JobUuid, details: &str) -> Result<(), String> {
-        todo!()
+        sqlx::query!(
+            r#"
+                UPDATE job
+                SET error = $2::TEXT
+                WHERE uuid = $1::UUID;
+            "#,
+            job_uuid.to_uuid()?,
+            details
+        )
+        .execute(&self.sqlx)
+        .await
+        .map_err(|err| format!("Error marking job as failed: {}", err))?;
+
+        Ok(())
     }
 }
