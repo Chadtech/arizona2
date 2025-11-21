@@ -1,19 +1,21 @@
 use crate::capability::job::JobCapability;
 use crate::capability::message::MessageCapability;
 use crate::capability::scene::SceneCapability;
-use crate::domain::job::{process_message, send_message_to_scene, JobKind};
+use crate::domain::job::{process_message, send_message_to_scene, JobKind, PoppedJob};
+use crate::domain::job_uuid::JobUuid;
 use crate::nice_display::NiceDisplay;
 use crate::worker;
 use crate::worker::Worker;
 
 pub enum Error {
     WorkerInitError(worker::InitError),
-    RunJobError(RunJobError),
+    PopJobError(String),
+    RunJobError((JobUuid, RunJobError)),
 }
 
 pub enum RunJobError {
-    FailedToPopJob(String),
     FailedToMarkJobFinished(String),
+    FailedToMarkJobFailed(String),
     ProcessMessageError(process_message::Error),
     SendMessageToSceneError(send_message_to_scene::Error),
 }
@@ -25,16 +27,26 @@ impl NiceDisplay for Error {
                 format!("Worker initialization error\n{}", err.message())
             }
             Error::RunJobError(err) => err.message(),
+            Error::PopJobError(err) => {
+                format!("Failed to pop next job\n{}", err)
+            }
         }
+    }
+}
+
+impl NiceDisplay for (JobUuid, RunJobError) {
+    fn message(&self) -> String {
+        let (job_uuid, err) = self;
+
+        let err_msg = err.to_nice_error().to_string();
+
+        format!("I failed to run job {}\n{}", job_uuid, err_msg)
     }
 }
 
 impl NiceDisplay for RunJobError {
     fn message(&self) -> String {
         match self {
-            RunJobError::FailedToPopJob(err) => {
-                format!("Failed to pop next job\n{}", err)
-            }
             RunJobError::FailedToMarkJobFinished(err) => {
                 format!(
                     "I ran into the following problem trying to mark the job as finished\n{}",
@@ -47,56 +59,68 @@ impl NiceDisplay for RunJobError {
             RunJobError::SendMessageToSceneError(err) => {
                 format!("Error sending message to scene job\n{}", err.message())
             }
+            RunJobError::FailedToMarkJobFailed(err) => {
+                format!(
+                    "I ran into the following problem trying to mark the job as failed\n{}",
+                    err
+                )
+            }
         }
     }
 }
 pub async fn run() -> Result<(), Error> {
     let worker = Worker::new().await.map_err(Error::WorkerInitError)?;
     loop {
-        run_next_job(worker.clone())
-            .await
-            .map_err(Error::RunJobError)?;
+        run_next_job(worker.clone()).await?;
     }
 }
 
 async fn run_next_job<W: JobCapability + MessageCapability + SceneCapability>(
     worker: W,
-) -> Result<(), RunJobError> {
-    let job = match worker
-        .pop_next_job()
-        .await
-        .map_err(RunJobError::FailedToPopJob)?
-    {
+) -> Result<(), Error> {
+    let job = match worker.pop_next_job().await.map_err(Error::PopJobError)? {
         Some(j) => j,
         None => {
             return Ok(());
         }
     };
 
-    match job.kind {
+    let job_uuid = job.uuid.clone();
+
+    run_job(worker, job)
+        .await
+        .map_err(|err| Error::RunJobError((job_uuid, err)))
+}
+
+async fn run_job<W: JobCapability + MessageCapability + SceneCapability>(
+    worker: W,
+    job: PoppedJob,
+) -> Result<(), RunJobError> {
+    let res: Result<(), RunJobError> = match job.kind {
         JobKind::Ping => {
             println!("Pong");
+            Ok(())
         }
-        JobKind::SendMessageToScene(job_data) => {
-            job_data
-                .run(&worker)
-                .await
-                .map_err(RunJobError::SendMessageToSceneError)?;
-        }
-        JobKind::ProcessMessage(process_message_job) => {
-            process_message_job
-                .run(&worker)
-                .await
-                .map_err(RunJobError::ProcessMessageError)?;
-        }
+        JobKind::SendMessageToScene(job_data) => job_data
+            .run(&worker)
+            .await
+            .map_err(RunJobError::SendMessageToSceneError),
+        JobKind::ProcessMessage(process_message_job) => process_message_job
+            .run(&worker)
+            .await
+            .map_err(RunJobError::ProcessMessageError),
+    };
+
+    match res {
+        Ok(_) => worker
+            .mark_job_finished(&job.uuid)
+            .await
+            .map_err(RunJobError::FailedToMarkJobFinished),
+        Err(err) => worker
+            .mark_job_failed(&job.uuid, err.to_nice_error().to_string().as_str())
+            .await
+            .map_err(RunJobError::FailedToMarkJobFailed),
     }
-
-    worker
-        .mark_job_finished(&job.uuid)
-        .await
-        .map_err(RunJobError::FailedToMarkJobFinished)?;
-
-    Ok(())
 }
 
 #[cfg(test)]

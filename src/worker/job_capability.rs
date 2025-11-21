@@ -137,4 +137,8 @@ impl JobCapability for Worker {
 
         Ok(())
     }
+
+    async fn mark_job_failed(&self, job_uuid: &JobUuid, details: &str) -> Result<(), String> {
+        todo!()
+    }
 }
