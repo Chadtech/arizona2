@@ -157,7 +157,7 @@ impl JobKind {
     ) -> Result<JobKind, ParseError> {
         match name.as_str() {
             "ping" => Ok(JobKind::Ping),
-            "send message" => match maybe_data {
+            "send message to scene" => match maybe_data {
                 None => Err(ParseError::NoJobDataForJobThatReuiresIt { job_name: name }),
                 Some(data) => {
                     let job: SendMessageToSceneJob =
@@ -169,6 +169,19 @@ impl JobKind {
                         })?;
 
                     Ok(JobKind::SendMessageToScene(job))
+                }
+            },
+            "process message" => match maybe_data {
+                None => Err(ParseError::NoJobDataForJobThatReuiresIt { job_name: name }),
+                Some(data) => {
+                    let job: ProcessMessageJob = serde_json::from_value(data).map_err(|error| {
+                        ParseError::FailedToParseJobData {
+                            job_name: name.clone(),
+                            details: error.to_string(),
+                        }
+                    })?;
+
+                    Ok(JobKind::ProcessMessage(job))
                 }
             },
             _ => Err(ParseError::UnknownJobName(name)),

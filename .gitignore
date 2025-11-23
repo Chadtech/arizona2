@@ -2,3 +2,4 @@
 .env
 .idea/
 /storage.json
+/logs

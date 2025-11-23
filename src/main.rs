@@ -54,21 +54,66 @@ impl NiceDisplay for Error {
     }
 }
 
+impl Cmd {
+    fn log_file_name(&self) -> &str {
+        match self {
+            Cmd::Run => "server",
+            Cmd::NewMigration { .. } => "migrations",
+            Cmd::RunMigrations => "migrations",
+            Cmd::AdminUi => "admin-ui",
+            Cmd::RunJobRunner => "job-runner",
+        }
+    }
+}
+
 #[actix_web::main]
 async fn main() -> Result<(), String> {
-    tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::ERROR)
+    use tracing_subscriber::layer::SubscriberExt;
+    use tracing_subscriber::util::SubscriberInitExt;
+
+    // Parse command first to determine log file name
+    let cmd = Cmd::parse();
+    let log_file_name = format!("arizona2-{}.log", cmd.log_file_name());
+
+    // Create logs directory if it doesn't exist
+    std::fs::create_dir_all("logs").ok();
+
+    // File appender - each process writes to its own log file
+    let file_appender = tracing_appender::rolling::daily("logs", log_file_name);
+    let (non_blocking_file, _guard) = tracing_appender::non_blocking(file_appender);
+
+    // File layer - captures everything (debug and above)
+    let file_layer = tracing_subscriber::fmt::layer()
+        .with_writer(non_blocking_file)
+        .with_ansi(false) // No color codes in file
+        .with_target(true)
+        .with_line_number(true);
+
+    // Console layer - shows info and above
+    let console_layer = tracing_subscriber::fmt::layer()
+        .with_writer(std::io::stdout)
+        .with_target(false);
+
+    // Environment filter - defaults to "warn" for everything except job_runner
+    // Job runner gets "info" level, admin_ui stays at "warn"
+    // cosmic_text warnings suppressed (font loading warnings are harmless)
+    // Can be overridden with RUST_LOG env var
+    let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("warn,arizona2::job_runner=info,cosmic_text=error"));
+
+    tracing_subscriber::registry()
+        .with(env_filter)
+        .with(file_layer)
+        .with(console_layer)
         .init();
 
-    nice_main()
+    nice_main(cmd)
         .await
         .map_err(|err| err.to_nice_error().to_string())
 }
 
-async fn nice_main() -> Result<(), Error> {
+async fn nice_main(cmd: Cmd) -> Result<(), Error> {
     dotenv::dotenv().map_err(Error::EnvVars)?;
-
-    let cmd = Cmd::parse();
 
     match cmd {
         Cmd::Run => run_server().await.map_err(Error::ActixWeb),

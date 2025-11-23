@@ -70,8 +70,12 @@ impl NiceDisplay for RunJobError {
 }
 pub async fn run() -> Result<(), Error> {
     let worker = Worker::new().await.map_err(Error::WorkerInitError)?;
+    tracing::info!("Job runner started, polling for jobs");
     loop {
-        run_next_job(worker.clone()).await?;
+        if let Err(err) = run_next_job(worker.clone()).await {
+            // Log the error but continue processing other jobs
+            tracing::error!("Job runner error: {}", err.to_nice_error().to_string());
+        }
     }
 }
 
@@ -86,6 +90,7 @@ async fn run_next_job<W: JobCapability + MessageCapability + SceneCapability>(
     };
 
     let job_uuid = job.uuid.clone();
+    tracing::info!("Processing job {} of type {:?}", job_uuid, job.kind);
 
     run_job(worker, job)
         .await
@@ -98,28 +103,45 @@ async fn run_job<W: JobCapability + MessageCapability + SceneCapability>(
 ) -> Result<(), RunJobError> {
     let res: Result<(), RunJobError> = match job.kind {
         JobKind::Ping => {
+            tracing::debug!("Ping job received");
             println!("Pong");
             Ok(())
         }
-        JobKind::SendMessageToScene(job_data) => job_data
-            .run(&worker)
-            .await
-            .map_err(RunJobError::SendMessageToSceneError),
-        JobKind::ProcessMessage(process_message_job) => process_message_job
-            .run(&worker)
-            .await
-            .map_err(RunJobError::ProcessMessageError),
+        JobKind::SendMessageToScene(job_data) => {
+            tracing::debug!("Executing SendMessageToScene job");
+            job_data
+                .run(&worker)
+                .await
+                .map_err(RunJobError::SendMessageToSceneError)
+        }
+        JobKind::ProcessMessage(process_message_job) => {
+            tracing::debug!("Executing ProcessMessage job");
+            process_message_job
+                .run(&worker)
+                .await
+                .map_err(RunJobError::ProcessMessageError)
+        }
     };
 
     match res {
-        Ok(_) => worker
-            .mark_job_finished(&job.uuid)
-            .await
-            .map_err(RunJobError::FailedToMarkJobFinished),
-        Err(err) => worker
-            .mark_job_failed(&job.uuid, err.to_nice_error().to_string().as_str())
-            .await
-            .map_err(RunJobError::FailedToMarkJobFailed),
+        Ok(_) => {
+            tracing::info!("Job {} completed successfully", job.uuid);
+            worker
+                .mark_job_finished(&job.uuid)
+                .await
+                .map_err(RunJobError::FailedToMarkJobFinished)
+        }
+        Err(ref err) => {
+            tracing::error!(
+                "Job {} failed: {}",
+                job.uuid,
+                err.to_nice_error().to_string()
+            );
+            worker
+                .mark_job_failed(&job.uuid, err.to_nice_error().to_string().as_str())
+                .await
+                .map_err(RunJobError::FailedToMarkJobFailed)
+        }
     }
 }
 

@@ -18,7 +18,8 @@ dotenv = "0.15.0"
 iced = { version = "0.13.0", features = ["tokio"] }
 reqwest = { version = "0.12", features = ["blocking", "json", "rustls-tls"] }
 pgvector = { version = "0.4", features = ["postgres"] }
-tracing-subscriber = "0.3"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tracing = "0.1"
+tracing-appender = "0.2"
 time = "0.3.41"
 rand = { version = "0.8", features = ["small_rng"] }
