@@ -4,6 +4,7 @@ mod memory_page;
 mod messages_page;
 mod new_identity_page;
 mod new_person_page;
+mod reaction_page;
 mod scene_page;
 mod scene_timeline;
 mod state_of_mind_page;
@@ -12,7 +13,6 @@ mod style;
 use self::style as s;
 use crate::nice_display::NiceDisplay;
 use crate::open_ai::completion::CompletionError;
-use crate::person_actions::PersonAction;
 use crate::worker;
 use crate::worker::Worker;
 use iced;
@@ -27,12 +27,7 @@ const STORAGE_FILE_PATH: &str = "storage.json";
 
 struct Model {
     prompt_field: String,
-    identity_field: String,
     prompt_status: PromptStatus,
-    memory_fields: Vec<w::text_editor::Content>,
-    situation_field: String,
-    state_of_mind_field: String,
-    reaction_status: ReactionStatus,
     new_identity_page: new_identity_page::Model,
     new_person_page: new_person_page::Model,
     memory_page: memory_page::Model,
@@ -40,6 +35,7 @@ struct Model {
     state_of_mind_page: state_of_mind_page::Model,
     scene_page: scene_page::Model,
     job_page: job_page::Model,
+    reaction_page: reaction_page::Model,
     tab: Tab,
     worker: Arc<Worker>,
     error: Option<Error>,
@@ -49,14 +45,6 @@ impl Model {
     pub fn to_storage(&self) -> Storage {
         Storage {
             prompt: self.prompt_field.clone(),
-            memories: self
-                .memory_fields
-                .iter()
-                .map(|editor_content| editor_content.text())
-                .collect(),
-            identity_field: self.identity_field.clone(),
-            situation_field: self.situation_field.clone(),
-            state_of_mind_field: self.state_of_mind_field.clone(),
             new_identity: self.new_identity_page.to_storage(),
             new_person: self.new_person_page.to_storage(),
             memory: self.memory_page.to_storage(),
@@ -64,6 +52,7 @@ impl Model {
             state_of_mind: self.state_of_mind_page.to_storage(),
             scene: self.scene_page.to_storage(),
             job: self.job_page.to_storage(),
+            reaction: self.reaction_page.to_storage(),
             tab: self.tab.clone(),
         }
     }
@@ -75,25 +64,11 @@ enum PromptStatus {
     Error(CompletionError),
 }
 
-enum ReactionStatus {
-    Ready,
-    Response(Vec<PersonAction>),
-    Error(CompletionError),
-}
-
 #[derive(Serialize, Deserialize, Debug)]
 struct Storage {
     prompt: String,
     #[serde(default)]
-    memories: Vec<String>,
-    #[serde(default)]
-    identity_field: String,
-    #[serde(default)]
     tab: Tab,
-    #[serde(default)]
-    situation_field: String,
-    #[serde(default)]
-    state_of_mind_field: String,
     #[serde(default)]
     new_identity: new_identity_page::Storage,
     #[serde(default)]
@@ -108,6 +83,8 @@ struct Storage {
     scene: scene_page::Storage,
     #[serde(default)]
     job: job_page::Storage,
+    #[serde(default)]
+    reaction: reaction_page::Storage,
 }
 
 impl Storage {
@@ -147,11 +124,7 @@ impl Storage {
     pub fn default() -> Self {
         Storage {
             prompt: String::new(),
-            memories: Vec::new(),
-            identity_field: String::new(),
             tab: Tab::default(),
-            situation_field: String::new(),
-            state_of_mind_field: String::new(),
             new_identity: new_identity_page::Storage::default(),
             new_person: new_person_page::Storage::default(),
             memory: memory_page::Storage::default(),
@@ -159,6 +132,7 @@ impl Storage {
             state_of_mind: state_of_mind_page::Storage::default(),
             scene: scene_page::Storage::default(),
             job: job_page::Storage::default(),
+            reaction: reaction_page::Storage::default(),
         }
     }
 }
@@ -240,18 +214,8 @@ impl Flags {
 enum Msg {
     PromptFieldChanged(String),
     ClickedSubmitPrompt,
-    ClickedAddMemory,
     SubmissionResult(Result<String, CompletionError>),
-    MemoryUpdated {
-        index: usize,
-        action: w::text_editor::Action,
-    },
-    IdentityFieldChanged(String),
     TabSelected(Tab),
-    ClickedSubmitReaction,
-    SituationFieldChanged(String),
-    StateOfMindFieldChanged(String),
-    ReactionSubmissionResult(Result<Vec<PersonAction>, CompletionError>),
     NewIdentityPageMsg(new_identity_page::Msg),
     NewPersonPageMsg(new_person_page::Msg),
     MemoryPageMsg(memory_page::Msg),
@@ -259,6 +223,7 @@ enum Msg {
     StateOfMindPageMsg(state_of_mind_page::Msg),
     SceneMsg(scene_page::Msg),
     JobPageMsg(job_page::Msg),
+    ReactionPageMsg(reaction_page::Msg),
     WarmedUpDb,
 }
 
@@ -297,23 +262,14 @@ impl Model {
 
         let model = Model {
             prompt_field: flags.storage.prompt,
-            identity_field: flags.storage.identity_field,
             prompt_status: PromptStatus::Ready,
-            memory_fields: flags
-                .storage
-                .memories
-                .iter()
-                .map(|content_str| w::text_editor::Content::with_text(content_str))
-                .collect(),
-            situation_field: flags.storage.situation_field,
-            state_of_mind_field: flags.storage.state_of_mind_field,
             new_identity_page: new_identity_page::Model::new(&flags.storage.new_identity),
             new_person_page: new_person_page::Model::new(&flags.storage.new_person),
             memory_page: memory_page::Model::new(&flags.storage.memory),
             messages_page: messages_page::Model::new(&flags.storage.messages),
             scene_page: scene_page::Model::new(&flags.storage.scene),
             job_page: job_page::Model::new(&flags.storage.job),
-            reaction_status: ReactionStatus::Ready,
+            reaction_page: reaction_page::Model::new(&flags.storage.reaction),
             tab,
             worker: Arc::new(flags.worker),
             error: None,
@@ -366,37 +322,6 @@ impl Model {
 
                 Task::none()
             }
-            Msg::ClickedAddMemory => {
-                self.memory_fields.push(w::text_editor::Content::new());
-
-                // Save the updated memories to the file system
-                if let Err(err) = self.to_storage().save_to_file_system() {
-                    self.error = Some(err);
-                }
-
-                Task::none()
-            }
-            Msg::MemoryUpdated { index, action } => {
-                if let Some(memory) = self.memory_fields.get_mut(index) {
-                    memory.perform(action);
-
-                    // Save the updated memories to the file system
-                    if let Err(err) = self.to_storage().save_to_file_system() {
-                        self.error = Some(err);
-                    }
-                }
-
-                Task::none()
-            }
-            Msg::IdentityFieldChanged(new_field) => {
-                self.identity_field = new_field;
-
-                if let Err(err) = self.to_storage().save_to_file_system() {
-                    self.error = Some(err);
-                }
-
-                Task::none()
-            }
             Msg::TabSelected(tab) => {
                 self.tab = tab.clone();
 
@@ -405,54 +330,6 @@ impl Model {
                 }
 
                 self.tab.init_task(&self.worker)
-            }
-            Msg::ClickedSubmitReaction => {
-                let open_ai_key = self.worker.open_ai_key.clone();
-                let memories: Vec<String> = self
-                    .memory_fields
-                    .iter()
-                    .map(|editor_content| editor_content.text())
-                    .collect();
-                let person_identity = self.identity_field.clone();
-                let situation = self.situation_field.clone();
-                let state_of_mind = self.state_of_mind_field.clone();
-
-                Task::perform(
-                    call::submit_reaction(
-                        open_ai_key,
-                        memories,
-                        person_identity,
-                        situation,
-                        state_of_mind,
-                    ),
-                    Msg::ReactionSubmissionResult,
-                )
-            }
-            Msg::SituationFieldChanged(new_field) => {
-                self.situation_field = new_field;
-
-                if let Err(err) = self.to_storage().save_to_file_system() {
-                    self.error = Some(err);
-                }
-
-                Task::none()
-            }
-            Msg::StateOfMindFieldChanged(new_field) => {
-                self.state_of_mind_field = new_field;
-
-                if let Err(err) = self.to_storage().save_to_file_system() {
-                    self.error = Some(err);
-                }
-
-                Task::none()
-            }
-            Msg::ReactionSubmissionResult(result) => {
-                self.reaction_status = match result {
-                    Ok(response) => ReactionStatus::Response(response.clone()),
-                    Err(err) => ReactionStatus::Error(err.clone()),
-                };
-
-                Task::none()
             }
             Msg::NewIdentityPageMsg(sub_msg) => {
                 let task = self.new_identity_page.update(self.worker.clone(), sub_msg);
@@ -518,21 +395,19 @@ impl Model {
 
                 task.map(Msg::JobPageMsg)
             }
+            Msg::ReactionPageMsg(sub_msg) => {
+                let task = self.reaction_page.update(self.worker.clone(), sub_msg);
+
+                if let Err(err) = self.to_storage().save_to_file_system() {
+                    self.error = Some(err);
+                }
+
+                task.map(Msg::ReactionPageMsg)
+            }
         }
     }
 
     fn view(&self) -> Element<'_, Msg> {
-        let mut memories_children: Vec<Element<_>> = vec![];
-
-        for (i, memory) in self.memory_fields.iter().enumerate() {
-            let memories_editor = w::text_editor(memory).on_action(move |act| Msg::MemoryUpdated {
-                index: i,
-                action: act,
-            });
-
-            memories_children.push(memories_editor.into());
-        }
-
         let tabs = Tab::all()
             .iter()
             .map(|tab: &Tab| {
@@ -567,43 +442,7 @@ impl Model {
                 ]
                 .into()
             }
-            Tab::Reaction => {
-                let reaction_response_view: Element<Msg> = match &self.reaction_status {
-                    ReactionStatus::Ready => w::Column::new().into(),
-                    ReactionStatus::Response(response) => {
-                        w::Column::with_children(
-                            response
-                                .iter()
-                                .map(|action| w::text(format!("Action: {:#?}", action)).into())
-                                .collect::<Vec<_>>(),
-                        )
-                        .into()
-                        // w::text(format!("Response: {}", response)).into()
-                    }
-                    ReactionStatus::Error(err) => {
-                        w::text(format!("Error: {}", err.to_nice_error().to_string())).into()
-                    }
-                };
-
-                w::column![
-                    w::text("Identity"),
-                    w::text_input("Identity", &self.identity_field)
-                        .on_input(Msg::IdentityFieldChanged),
-                    w::text("Memories"),
-                    w::Column::with_children(memories_children).spacing(s::S4),
-                    w::button("Add Memory").on_press(Msg::ClickedAddMemory),
-                    w::text("Situation"),
-                    w::text_input("Situation", &self.situation_field)
-                        .on_input(|field| { Msg::SituationFieldChanged(field) }),
-                    w::text("State of Mind"),
-                    w::text_input("State of Mind", &self.state_of_mind_field)
-                        .on_input(|field| { Msg::StateOfMindFieldChanged(field) }),
-                    w::button("Submit Reaction").on_press(Msg::ClickedSubmitReaction),
-                    reaction_response_view,
-                ]
-                .spacing(s::S4)
-                .into()
-            }
+            Tab::Reaction => self.reaction_page.view().map(Msg::ReactionPageMsg),
             Tab::Identity => self.new_identity_page.view().map(Msg::NewIdentityPageMsg),
             Tab::Person => self.new_person_page.view().map(Msg::NewPersonPageMsg),
             Tab::Memory => self.memory_page.view().map(Msg::MemoryPageMsg),

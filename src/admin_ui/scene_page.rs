@@ -48,7 +48,7 @@ enum NewSceneStatus {
 }
 
 #[derive(Debug, Clone)]
-struct SceneAggregate {
+pub struct SceneAggregate {
     scene: Scene,
     participants: Vec<SceneParticipant>,
 }
@@ -86,7 +86,7 @@ pub enum Msg {
 }
 
 #[derive(Debug, Clone)]
-enum SceneLookUpMsg {
+pub enum SceneLookUpMsg {
     NewParticipantFieldChanged(String),
     ClickedAddParticipant,
     AddedParticipant(Result<SceneParticipantUuid, String>),

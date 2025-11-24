@@ -57,7 +57,7 @@ impl Default for ViewMode {
 }
 
 #[derive(Debug, Clone)]
-enum MessagesStatus {
+pub enum MessagesStatus {
     Loading,
     Loaded(Vec<Message>),
     Error(String),
@@ -209,9 +209,7 @@ impl Model {
                     self.send_status = SendStatus::Sending;
 
                     Task::perform(
-                        async move {
-                            worker.unshift_job(JobKind::SendMessageToScene(job)).await
-                        },
+                        async move { worker.unshift_job(JobKind::SendMessageToScene(job)).await },
                         Msg::MessageSent,
                     )
                 } else {
@@ -319,12 +317,18 @@ impl Model {
             SceneLoadStatus::Loaded(scene) => {
                 let message_composer = self.view_message_composer();
 
+                let description_view: Element<'_, Msg> = match &scene.description {
+                    Some(desc) => w::text(desc).into(),
+                    None => w::text("").into(),
+                };
+
                 w::column![
                     w::text(format!(
                         "Loaded: {} (UUID: {})",
                         scene.name,
                         scene.uuid.to_uuid()
                     )),
+                    description_view,
                     view_messages(&scene.messages),
                     message_composer
                 ]
@@ -352,9 +356,7 @@ impl Model {
             .width(Length::Fill);
 
         let send_button = match &self.send_status {
-            SendStatus::Ready | SendStatus::Sent => {
-                w::button("Send").on_press(Msg::SubmitMessage)
-            }
+            SendStatus::Ready | SendStatus::Sent => w::button("Send").on_press(Msg::SubmitMessage),
             SendStatus::Sending => w::button("Sending..."),
             SendStatus::Error(_) => w::button("Send").on_press(Msg::SubmitMessage),
         };
@@ -366,12 +368,9 @@ impl Model {
             SendStatus::Error(err) => w::text(format!("Error: {}", err)).into(),
         };
 
-        w::column![
-            w::row![input, send_button].spacing(s::S1),
-            status_text
-        ]
-        .spacing(s::S1)
-        .into()
+        w::column![w::row![input, send_button].spacing(s::S1), status_text]
+            .spacing(s::S1)
+            .into()
     }
 
     pub fn to_storage(&self) -> Storage {
