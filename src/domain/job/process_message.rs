@@ -1,7 +1,7 @@
 use crate::domain::message::MessageRecipient;
 use crate::{
     capability::{message::MessageCapability, scene::SceneCapability},
-    domain::{message_uuid::MessageUuid, scene_uuid::SceneUuid},
+    domain::message_uuid::MessageUuid,
     nice_display::NiceDisplay,
 };
 use serde::{Deserialize, Serialize};
