@@ -108,15 +108,6 @@ impl Job {
         })
     }
 
-    // Public getters to allow UI to render job information
-    pub fn kind(&self) -> &JobKind {
-        &self.kind
-    }
-
-    pub fn uuid(&self) -> &JobUuid {
-        &self.uuid
-    }
-
     pub fn to_info_string(&self) -> String {
         let status_string = match self.finished_at {
             Some(ts) => {

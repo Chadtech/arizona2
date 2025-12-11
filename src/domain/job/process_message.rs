@@ -14,10 +14,6 @@ pub struct ProcessMessageJob {
 pub enum Error {
     FailedToGetMessage(String),
     MessageNotFound,
-    FailedToGetSceneParticipants {
-        scene_uuid: SceneUuid,
-        details: String,
-    },
 }
 
 impl NiceDisplay for Error {
@@ -27,16 +23,6 @@ impl NiceDisplay for Error {
                 format!("Failed to get message: {}", details)
             }
             Error::MessageNotFound => "Message not found".to_string(),
-            Error::FailedToGetSceneParticipants {
-                scene_uuid,
-                details,
-            } => {
-                format!(
-                    "Failed to get participants for scene {}: {}",
-                    scene_uuid.to_uuid().to_string(),
-                    details
-                )
-            }
         }
     }
 }

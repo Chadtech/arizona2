@@ -329,6 +329,8 @@ fn scene_loaded_view(scene_model: &SceneModel) -> Element<'_, SceneLookUpMsg> {
     };
 
     w::column![
+        w::text("Scene Name"),
+        w::text(&scene_model.scene_name),
         w::text("Description"),
         w::text(description),
         w::text("Participants"),
