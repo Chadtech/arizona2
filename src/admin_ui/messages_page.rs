@@ -398,10 +398,7 @@ fn view_messages(messages_status: &MessagesStatus) -> Element<'_, Msg> {
                     )))
                 });
 
-                w::scrollable(message_list)
-                    .width(Length::Fill)
-                    .height(Length::Fill)
-                    .into()
+                w::scrollable(message_list).width(Length::Fill).into()
             }
         }
         MessagesStatus::Error(err) => w::text(format!("Error: {}", err)).into(),

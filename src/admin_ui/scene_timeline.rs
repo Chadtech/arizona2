@@ -48,7 +48,6 @@ impl Model {
 
             w::scrollable(timeline)
                 .width(Length::Fill)
-                .height(Length::Fill)
                 .into()
         }
     }
