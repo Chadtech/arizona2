@@ -39,10 +39,7 @@ impl MessageCapability for Worker {
         Ok(message_uuid)
     }
 
-    async fn get_messages_in_scene(
-        &self,
-        scene_uuid: &crate::domain::scene_uuid::SceneUuid,
-    ) -> Result<Vec<Message>, String> {
+    async fn get_messages_in_scene(&self, scene_uuid: &SceneUuid) -> Result<Vec<Message>, String> {
         let rows = sqlx::query!(
             r#"
                 SELECT uuid, sender_person_uuid, receiver_person_uuid, scene_uuid, content, sent_at, read_at

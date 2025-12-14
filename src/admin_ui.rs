@@ -6,7 +6,6 @@ mod new_identity_page;
 mod new_person_page;
 mod reaction_page;
 mod scene_page;
-mod scene_timeline;
 mod state_of_mind_page;
 mod style;
 

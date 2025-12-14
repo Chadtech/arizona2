@@ -282,7 +282,7 @@ mod tests {
             Ok(None)
         }
 
-        async fn get_scene_participants(
+        async fn get_scene_current_participants(
             &self,
             _scene_uuid: &SceneUuid,
         ) -> Result<Vec<SceneParticipant>, String> {

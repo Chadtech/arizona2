@@ -1,6 +1,6 @@
 use super::s;
 use crate::capability::job::JobCapability;
-use crate::capability::message::MessageCapability;
+use crate::capability::message::{self, MessageCapability};
 use crate::capability::scene::{Scene, SceneCapability};
 use crate::domain::job::send_message_to_scene::{RandomSeed, SendMessageToSceneJob};
 use crate::domain::job::JobKind;
@@ -10,6 +10,8 @@ use crate::worker::Worker;
 use iced::{widget as w, Element, Length, Task};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+
+mod scene_timeline;
 
 pub struct Model {
     // For direct message view between two people
@@ -59,7 +61,7 @@ impl Default for ViewMode {
 #[derive(Debug, Clone)]
 pub enum MessagesStatus {
     Loading,
-    Loaded(Vec<Message>),
+    Loaded(scene_timeline::Model),
     Error(String),
 }
 
@@ -79,10 +81,11 @@ pub enum Msg {
     SceneNameInputChanged(String),
     LoadScene,
     SceneLoaded(Result<Option<Scene>, String>),
-    MessagesLoaded(Result<Vec<Message>, String>),
+    TimelineLoaded(Result<scene_timeline::Model, String>),
     MessageInputChanged(String),
     SubmitMessage,
     MessageSent(Result<(), String>),
+    GotTimelineMsg(scene_timeline::Msg),
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -162,8 +165,8 @@ impl Model {
                     self.scene_load_status = SceneLoadStatus::Loaded(loaded_scene);
 
                     Task::perform(
-                        async move { worker.get_messages_in_scene(&scene_uuid).await },
-                        Msg::MessagesLoaded,
+                        async move { scene_timeline::Model::load(&worker, scene_uuid).await },
+                        Msg::TimelineLoaded,
                     )
                 }
                 Ok(None) => {
@@ -178,10 +181,10 @@ impl Model {
                     Task::none()
                 }
             },
-            Msg::MessagesLoaded(res) => {
+            Msg::TimelineLoaded(res) => {
                 if let SceneLoadStatus::Loaded(loaded_scene) = &mut self.scene_load_status {
                     loaded_scene.messages = match res {
-                        Ok(messages) => MessagesStatus::Loaded(messages),
+                        Ok(timeline_model) => MessagesStatus::Loaded(timeline_model),
                         Err(err) => MessagesStatus::Error(err),
                     };
                 }
@@ -230,14 +233,22 @@ impl Model {
                                 async move {
                                     // Small delay to allow the job to process
                                     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-                                    worker.get_messages_in_scene(&scene_uuid).await
+                                    scene_timeline::Model::load(&worker, scene_uuid).await
                                 },
-                                Msg::MessagesLoaded,
+                                Msg::TimelineLoaded,
                             );
                         }
                     }
                     Err(err) => {
                         self.send_status = SendStatus::Error(err);
+                    }
+                }
+                Task::none()
+            }
+            Msg::GotTimelineMsg(sub_msg) => {
+                if let SceneLoadStatus::Loaded(loaded_scene) = &mut self.scene_load_status {
+                    if let MessagesStatus::Loaded(timeline_model) = &mut loaded_scene.messages {
+                        return timeline_model.update(sub_msg).map(Msg::GotTimelineMsg);
                     }
                 }
                 Task::none()
@@ -386,21 +397,7 @@ impl Model {
 fn view_messages(messages_status: &MessagesStatus) -> Element<'_, Msg> {
     match &messages_status {
         MessagesStatus::Loading => w::text("Loading messages...").into(),
-        MessagesStatus::Loaded(messages) => {
-            if messages.is_empty() {
-                w::text("No messages found").into()
-            } else {
-                let message_list = messages.iter().fold(w::column![], |col, msg| {
-                    col.push(w::text(format!(
-                        "{}: {}",
-                        msg.sender.to_string(),
-                        msg.content
-                    )))
-                });
-
-                w::scrollable(message_list).width(Length::Fill).into()
-            }
-        }
+        MessagesStatus::Loaded(timeline_model) => timeline_model.view().map(Msg::GotTimelineMsg),
         MessagesStatus::Error(err) => w::text(format!("Error: {}", err)).into(),
     }
 }

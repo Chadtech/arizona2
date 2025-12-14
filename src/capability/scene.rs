@@ -1,7 +1,9 @@
 use crate::domain::actor_uuid::ActorUuid;
+use crate::domain::person_uuid::PersonUuid;
 use crate::domain::scene_participant_uuid::SceneParticipantUuid;
 use crate::domain::{person_name::PersonName, scene_uuid::SceneUuid};
 use async_trait::async_trait;
+use chrono::{DateTime, Utc};
 
 pub struct NewScene {
     pub name: String,
@@ -24,6 +26,12 @@ pub struct Scene {
 pub struct SceneParticipant {
     pub person_name: PersonName,
     pub actor_uuid: ActorUuid,
+}
+
+pub struct SceneParticipation {
+    pub person_uuid: PersonUuid,
+    pub joined_at: DateTime<Utc>,
+    pub left_at: Option<DateTime<Utc>>,
 }
 
 pub struct CurrentScene {
@@ -53,8 +61,12 @@ pub trait SceneCapability {
         new_scene_snapshot: NewSceneSnapshot,
     ) -> Result<(), String>;
     async fn get_scene_from_name(&self, scene_name: String) -> Result<Option<Scene>, String>;
-    async fn get_scene_participants(
+    async fn get_scene_current_participants(
         &self,
         scene_uuid: &SceneUuid,
     ) -> Result<Vec<SceneParticipant>, String>;
+    async fn get_scene_participation_history(
+        &self,
+        scene_uuid: &SceneUuid,
+    ) -> Result<Vec<SceneParticipation>, String>;
 }

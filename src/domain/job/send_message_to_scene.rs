@@ -91,7 +91,7 @@ impl SendMessageToSceneJob {
         worker: &W,
     ) -> Result<(), Error> {
         let mut participants = worker
-            .get_scene_participants(&self.scene_uuid)
+            .get_scene_current_participants(&self.scene_uuid)
             .await
             .map_err(|err| Error::FailedToGetSceneParticipants {
                 scene_uuid: self.scene_uuid.clone(),

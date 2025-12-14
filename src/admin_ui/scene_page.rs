@@ -62,7 +62,7 @@ impl SceneAggregate {
             None => return Ok(None),
         };
 
-        let participants = worker.get_scene_participants(&scene.uuid).await?;
+        let participants = worker.get_scene_current_participants(&scene.uuid).await?;
 
         let ret = Self {
             scene,
@@ -156,7 +156,7 @@ impl SceneModel {
                     let scene_uuid = self.scene_uuid.clone();
 
                     Task::perform(
-                        async move { worker.get_scene_participants(&scene_uuid).await },
+                        async move { worker.get_scene_current_participants(&scene_uuid).await },
                         SceneLookUpMsg::GotRefreshedParticipants,
                     )
                 }

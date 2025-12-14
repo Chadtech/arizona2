@@ -1,0 +1,34 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                SELECT\n                    scene_participant.person_uuid,\n                    scene_participant.joined_at,\n                    scene_participant.left_at\n                FROM scene_participant\n                WHERE scene_participant.scene_uuid = $1::UUID\n                ORDER BY scene_participant.joined_at ASC;\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "person_uuid",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "joined_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 2,
+        "name": "left_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "eaf02a53e4f0ae515623a31179f195ecae3bc9593da577ccabf12d0760a23a79"
+}

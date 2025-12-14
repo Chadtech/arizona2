@@ -1,5 +1,6 @@
 use crate::capability::scene::{
     CurrentScene, NewScene, NewSceneSnapshot, Scene, SceneCapability, SceneParticipant,
+    SceneParticipation,
 };
 use crate::domain::actor_uuid::ActorUuid;
 use crate::domain::person_name::PersonName;
@@ -163,7 +164,7 @@ impl SceneCapability for Worker {
         Ok(maybe_ret)
     }
 
-    async fn get_scene_participants(
+    async fn get_scene_current_participants(
         &self,
         scene_uuid: &SceneUuid,
     ) -> Result<Vec<SceneParticipant>, String> {
@@ -194,5 +195,40 @@ impl SceneCapability for Worker {
             .collect();
 
         Ok(participants)
+    }
+
+    async fn get_scene_participation_history(
+        &self,
+        scene_uuid: &SceneUuid,
+    ) -> Result<Vec<SceneParticipation>, String> {
+        let participation_rows = sqlx::query!(
+            r#"
+                SELECT
+                    scene_participant.person_uuid,
+                    scene_participant.joined_at,
+                    scene_participant.left_at
+                FROM scene_participant
+                WHERE scene_participant.scene_uuid = $1::UUID
+                ORDER BY scene_participant.joined_at ASC;
+            "#,
+            scene_uuid.to_uuid(),
+        )
+        .fetch_all(&self.sqlx)
+        .await
+        .map_err(|err| format!("Error fetching scene participation history: {}", err))?;
+
+        let participation_history = participation_rows
+            .into_iter()
+            .map(|row| {
+                let person_uuid = PersonUuid::from_uuid(row.person_uuid);
+                SceneParticipation {
+                    person_uuid,
+                    joined_at: row.joined_at,
+                    left_at: row.left_at,
+                }
+            })
+            .collect();
+
+        Ok(participation_history)
     }
 }
