@@ -1,6 +1,7 @@
 pub mod actor_uuid;
 pub mod job;
 pub mod job_uuid;
+pub mod memory;
 pub mod memory_uuid;
 pub mod message;
 pub mod message_uuid;

@@ -1,8 +1,13 @@
 use crate::domain::message::MessageRecipient;
+use crate::open_ai::completion::{Completion, CompletionError};
+use crate::open_ai::role::Role;
+use crate::open_ai_key::OpenAiKey;
+use crate::person_actions::PersonAction;
 use crate::{
     capability::{message::MessageCapability, scene::SceneCapability},
     domain::message_uuid::MessageUuid,
     nice_display::NiceDisplay,
+    open_ai, person_actions,
 };
 use serde::{Deserialize, Serialize};
 
@@ -47,6 +52,7 @@ impl ProcessMessageJob {
                 todo!("Process message to AI person");
             }
             MessageRecipient::RealWorldUser => {
+
                 // Process message to real-world user
             }
         }

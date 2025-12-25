@@ -3,6 +3,7 @@ mod memory_capability;
 mod message_capability;
 mod person_capability;
 mod person_identity_capability;
+mod reaction_capability;
 mod scene_capability;
 mod state_of_mind_capability;
 

@@ -1,8 +1,11 @@
 use super::Worker;
-use crate::capability::memory::{MemoryCapability, NewMemory};
+use crate::capability::memory::{MemoryCapability, MemoryQueryPrompt, NewMemory};
 use crate::domain::memory_uuid::MemoryUuid;
 use crate::nice_display::NiceDisplay;
+use crate::open_ai;
+use crate::open_ai::completion::Completion;
 use crate::open_ai::embedding::EmbeddingRequest;
+use crate::open_ai::role::Role;
 
 impl MemoryCapability for Worker {
     async fn create_memory(&self, new_memory: NewMemory) -> Result<MemoryUuid, String> {
@@ -30,5 +33,63 @@ impl MemoryCapability for Worker {
             })?;
 
         Ok(MemoryUuid::from_uuid(rec.uuid))
+    }
+
+    async fn create_memory_query_prompt(
+        &self,
+        person_recalling: String,
+        people: Vec<String>,
+        scene_name: String,
+        scene_description: String,
+        recent_events: Vec<String>,
+        state_of_mind: String,
+    ) -> Result<MemoryQueryPrompt, String> {
+        let mut prompt = format!(
+            "{} is in a scene called '{}'. The scene is described as: {}.\n\n",
+            person_recalling, scene_name, scene_description
+        );
+
+        prompt.push_str("\n\n");
+
+        prompt.push_str(
+            format!("{}'s state of mind is {}", person_recalling, state_of_mind).as_str(),
+        );
+
+        prompt.push_str("\n\nOther people present:\n");
+
+        for person in people {
+            prompt.push_str(format!("- {}\n", person).as_str());
+        }
+
+        prompt.push_str("\n\nRecent events in the scene:\n");
+        for event in recent_events {
+            prompt.push_str(format!("- {}\n", event).as_str());
+        }
+
+        let mut completion = Completion::new(open_ai::model::Model::Gpt4p1);
+
+        completion.add_message(Role::System, "You are a memory retrieval assistant. Given context, generate a prompt that can be used in a vector database of memories to retrieve relevant memories for that person in that situation.");
+        completion.add_message(Role::User, prompt.as_str());
+
+        let response = completion
+            .send_request(&self.open_ai_key, self.reqwest_client.clone())
+            .await
+            .map_err(|err| {
+                format!(
+                    "Error generating memory query prompt:\n{}",
+                    err.to_nice_error().to_string()
+                )
+            })?;
+
+        let memory_prompt = response.as_message().map_err(|err| {
+            format!(
+                "Error extracting memory prompt from completion response: {}",
+                err.to_nice_error().to_string()
+            )
+        })?;
+
+        Ok(MemoryQueryPrompt {
+            prompt: memory_prompt,
+        })
     }
 }
