@@ -1,5 +1,7 @@
 use super::Worker;
-use crate::capability::memory::{MemoryCapability, MemoryQueryPrompt, NewMemory};
+use crate::capability::memory::{
+    MemoryCapability, MemoryQueryPrompt, MemorySearchResult, NewMemory,
+};
 use crate::domain::memory_uuid::MemoryUuid;
 use crate::nice_display::NiceDisplay;
 use crate::open_ai;
@@ -91,5 +93,44 @@ impl MemoryCapability for Worker {
         Ok(MemoryQueryPrompt {
             prompt: memory_prompt,
         })
+    }
+
+    async fn search_memories(
+        &self,
+        query: String,
+        limit: i64,
+    ) -> Result<Vec<MemorySearchResult>, String> {
+        // Generate embedding for the query
+        let query_embedding = EmbeddingRequest::new(query)
+            .create(self.open_ai_key.clone(), self.reqwest_client.clone())
+            .await
+            .map_err(|err| err.message())?;
+
+        // Search for similar memories using vector similarity
+        let records = sqlx::query!(
+            r#"
+                SELECT
+                    uuid,
+                    content,
+                    (embedding <=> $1::vector)::FLOAT AS distance
+                FROM memory
+                ORDER BY embedding <=> $1::vector
+                LIMIT $2
+            "#,
+            &query_embedding[..] as &[f32],
+            limit
+        )
+        .fetch_all(&self.sqlx)
+        .await
+        .map_err(|err| format!("Error searching memories: {}", err))?;
+
+        Ok(records
+            .into_iter()
+            .map(|rec| MemorySearchResult {
+                memory_uuid: MemoryUuid::from_uuid(rec.uuid),
+                content: rec.content,
+                distance: rec.distance.unwrap_or(f64::MAX),
+            })
+            .collect())
     }
 }

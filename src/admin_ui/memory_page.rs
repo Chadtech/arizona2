@@ -28,10 +28,17 @@ enum Status {
     FailedCreatingMemory(String),
 }
 
+#[derive(Clone, Debug)]
+struct MemoryQueryResult {
+    prompt: String,
+    memories: Vec<crate::capability::memory::MemorySearchResult>,
+}
+
 enum QueryStatus {
     Ready,
     GeneratingPrompt,
-    Done(String),
+    SearchingMemories(String),
+    Done(MemoryQueryResult),
     Failed(String),
 }
 
@@ -51,7 +58,7 @@ pub enum Msg {
     ClickedAddRecentEvent,
     ClickedRemoveRecentEvent(usize),
     ClickedGeneratePrompt,
-    GeneratedPrompt(Result<String, String>),
+    GeneratedPromptAndSearched(Result<MemoryQueryResult, String>),
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -248,7 +255,7 @@ impl Model {
 
                 Task::perform(
                     async move {
-                        generate_memory_query_prompt(
+                        generate_prompt_and_search_memories(
                             &worker,
                             person_recalling,
                             people,
@@ -259,12 +266,12 @@ impl Model {
                         )
                         .await
                     },
-                    Msg::GeneratedPrompt,
+                    Msg::GeneratedPromptAndSearched,
                 )
             }
-            Msg::GeneratedPrompt(result) => {
+            Msg::GeneratedPromptAndSearched(result) => {
                 self.query_status = match result {
-                    Ok(prompt) => QueryStatus::Done(prompt),
+                    Ok(query_result) => QueryStatus::Done(query_result),
                     Err(err) => QueryStatus::Failed(err),
                 };
 
@@ -291,17 +298,40 @@ fn query_status_view(status: &QueryStatus) -> Element<'_, Msg> {
     match status {
         QueryStatus::Ready => w::text("Ready to generate prompt").into(),
         QueryStatus::GeneratingPrompt => w::text("Generating prompt...").into(),
-        QueryStatus::Done(prompt) => w::column![
+        QueryStatus::SearchingMemories(prompt) => w::column![
             w::text("Generated Prompt:").size(16),
             w::text(prompt),
+            w::text("Searching memories..."),
         ]
         .spacing(s::S4)
         .into(),
+        QueryStatus::Done(result) => {
+            let mut col = w::column![
+                w::text("Generated Prompt:").size(16),
+                w::text(&result.prompt),
+                w::horizontal_rule(1),
+                w::text(format!("Found {} memories:", result.memories.len())).size(16),
+            ]
+            .spacing(s::S4);
+
+            for (i, memory) in result.memories.iter().enumerate() {
+                col = col.push(
+                    w::column![
+                        w::text(format!("Memory {} (distance: {:.3})", i + 1, memory.distance)),
+                        w::text(&memory.content),
+                        w::horizontal_rule(1),
+                    ]
+                    .spacing(s::S2),
+                );
+            }
+
+            col.into()
+        }
         QueryStatus::Failed(err) => w::text(format!("Error: {}", err)).into(),
     }
 }
 
-async fn generate_memory_query_prompt(
+async fn generate_prompt_and_search_memories(
     worker: &Worker,
     person_recalling: String,
     people: Vec<String>,
@@ -309,8 +339,9 @@ async fn generate_memory_query_prompt(
     scene_description: String,
     recent_events: Vec<String>,
     state_of_mind: String,
-) -> Result<String, String> {
-    let result = worker
+) -> Result<MemoryQueryResult, String> {
+    // Generate the prompt
+    let prompt_result = worker
         .create_memory_query_prompt(
             person_recalling,
             people,
@@ -321,5 +352,11 @@ async fn generate_memory_query_prompt(
         )
         .await?;
 
-    Ok(result.prompt)
+    // Search for memories using the generated prompt
+    let memories = worker.search_memories(prompt_result.prompt.clone(), 10).await?;
+
+    Ok(MemoryQueryResult {
+        prompt: prompt_result.prompt,
+        memories,
+    })
 }
