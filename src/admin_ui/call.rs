@@ -1,7 +1,7 @@
 use crate::open_ai::completion::{Completion, CompletionError};
 use crate::open_ai::role::Role;
 use crate::open_ai_key::OpenAiKey;
-use crate::person_actions::PersonAction;
+use crate::person_actions::{PersonAction, PersonActionKind};
 use crate::{open_ai, person_actions};
 
 pub async fn submit_prompt(
@@ -48,8 +48,9 @@ pub async fn submit_reaction(
 
     completion.add_message(Role::User, format!("Situation: {}", situation).as_str());
 
-    completion.add_tool_call(person_actions::PersonActionKind::Say.to_open_ai_tool());
-    completion.add_tool_call(person_actions::PersonActionKind::Wait.to_open_ai_tool());
+    for person_action_kind in PersonActionKind::all() {
+        completion.add_tool_call(person_action_kind.to_open_ai_tool());
+    }
 
     let response = completion
         .send_request(&open_ai_key, reqwest::Client::new())

@@ -2,6 +2,7 @@ use async_trait::async_trait;
 
 use crate::capability::person_identity::{NewPersonIdentity, PersonIdentityCapability};
 use crate::domain::person_identity_uuid::PersonIdentityUuid;
+use crate::domain::person_uuid::PersonUuid;
 use crate::worker::Worker;
 
 #[async_trait]
@@ -27,5 +28,26 @@ impl PersonIdentityCapability for Worker {
         .map_err(|err| format!("Error inserting new person identity: {}", err))?;
 
         Ok(PersonIdentityUuid::from_uuid(ret.uuid))
+    }
+
+    async fn get_person_identity(
+        &self,
+        person_uuid: &PersonUuid,
+    ) -> Result<Option<String>, String> {
+        let rec = sqlx::query!(
+            r#"
+                SELECT identity
+                FROM person_identity
+                WHERE person_uuid = $1::UUID
+                ORDER BY created_at DESC
+                LIMIT 1;
+            "#,
+            person_uuid.to_uuid()
+        )
+        .fetch_optional(&self.sqlx)
+        .await
+        .map_err(|err| format!("Error fetching person identity: {}", err))?;
+
+        Ok(rec.map(|r| r.identity))
     }
 }

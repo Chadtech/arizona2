@@ -1,6 +1,7 @@
 use async_trait::async_trait;
 
 use crate::domain::person_identity_uuid::PersonIdentityUuid;
+use crate::domain::person_uuid::PersonUuid;
 
 pub struct NewPersonIdentity {
     pub person_identity_uuid: PersonIdentityUuid,
@@ -14,4 +15,6 @@ pub trait PersonIdentityCapability {
         &self,
         new_person_identity: NewPersonIdentity,
     ) -> Result<PersonIdentityUuid, String>;
+    async fn get_person_identity(&self, person_uuid: &PersonUuid)
+        -> Result<Option<String>, String>;
 }

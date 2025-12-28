@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                SELECT identity\n                FROM person_identity\n                WHERE person_uuid = $1::UUID\n                ORDER BY created_at DESC\n                LIMIT 1;\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "identity",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "31ca71832d89c6c128e1c38a232a7573ebba5bf0fa57c0357a7e011296802be2"
+}

@@ -2,7 +2,7 @@ use crate::capability::memory::MemoryCapability;
 use crate::domain::memory_uuid::MemoryUuid;
 use crate::domain::person_name::PersonName;
 use crate::worker::Worker;
-use crate::{admin_ui::s, capability::memory::NewMemory};
+use crate::{admin_ui::s, capability, capability::memory::NewMemory};
 use iced::{widget as w, Element, Task};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -241,7 +241,8 @@ impl Model {
             Msg::ClickedGeneratePrompt => {
                 self.query_status = QueryStatus::GeneratingPrompt;
 
-                let person_recalling = self.query_person_recalling_field.clone();
+                let person_recalling =
+                    PersonName::from_string(self.query_person_recalling_field.clone());
                 let people: Vec<String> = self
                     .query_people_field
                     .split(',')
@@ -317,7 +318,11 @@ fn query_status_view(status: &QueryStatus) -> Element<'_, Msg> {
             for (i, memory) in result.memories.iter().enumerate() {
                 col = col.push(
                     w::column![
-                        w::text(format!("Memory {} (distance: {:.3})", i + 1, memory.distance)),
+                        w::text(format!(
+                            "Memory {} (distance: {:.3})",
+                            i + 1,
+                            memory.distance
+                        )),
                         w::text(&memory.content),
                         w::horizontal_rule(1),
                     ]
@@ -333,27 +338,32 @@ fn query_status_view(status: &QueryStatus) -> Element<'_, Msg> {
 
 async fn generate_prompt_and_search_memories(
     worker: &Worker,
-    person_recalling: String,
+    person_recalling: PersonName,
     people: Vec<String>,
     scene_name: String,
     scene_description: String,
     recent_events: Vec<String>,
     state_of_mind: String,
 ) -> Result<MemoryQueryResult, String> {
+    let message_type_args = capability::memory::MessageTypeArgs::Scene {
+        scene_name: scene_name.clone(),
+        scene_description: scene_description.clone(),
+        people,
+    };
     // Generate the prompt
     let prompt_result = worker
         .create_memory_query_prompt(
             person_recalling,
-            people,
-            scene_name,
-            scene_description,
+            message_type_args,
             recent_events,
-            state_of_mind,
+            &state_of_mind,
         )
         .await?;
 
     // Search for memories using the generated prompt
-    let memories = worker.search_memories(prompt_result.prompt.clone(), 10).await?;
+    let memories = worker
+        .search_memories(prompt_result.prompt.clone(), 10)
+        .await?;
 
     Ok(MemoryQueryResult {
         prompt: prompt_result.prompt,

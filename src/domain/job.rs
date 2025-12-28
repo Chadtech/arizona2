@@ -1,7 +1,9 @@
+pub mod person_waiting;
 pub mod process_message;
 pub mod send_message_to_scene;
 
 use super::job_uuid::JobUuid;
+use crate::domain::job::person_waiting::PersonWaitingJob;
 use crate::domain::job::send_message_to_scene::SendMessageToSceneJob;
 use crate::nice_display::NiceDisplay;
 use chrono::{DateTime, Utc};
@@ -27,6 +29,7 @@ pub enum JobKind {
     Ping,
     SendMessageToScene(SendMessageToSceneJob),
     ProcessMessage(ProcessMessageJob),
+    PersonWaiting(PersonWaitingJob),
 }
 
 pub enum ParseError {
@@ -61,6 +64,7 @@ impl JobKind {
             JobKind::Ping => "ping".to_string(),
             JobKind::SendMessageToScene(_) => "send message to scene".to_string(),
             JobKind::ProcessMessage(_) => "process message".to_string(),
+            JobKind::PersonWaiting(_) => "person waiting".to_string(),
         }
     }
 
@@ -75,6 +79,11 @@ impl JobKind {
             JobKind::ProcessMessage(job) => {
                 let data = serde_json::to_value(job)
                     .map_err(|err| format!("Failed to serialize ProcessMessageJob: {}", err))?;
+                Ok(Some(data))
+            }
+            JobKind::PersonWaiting(job) => {
+                let data = serde_json::to_value(job)
+                    .map_err(|err| format!("Failed to serialize PersonWaitingJob: {}", err))?;
                 Ok(Some(data))
             }
         }

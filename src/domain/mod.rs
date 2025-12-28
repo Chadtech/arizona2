@@ -1,4 +1,5 @@
 pub mod actor_uuid;
+pub mod event;
 pub mod job;
 pub mod job_uuid;
 pub mod memory;
@@ -10,4 +11,5 @@ pub mod person_name;
 pub mod person_uuid;
 pub mod scene_participant_uuid;
 pub mod scene_uuid;
+pub mod state_of_mind;
 pub mod state_of_mind_uuid;

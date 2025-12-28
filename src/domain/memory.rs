@@ -1,3 +1,13 @@
+use crate::capability::memory::MemorySearchResult;
+
 pub struct Memory {
-    content: String,
+    pub content: String,
+}
+
+impl From<MemorySearchResult> for Memory {
+    fn from(value: MemorySearchResult) -> Self {
+        Memory {
+            content: value.content,
+        }
+    }
 }

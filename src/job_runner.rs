@@ -1,7 +1,15 @@
+use crate::capability::event::EventCapability;
 use crate::capability::job::JobCapability;
+use crate::capability::memory::MemoryCapability;
 use crate::capability::message::MessageCapability;
+use crate::capability::person::PersonCapability;
+use crate::capability::person_identity::PersonIdentityCapability;
+use crate::capability::reaction::ReactionCapability;
 use crate::capability::scene::SceneCapability;
-use crate::domain::job::{process_message, send_message_to_scene, JobKind, PoppedJob};
+use crate::capability::state_of_mind::StateOfMindCapability;
+use crate::domain::job::{
+    person_waiting, process_message, send_message_to_scene, JobKind, PoppedJob,
+};
 use crate::domain::job_uuid::JobUuid;
 use crate::nice_display::NiceDisplay;
 use crate::worker;
@@ -18,6 +26,7 @@ pub enum RunJobError {
     FailedToMarkJobFailed(String),
     ProcessMessageError(process_message::Error),
     SendMessageToSceneError(send_message_to_scene::Error),
+    PersonWaitingError(person_waiting::Error),
 }
 
 impl NiceDisplay for Error {
@@ -65,6 +74,9 @@ impl NiceDisplay for RunJobError {
                     err
                 )
             }
+            RunJobError::PersonWaitingError(err) => {
+                format!("Error processing person waiting job\n{}", err.message())
+            }
         }
     }
 }
@@ -79,7 +91,17 @@ pub async fn run() -> Result<(), Error> {
     }
 }
 
-async fn run_next_job<W: JobCapability + MessageCapability + SceneCapability>(
+async fn run_next_job<
+    W: JobCapability
+        + MessageCapability
+        + SceneCapability
+        + ReactionCapability
+        + MemoryCapability
+        + PersonCapability
+        + EventCapability
+        + StateOfMindCapability
+        + PersonIdentityCapability,
+>(
     worker: W,
 ) -> Result<(), Error> {
     let job = match worker.pop_next_job().await.map_err(Error::PopJobError)? {
@@ -97,7 +119,17 @@ async fn run_next_job<W: JobCapability + MessageCapability + SceneCapability>(
         .map_err(|err| Error::RunJobError((job_uuid, err)))
 }
 
-async fn run_job<W: JobCapability + MessageCapability + SceneCapability>(
+async fn run_job<
+    W: JobCapability
+        + MessageCapability
+        + SceneCapability
+        + ReactionCapability
+        + MemoryCapability
+        + PersonCapability
+        + EventCapability
+        + StateOfMindCapability
+        + PersonIdentityCapability,
+>(
     worker: W,
     job: PoppedJob,
 ) -> Result<(), RunJobError> {
@@ -120,6 +152,13 @@ async fn run_job<W: JobCapability + MessageCapability + SceneCapability>(
                 .run(&worker)
                 .await
                 .map_err(RunJobError::ProcessMessageError)
+        }
+        JobKind::PersonWaiting(person_waiting_job) => {
+            tracing::debug!("Executing PersonWaiting job");
+            person_waiting_job
+                .run(&worker)
+                .await
+                .map_err(RunJobError::PersonWaitingError)
         }
     };
 

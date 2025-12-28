@@ -1,4 +1,6 @@
 use crate::capability::state_of_mind::{NewStateOfMind, StateOfMindCapability};
+use crate::domain::person_uuid::PersonUuid;
+use crate::domain::state_of_mind::StateOfMind;
 use crate::domain::state_of_mind_uuid::StateOfMindUuid;
 use crate::worker::Worker;
 use async_trait::async_trait;
@@ -26,5 +28,32 @@ impl StateOfMindCapability for Worker {
         .map_err(|err| format!("Error inserting new state of mind: {}", err))?;
 
         Ok(StateOfMindUuid::from_uuid(ret.uuid))
+    }
+
+    async fn get_latest_state_of_mind(
+        &self,
+        person_uuid: &PersonUuid,
+    ) -> Result<Option<StateOfMind>, String> {
+        let rec = sqlx::query!(
+            r#"
+                SELECT  content
+                FROM state_of_mind
+                WHERE person_uuid = $1::UUID
+                ORDER BY created_at DESC
+                LIMIT 1;
+            "#,
+            person_uuid.to_uuid()
+        )
+        .fetch_optional(&self.sqlx)
+        .await
+        .map_err(|err| format!("Error fetching latest state of mind: {}", err))?;
+
+        if let Some(record) = rec {
+            Ok(Some(StateOfMind {
+                content: record.content,
+            }))
+        } else {
+            Ok(None)
+        }
     }
 }

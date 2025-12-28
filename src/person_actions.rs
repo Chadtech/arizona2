@@ -4,54 +4,39 @@ use crate::open_ai::tool_call::ToolCall;
 use crate::{nice_display::NiceDisplay, open_ai};
 
 pub enum PersonActionKind {
-    Say,
     Wait,
+    SayInScene,
 }
 
 impl PersonActionKind {
     pub fn to_name(&self) -> String {
         match self {
-            PersonActionKind::Say => "say".to_string(),
             PersonActionKind::Wait => "wait".to_string(),
+            PersonActionKind::SayInScene => "say in scene".to_string(),
         }
     }
     pub fn to_open_ai_tool_function(&self) -> open_ai::tool::ToolFunction {
         match self {
-            PersonActionKind::Say => {
-                let parameters = vec![
-                    ToolFunctionParameter::StringParam {
-                        name: "comment".to_string(),
-                        description: "The comment to say".to_string(),
-                        required: true,
-                    },
-                    ToolFunctionParameter::ArrayParam {
-                        name: "recipients".to_string(),
-                        description: "The recipients of the comment".to_string(),
-                        item_type: open_ai::tool::ArrayParamItemType::String,
-                        required: true,
-                    },
-                ];
+            PersonActionKind::SayInScene => {
+                let parameters = vec![ToolFunctionParameter::StringParam {
+                    name: "comment".to_string(),
+                    description: "The comment to say".to_string(),
+                    required: true,
+                }];
 
                 open_ai::tool::ToolFunction {
                     name: self.to_name(),
-                    description: "Make the person say something to specified recipients"
+                    description: "Make the person say something in the scene they are in, which will be heard by everyone in the scene"
                         .to_string(),
                     parameters,
                 }
             }
             PersonActionKind::Wait => {
-                let parameters = vec![
-                    ToolFunctionParameter::IntegerParam {
-                        name: "duration".to_string(),
-                        description: "The duration to wait in millisoconds".to_string(),
-                        required: true,
-                    },
-                    ToolFunctionParameter::StringParam {
-                        name: "and_then".to_string(),
-                        description: "The action to perform after waiting".to_string(),
-                        required: false,
-                    },
-                ];
+                let parameters = vec![ToolFunctionParameter::IntegerParam {
+                    name: "duration".to_string(),
+                    description: "The duration to wait in millisoconds".to_string(),
+                    required: true,
+                }];
 
                 open_ai::tool::ToolFunction {
                     name: self.to_name(),
@@ -65,18 +50,16 @@ impl PersonActionKind {
     pub fn to_open_ai_tool(&self) -> open_ai::tool::Tool {
         open_ai::tool::Tool::FunctionCall(self.to_open_ai_tool_function())
     }
+
+    pub fn all() -> Vec<PersonActionKind> {
+        vec![PersonActionKind::Wait, PersonActionKind::SayInScene]
+    }
 }
 
 #[derive(Debug, Clone)]
 pub enum PersonAction {
-    Say {
-        comment: String,
-        recipients: Vec<String>,
-    },
-    Wait {
-        duration: u64,
-        and_then: Option<String>,
-    },
+    Wait { duration: u64 },
+    SayInScene { comment: String },
 }
 
 impl Into<CompletionError> for PersonActionError {
@@ -141,22 +124,13 @@ impl PersonAction {
     pub fn from_open_ai_tool_call(tool_call: ToolCall) -> Result<Self, PersonActionError> {
         let tool_call_name = tool_call.name;
         match tool_call_name.as_str() {
-            "say" => {
-                let mut comment = None;
-                let mut recipients = None;
+            "say in scene" => {
+                let mut maybe_comment = None;
 
                 for (key, value) in tool_call.arguments {
                     match key.as_str() {
                         "comment" => {
-                            comment = value.as_str().map(|s| s.to_string());
-                        }
-                        "recipients" => {
-                            recipients = value.as_array().map(|arr| {
-                                arr.iter()
-                                    .filter_map(|v| v.as_str())
-                                    .map(|s| s.to_string())
-                                    .collect()
-                            });
+                            maybe_comment = value.as_str().map(|s| s.to_string());
                         }
                         _ => {
                             Err(PersonActionError::UnrecongizedParameter {
@@ -167,25 +141,16 @@ impl PersonAction {
                     }
                 }
 
-                match (comment, recipients) {
-                    (Some(comment), Some(recipients)) => Ok(PersonAction::Say {
-                        comment,
-                        recipients,
-                    }),
-                    (None, _) => Err(PersonActionError::ParameterMissing {
+                match maybe_comment {
+                    Some(comment) => Ok(PersonAction::SayInScene { comment }),
+                    None => Err(PersonActionError::ParameterMissing {
                         action_name: tool_call_name.clone(),
                         parameter_name: "comment".to_string(),
-                    }),
-                    (_, None) => Err(PersonActionError::ParameterMissing {
-                        action_name: tool_call_name.clone(),
-                        parameter_name: "recipients".to_string(),
                     }),
                 }
             }
             "wait" => {
                 let mut maybe_duration: Option<u64> = None;
-
-                let mut and_then: Option<String> = None;
 
                 for (key, value) in tool_call.arguments {
                     match key.as_str() {
@@ -197,17 +162,6 @@ impl PersonAction {
                                     action_name: tool_call_name.clone(),
                                     parameter_name: "duration".to_string(),
                                     wanted_type: "u64".to_string(),
-                                })?
-                            }
-                        }
-                        "and_then" => {
-                            if let Some(s) = value.as_str() {
-                                and_then = Some(s.to_string());
-                            } else {
-                                Err(PersonActionError::UnexpectedType {
-                                    action_name: tool_call_name.clone(),
-                                    parameter_name: "and_then".to_string(),
-                                    wanted_type: "String".to_string(),
                                 })?
                             }
                         }
@@ -226,7 +180,7 @@ impl PersonAction {
                         parameter_name: "duration".to_string(),
                     })?;
 
-                Ok(PersonAction::Wait { duration, and_then })
+                Ok(PersonAction::Wait { duration })
             }
             _ => Err(PersonActionError::UnrecognizedAction {
                 action_name: tool_call_name,

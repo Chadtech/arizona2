@@ -231,4 +231,41 @@ impl SceneCapability for Worker {
 
         Ok(participation_history)
     }
+
+    async fn get_scene_name(&self, scene_uuid: &SceneUuid) -> Result<Option<String>, String> {
+        let maybe_rec = sqlx::query!(
+            r#"
+                SELECT name
+                FROM scene
+                WHERE uuid = $1::UUID;
+            "#,
+            scene_uuid.to_uuid(),
+        )
+        .fetch_optional(&self.sqlx)
+        .await
+        .map_err(|err| format!("Error fetching scene name: {}", err))?;
+
+        Ok(maybe_rec.map(|rec| rec.name))
+    }
+
+    async fn get_scene_description(
+        &self,
+        scene_uuid: &SceneUuid,
+    ) -> Result<Option<String>, String> {
+        let maybe_rec = sqlx::query!(
+            r#"
+                SELECT description
+                FROM scene_snapshot
+                WHERE scene_uuid = $1::UUID
+                ORDER BY created_at DESC
+                LIMIT 1;
+            "#,
+            scene_uuid.to_uuid(),
+        )
+        .fetch_optional(&self.sqlx)
+        .await
+        .map_err(|err| format!("Error fetching scene description: {}", err))?;
+
+        Ok(maybe_rec.map(|rec| rec.description))
+    }
 }

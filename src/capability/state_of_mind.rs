@@ -1,4 +1,9 @@
-use crate::domain::{person_name::PersonName, state_of_mind_uuid::StateOfMindUuid};
+use crate::domain::state_of_mind::StateOfMind;
+use crate::domain::{
+    person_name::PersonName,
+    person_uuid::{self, PersonUuid},
+    state_of_mind_uuid::StateOfMindUuid,
+};
 use async_trait::async_trait;
 
 pub struct NewStateOfMind {
@@ -13,4 +18,8 @@ pub trait StateOfMindCapability {
         &self,
         new_state_of_mind: NewStateOfMind,
     ) -> Result<StateOfMindUuid, String>;
+    async fn get_latest_state_of_mind(
+        &self,
+        person_uuid: &PersonUuid,
+    ) -> Result<Option<StateOfMind>, String>;
 }

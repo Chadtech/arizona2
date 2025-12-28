@@ -1,8 +1,10 @@
 use super::Worker;
 use crate::capability::memory::{
-    MemoryCapability, MemoryQueryPrompt, MemorySearchResult, NewMemory,
+    MemoryCapability, MemoryQueryPrompt, MemorySearchResult, MessageTypeArgs, NewMemory,
 };
 use crate::domain::memory_uuid::MemoryUuid;
+use crate::domain::message::MessageSender;
+use crate::domain::person_name::PersonName;
 use crate::nice_display::NiceDisplay;
 use crate::open_ai;
 use crate::open_ai::completion::Completion;
@@ -39,31 +41,88 @@ impl MemoryCapability for Worker {
 
     async fn create_memory_query_prompt(
         &self,
-        person_recalling: String,
-        people: Vec<String>,
-        scene_name: String,
-        scene_description: String,
+        person_recalling: PersonName,
+        message_type_args: MessageTypeArgs,
         recent_events: Vec<String>,
-        state_of_mind: String,
+        state_of_mind: &String,
     ) -> Result<MemoryQueryPrompt, String> {
-        let mut prompt = format!(
-            "{} is in a scene called '{}'. The scene is described as: {}.\n\n",
-            person_recalling, scene_name, scene_description
-        );
+        let mut prompt = String::new();
+
+        match &message_type_args {
+            MessageTypeArgs::Scene {
+                scene_name,
+                scene_description,
+                ..
+            } => {
+                prompt.push_str(
+                    format!(
+                        "{} is in a scene called '{}'. The scene is described as: {}.\n\n",
+                        person_recalling.to_string(),
+                        scene_name,
+                        scene_description
+                    )
+                    .as_str(),
+                );
+            }
+            MessageTypeArgs::Direct { from } => {
+                let sender_name = {
+                    match from {
+                        MessageSender::AiPerson(person_uuid) => {
+                            let rec = sqlx::query!(
+                                r#"
+                                SELECT name
+                                FROM person
+                                WHERE uuid = $1::UUID;
+                            "#,
+                                person_uuid.to_uuid()
+                            )
+                            .fetch_one(&self.sqlx)
+                            .await
+                            .map_err(|err| format!("Error fetching person's name: {}", err))?;
+
+                            rec.name
+                        }
+                        MessageSender::RealWorldUser => "Chadtech".to_string(),
+                    }
+                };
+
+                prompt.push_str(
+                    format!(
+                        "{} has received a direct message from {}.\n\n",
+                        person_recalling.to_string(),
+                        sender_name
+                    )
+                    .as_str(),
+                );
+            }
+        }
 
         prompt.push_str("\n\n");
 
         prompt.push_str(
-            format!("{}'s state of mind is {}", person_recalling, state_of_mind).as_str(),
+            format!(
+                "{}'s state of mind is {}",
+                person_recalling.to_string(),
+                state_of_mind
+            )
+            .as_str(),
         );
 
-        prompt.push_str("\n\nOther people present:\n");
+        match message_type_args {
+            MessageTypeArgs::Scene { people, .. } => {
+                prompt.push_str("\n\nOther people present:\n");
 
-        for person in people {
-            prompt.push_str(format!("- {}\n", person).as_str());
+                for person in people {
+                    prompt.push_str(format!("- {}\n", person).as_str());
+                }
+            }
+            MessageTypeArgs::Direct { .. } => {
+                prompt
+                    .push_str("\n\nThis is a direct message, so no one else is around to see it\n");
+            }
         }
 
-        prompt.push_str("\n\nRecent events in the scene:\n");
+        prompt.push_str("\n\nRecent events include:\n");
         for event in recent_events {
             prompt.push_str(format!("- {}\n", event).as_str());
         }

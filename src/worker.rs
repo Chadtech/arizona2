@@ -1,3 +1,4 @@
+mod event_capability;
 mod job_capability;
 mod memory_capability;
 mod message_capability;

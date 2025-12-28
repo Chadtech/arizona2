@@ -1,4 +1,5 @@
 use crate::capability::person::{NewPerson, PersonCapability};
+use crate::domain::person_name::PersonName;
 use crate::domain::person_uuid::PersonUuid;
 use crate::worker::Worker;
 
@@ -18,5 +19,21 @@ impl PersonCapability for Worker {
         .map_err(|err| format!("Error inserting new person identity: {}", err))?;
 
         Ok(PersonUuid::from_uuid(ret.uuid))
+    }
+
+    async fn get_persons_name(&self, person_uuid: PersonUuid) -> Result<PersonName, String> {
+        let rec = sqlx::query!(
+            r#"
+                SELECT name
+                FROM person
+                WHERE uuid = $1::UUID;
+            "#,
+            person_uuid.to_uuid()
+        )
+        .fetch_one(&self.sqlx)
+        .await
+        .map_err(|err| format!("Error fetching person's name: {}", err))?;
+
+        Ok(PersonName::from_string(rec.name))
     }
 }

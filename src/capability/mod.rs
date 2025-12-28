@@ -1,3 +1,4 @@
+pub mod event;
 pub mod job;
 pub mod memory;
 pub mod message;

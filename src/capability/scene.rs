@@ -69,4 +69,7 @@ pub trait SceneCapability {
         &self,
         scene_uuid: &SceneUuid,
     ) -> Result<Vec<SceneParticipation>, String>;
+    async fn get_scene_name(&self, scene_uuid: &SceneUuid) -> Result<Option<String>, String>;
+    async fn get_scene_description(&self, scene_uuid: &SceneUuid)
+        -> Result<Option<String>, String>;
 }

@@ -1,13 +1,21 @@
-use crate::domain::message::MessageRecipient;
-use crate::open_ai::completion::{Completion, CompletionError};
-use crate::open_ai::role::Role;
-use crate::open_ai_key::OpenAiKey;
+use crate::capability;
+use crate::capability::event::EventCapability;
+use crate::capability::memory::{MemoryCapability, MemorySearchResult, MessageTypeArgs};
+use crate::capability::person::PersonCapability;
+use crate::capability::person_identity::PersonIdentityCapability;
+use crate::capability::reaction::ReactionCapability;
+use crate::capability::state_of_mind::StateOfMindCapability;
+use crate::domain::memory::Memory;
+use crate::domain::message::{Message, MessageRecipient, MessageSender};
+use crate::domain::person_name::PersonName;
+use crate::domain::person_uuid::PersonUuid;
+use crate::domain::state_of_mind::StateOfMind;
+use crate::open_ai::completion::CompletionError;
 use crate::person_actions::PersonAction;
 use crate::{
     capability::{message::MessageCapability, scene::SceneCapability},
     domain::message_uuid::MessageUuid,
     nice_display::NiceDisplay,
-    open_ai, person_actions,
 };
 use serde::{Deserialize, Serialize};
 
@@ -19,6 +27,14 @@ pub struct ProcessMessageJob {
 pub enum Error {
     FailedToGetMessage(String),
     MessageNotFound,
+    GetPersonReactionCompletionError(CompletionError),
+    FailedToGetEvents(String),
+    FailedToGetStateOfMind(String),
+    NoStateOfMindFound { person_uuid: PersonUuid },
+    CouldNotCreateMemoriesPrompt(String),
+    FailedToSearchMemories(String),
+    FailedToGetPersonIdentity(String),
+    NoPersonIdentityFound { person_uuid: PersonUuid },
 }
 
 impl NiceDisplay for Error {
@@ -28,12 +44,51 @@ impl NiceDisplay for Error {
                 format!("Failed to get message: {}", details)
             }
             Error::MessageNotFound => "Message not found".to_string(),
+            Error::GetPersonReactionCompletionError(err) => {
+                format!("Failed to get person reaction: {}", err.message())
+            }
+            Error::FailedToGetEvents(err) => {
+                format!("Failed to get events: {}", err)
+            }
+            Error::FailedToGetStateOfMind(err) => {
+                format!("Failed to get state of mind: {}", err)
+            }
+            Error::NoStateOfMindFound { person_uuid } => {
+                format!(
+                    "No state of mind found for person {}",
+                    person_uuid.to_uuid()
+                )
+            }
+            Error::CouldNotCreateMemoriesPrompt(err) => {
+                format!("Could not create memories prompt: {}", err)
+            }
+            Error::FailedToSearchMemories(err) => {
+                format!("Failed to search memories: {}", err)
+            }
+            Error::FailedToGetPersonIdentity(err) => {
+                format!("Failed to get person identity: {}", err)
+            }
+            Error::NoPersonIdentityFound { person_uuid } => {
+                format!(
+                    "No person identity found for person {}",
+                    person_uuid.to_uuid()
+                )
+            }
         }
     }
 }
 
 impl ProcessMessageJob {
-    pub async fn run<W: MessageCapability + SceneCapability>(
+    pub async fn run<
+        W: MessageCapability
+            + SceneCapability
+            + ReactionCapability
+            + MemoryCapability
+            + PersonCapability
+            + EventCapability
+            + StateOfMindCapability
+            + PersonIdentityCapability,
+    >(
         self,
         worker: &W,
     ) -> Result<(), Error> {
@@ -48,17 +103,116 @@ impl ProcessMessageJob {
         };
 
         match message.recipient {
-            MessageRecipient::Person(_person_uuid) => {
-                todo!("Process message to AI person");
-            }
-            MessageRecipient::RealWorldUser => {
+            MessageRecipient::Person(ref person_uuid) => {
+                let actions = process_message_for_person(worker, &message, person_uuid).await?;
 
-                // Process message to real-world user
+                for action in actions {
+                    match action {
+                        PersonAction::Wait { .. } => {}
+                        PersonAction::SayInScene { .. } => {}
+                    }
+                }
             }
+            MessageRecipient::RealWorldUser => {}
         }
 
         // Placeholder for additional processing logic on the message
 
         Ok(())
     }
+}
+
+async fn process_message_for_person<
+    'a,
+    W: MessageCapability
+        + SceneCapability
+        + ReactionCapability
+        + MemoryCapability
+        + PersonCapability
+        + EventCapability
+        + StateOfMindCapability
+        + PersonIdentityCapability,
+>(
+    worker: &W,
+    message: &'a Message,
+    person_uuid: &'a PersonUuid,
+) -> Result<Vec<PersonAction>, Error> {
+    let persons_name: PersonName =
+        worker
+            .get_persons_name(person_uuid.clone())
+            .await
+            .map_err(|err| {
+                Error::FailedToGetMessage(format!("Failed to get person's name: {}", err))
+            })?;
+
+    let message_type_args = match &message.scene_uuid {
+        None => MessageTypeArgs::Direct {
+            from: message.sender.clone(),
+        },
+        Some(scene_uuid) => MessageTypeArgs::Scene {
+            scene_name: "".to_string(),
+            scene_description: "".to_string(),
+            people: vec![],
+        },
+    };
+
+    let get_args: capability::event::GetArgs =
+        capability::event::GetArgs::new().with_person_uuid(person_uuid.clone());
+
+    let events = worker
+        .get_events(get_args)
+        .await
+        .map_err(Error::FailedToGetEvents)?
+        .iter()
+        .map(|event| event.to_text())
+        .collect::<Vec<String>>();
+
+    let maybe_state_of_mind: Option<StateOfMind> = worker
+        .get_latest_state_of_mind(&person_uuid)
+        .await
+        .map_err(Error::FailedToGetStateOfMind)?;
+
+    let state_of_mind: StateOfMind = match maybe_state_of_mind {
+        Some(som) => som,
+        None => Err(Error::NoStateOfMindFound {
+            person_uuid: person_uuid.clone(),
+        })?,
+    };
+
+    let memories_prompt = worker
+        .create_memory_query_prompt(
+            persons_name,
+            message_type_args,
+            events,
+            &state_of_mind.content,
+        )
+        .await
+        .map_err(Error::CouldNotCreateMemoriesPrompt)?;
+
+    let memories: Vec<Memory> = worker
+        .search_memories(memories_prompt.prompt, 8)
+        .await
+        .map_err(Error::FailedToSearchMemories)?
+        .into_iter()
+        .map(|memory_search_result: MemorySearchResult| Memory::from(memory_search_result))
+        .collect();
+
+    let maybe_person_identity: Option<String> = worker
+        .get_person_identity(person_uuid)
+        .await
+        .map_err(Error::FailedToGetPersonIdentity)?;
+
+    let person_identity: String = match maybe_person_identity {
+        Some(identity) => identity,
+        None => Err(Error::NoPersonIdentityFound {
+            person_uuid: person_uuid.clone(),
+        })?,
+    };
+
+    let actions = worker
+        .get_reaction(memories, person_identity, state_of_mind.content)
+        .await
+        .map_err(Error::GetPersonReactionCompletionError)?;
+
+    Ok(actions)
 }
