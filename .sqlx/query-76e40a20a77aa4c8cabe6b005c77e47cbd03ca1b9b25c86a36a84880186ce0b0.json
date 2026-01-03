@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                SELECT\n                    scene.uuid AS scene_uuid\n                FROM scene_participant\n                JOIN scene ON scene_participant.scene_uuid = scene.uuid\n                WHERE scene_participant.person_uuid = $1::UUID AND scene_participant.left_at IS NULL\n                ORDER BY scene_participant.joined_at DESC\n                LIMIT 1;\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "scene_uuid",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "76e40a20a77aa4c8cabe6b005c77e47cbd03ca1b9b25c86a36a84880186ce0b0"
+}

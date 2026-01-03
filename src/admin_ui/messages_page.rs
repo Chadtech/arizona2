@@ -2,9 +2,10 @@ use super::s;
 use crate::capability::job::JobCapability;
 use crate::capability::message::{self, MessageCapability};
 use crate::capability::scene::{Scene, SceneCapability};
-use crate::domain::job::send_message_to_scene::{RandomSeed, SendMessageToSceneJob};
+use crate::domain::job::send_message_to_scene::SendMessageToSceneJob;
 use crate::domain::job::JobKind;
 use crate::domain::message::{Message, MessageSender};
+use crate::domain::random_seed::RandomSeed;
 use crate::domain::scene_uuid::SceneUuid;
 use crate::worker::Worker;
 use iced::{widget as w, Element, Length, Task};
@@ -206,7 +207,7 @@ impl Model {
                         sender: MessageSender::RealWorldUser,
                         scene_uuid: scene.uuid.clone(),
                         content: self.message_input.clone(),
-                        random_seed: RandomSeed::new(rand::random()),
+                        random_seed: RandomSeed::from_u64(rand::random()),
                     };
 
                     self.send_status = SendStatus::Sending;

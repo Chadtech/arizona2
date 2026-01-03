@@ -2,6 +2,7 @@ use super::Worker;
 use crate::capability::memory::{
     MemoryCapability, MemoryQueryPrompt, MemorySearchResult, MessageTypeArgs, NewMemory,
 };
+use crate::capability::scene::SceneCapability;
 use crate::domain::memory_uuid::MemoryUuid;
 use crate::domain::message::MessageSender;
 use crate::domain::person_name::PersonName;
@@ -48,20 +49,65 @@ impl MemoryCapability for Worker {
     ) -> Result<MemoryQueryPrompt, String> {
         let mut prompt = String::new();
 
+        fn add_scene_to_prompt(
+            prompt: &mut String,
+            person_recalling: &PersonName,
+            scene_name: &String,
+            scene_description: &String,
+        ) {
+            prompt.push_str(
+                format!(
+                    "{} is in a scene called '{}'. The scene is described as: {}.\n\n",
+                    person_recalling.to_string(),
+                    scene_name,
+                    scene_description
+                )
+                .as_str(),
+            );
+        }
+
         match &message_type_args {
             MessageTypeArgs::Scene {
                 scene_name,
                 scene_description,
                 ..
             } => {
-                prompt.push_str(
-                    format!(
-                        "{} is in a scene called '{}'. The scene is described as: {}.\n\n",
-                        person_recalling.to_string(),
-                        scene_name,
-                        scene_description
-                    )
-                    .as_str(),
+                add_scene_to_prompt(
+                    &mut prompt,
+                    &person_recalling,
+                    scene_name,
+                    scene_description,
+                );
+            }
+            MessageTypeArgs::SceneByUuid { scene_uuid } => {
+                let maybe_scene_name = self
+                    .get_scene_name(scene_uuid)
+                    .await
+                    .map_err(|err| format!("Error fetching scene name: {}", err))?;
+
+                let scene_name = match maybe_scene_name {
+                    Some(name) => name,
+                    None => Err(format!("Scene with UUID {} not found", scene_uuid.clone()))?,
+                };
+
+                let maybe_scene_description = self
+                    .get_scene_description(scene_uuid)
+                    .await
+                    .map_err(|err| format!("Error fetching scene description: {}", err))?;
+
+                let scene_description = match maybe_scene_description {
+                    Some(description) => description,
+                    None => Err(format!(
+                        "Scene description for UUID {} not found",
+                        scene_uuid.to_string()
+                    ))?,
+                };
+
+                add_scene_to_prompt(
+                    &mut prompt,
+                    &person_recalling,
+                    &scene_name,
+                    &scene_description,
                 );
             }
             MessageTypeArgs::Direct { from } => {
@@ -108,17 +154,34 @@ impl MemoryCapability for Worker {
             .as_str(),
         );
 
+        fn add_people_to_prompt(prompt: &mut String, people: &Vec<String>) {
+            prompt.push_str("\n\nOther people present:\n");
+
+            for person in people {
+                prompt.push_str(format!("- {}\n", person).as_str());
+            }
+        }
+
         match message_type_args {
             MessageTypeArgs::Scene { people, .. } => {
-                prompt.push_str("\n\nOther people present:\n");
-
-                for person in people {
-                    prompt.push_str(format!("- {}\n", person).as_str());
-                }
+                add_people_to_prompt(&mut prompt, &people);
             }
             MessageTypeArgs::Direct { .. } => {
                 prompt
                     .push_str("\n\nThis is a direct message, so no one else is around to see it\n");
+            }
+            MessageTypeArgs::SceneByUuid { scene_uuid } => {
+                let scene_participants = self
+                    .get_scene_current_participants(&scene_uuid)
+                    .await
+                    .map_err(|err| format!("Error fetching scene participants: {}", err))?;
+
+                let participant_names: Vec<String> = scene_participants
+                    .iter()
+                    .map(|participant| participant.person_name.to_string().to_owned())
+                    .collect();
+
+                add_people_to_prompt(&mut prompt, &participant_names);
             }
         }
 

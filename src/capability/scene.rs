@@ -56,6 +56,10 @@ pub trait SceneCapability {
         &self,
         person_name: PersonName,
     ) -> Result<Option<CurrentScene>, String>;
+    async fn get_persons_current_scene_uuid(
+        &self,
+        person_uuid: &PersonUuid,
+    ) -> Result<Option<SceneUuid>, String>;
     async fn create_scene_snapshot(
         &self,
         new_scene_snapshot: NewSceneSnapshot,

@@ -5,6 +5,7 @@ use crate::domain::job::process_message::ProcessMessageJob;
 use crate::domain::job::JobKind;
 use crate::domain::message::MessageRecipient;
 use crate::domain::message_uuid::MessageUuid;
+use crate::domain::random_seed::RandomSeed;
 use crate::domain::scene_uuid::SceneUuid;
 use crate::nice_display::NiceDisplay;
 use crate::{capability::scene::SceneCapability, domain::message::MessageSender};
@@ -18,19 +19,6 @@ pub struct SendMessageToSceneJob {
     pub scene_uuid: SceneUuid,
     pub content: String,
     pub random_seed: RandomSeed,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RandomSeed(u64);
-
-impl RandomSeed {
-    pub fn new(seed: u64) -> Self {
-        Self(seed)
-    }
-
-    pub fn value(&self) -> u64 {
-        self.0
-    }
 }
 
 pub enum Error {

@@ -1,7 +1,14 @@
 use serde::{Deserialize, Serialize};
+use std::fmt::Display;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SceneUuid(uuid::Uuid);
+
+impl Display for SceneUuid {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
 
 impl SceneUuid {
     pub fn new() -> Self {

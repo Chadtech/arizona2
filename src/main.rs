@@ -98,8 +98,9 @@ async fn main() -> Result<(), String> {
     // Job runner gets "info" level, admin_ui stays at "warn"
     // cosmic_text warnings suppressed (font loading warnings are harmless)
     // Can be overridden with RUST_LOG env var
-    let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("warn,arizona2::job_runner=info,cosmic_text=error"));
+    let env_filter = tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+        tracing_subscriber::EnvFilter::new("warn,arizona2::job_runner=info,cosmic_text=error")
+    });
 
     tracing_subscriber::registry()
         .with(env_filter)

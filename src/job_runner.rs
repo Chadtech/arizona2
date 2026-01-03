@@ -11,6 +11,7 @@ use crate::domain::job::{
     person_waiting, process_message, send_message_to_scene, JobKind, PoppedJob,
 };
 use crate::domain::job_uuid::JobUuid;
+use crate::domain::random_seed::RandomSeed;
 use crate::nice_display::NiceDisplay;
 use crate::worker;
 use crate::worker::Worker;
@@ -81,10 +82,11 @@ impl NiceDisplay for RunJobError {
     }
 }
 pub async fn run() -> Result<(), Error> {
-    let worker = Worker::new().await.map_err(Error::WorkerInitError)?;
+    let mut worker = Worker::new().await.map_err(Error::WorkerInitError)?;
     tracing::info!("Job runner started, polling for jobs");
     loop {
-        if let Err(err) = run_next_job(worker.clone()).await {
+        let random_seed = worker.get_random_seed();
+        if let Err(err) = run_next_job(worker.clone(), random_seed).await {
             // Log the error but continue processing other jobs
             tracing::error!("Job runner error: {}", err.to_nice_error().to_string());
         }
@@ -103,6 +105,7 @@ async fn run_next_job<
         + PersonIdentityCapability,
 >(
     worker: W,
+    random_seed: RandomSeed,
 ) -> Result<(), Error> {
     let job = match worker.pop_next_job().await.map_err(Error::PopJobError)? {
         Some(j) => j,
@@ -114,7 +117,7 @@ async fn run_next_job<
     let job_uuid = job.uuid.clone();
     tracing::info!("Processing job {} of type {:?}", job_uuid, job.kind);
 
-    run_job(worker, job)
+    run_job(worker, random_seed, job)
         .await
         .map_err(|err| Error::RunJobError((job_uuid, err)))
 }
@@ -131,6 +134,7 @@ async fn run_job<
         + PersonIdentityCapability,
 >(
     worker: W,
+    random_seed: RandomSeed,
     job: PoppedJob,
 ) -> Result<(), RunJobError> {
     let res: Result<(), RunJobError> = match job.kind {
@@ -149,7 +153,7 @@ async fn run_job<
         JobKind::ProcessMessage(process_message_job) => {
             tracing::debug!("Executing ProcessMessage job");
             process_message_job
-                .run(&worker)
+                .run(&worker, random_seed)
                 .await
                 .map_err(RunJobError::ProcessMessageError)
         }

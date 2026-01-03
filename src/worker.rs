@@ -8,6 +8,7 @@ mod reaction_capability;
 mod scene_capability;
 mod state_of_mind_capability;
 
+use crate::domain::random_seed::RandomSeed;
 use crate::{db, nice_display::NiceDisplay, open_ai_key::OpenAiKey};
 use sqlx::postgres::PgPoolOptions;
 use sqlx::Postgres;
@@ -19,6 +20,7 @@ pub struct Worker {
     pub open_ai_key: OpenAiKey,
     pub reqwest_client: reqwest::Client,
     pub sqlx: sqlx::Pool<Postgres>,
+    pub random_seed: RandomSeed,
 }
 
 #[derive(Debug)]
@@ -82,6 +84,7 @@ impl Worker {
             open_ai_key,
             reqwest_client: reqwest::Client::new(),
             sqlx: sqlx_pool,
+            random_seed: RandomSeed::new(),
         })
     }
 
@@ -91,5 +94,13 @@ impl Worker {
             .await
             .map_err(|err| err.to_string())?;
         Ok(())
+    }
+
+    pub fn get_random_seed(&mut self) -> RandomSeed {
+        let (seed1, seed2) = self.random_seed.split();
+
+        self.random_seed = seed2;
+
+        seed1
     }
 }

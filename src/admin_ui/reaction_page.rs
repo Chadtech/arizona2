@@ -37,7 +37,10 @@ pub struct Storage {
 #[derive(Debug, Clone)]
 pub enum Msg {
     ClickedAddMemory,
-    MemoryUpdated { index: usize, action: w::text_editor::Action },
+    MemoryUpdated {
+        index: usize,
+        action: w::text_editor::Action,
+    },
     IdentityFieldChanged(String),
     ClickedSubmitReaction,
     SituationFieldChanged(String),

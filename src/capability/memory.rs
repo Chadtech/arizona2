@@ -1,6 +1,8 @@
+use super::scene::SceneCapability;
 use crate::domain::memory_uuid::MemoryUuid;
 use crate::domain::message::MessageSender;
 use crate::domain::person_name::PersonName;
+use crate::domain::scene_uuid::SceneUuid;
 
 pub struct NewMemory {
     pub memory_uuid: MemoryUuid,
@@ -25,12 +27,15 @@ pub enum MessageTypeArgs {
         scene_description: String,
         people: Vec<String>,
     },
+    SceneByUuid {
+        scene_uuid: SceneUuid,
+    },
     Direct {
         from: MessageSender,
     },
 }
 
-pub trait MemoryCapability {
+pub trait MemoryCapability: SceneCapability {
     async fn create_memory(&self, new_memory: NewMemory) -> Result<MemoryUuid, String>;
     async fn create_memory_query_prompt(
         &self,

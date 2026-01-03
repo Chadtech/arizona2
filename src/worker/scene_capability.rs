@@ -123,6 +123,35 @@ impl SceneCapability for Worker {
         Ok(maybe_ret)
     }
 
+    async fn get_persons_current_scene_uuid(
+        &self,
+        person_uuid: &PersonUuid,
+    ) -> Result<Option<SceneUuid>, String> {
+        let maybe_rec = sqlx::query!(
+            r#"
+                SELECT
+                    scene.uuid AS scene_uuid
+                FROM scene_participant
+                JOIN scene ON scene_participant.scene_uuid = scene.uuid
+                WHERE scene_participant.person_uuid = $1::UUID AND scene_participant.left_at IS NULL
+                ORDER BY scene_participant.joined_at DESC
+                LIMIT 1;
+            "#,
+            person_uuid.to_uuid(),
+        )
+        .fetch_optional(&self.sqlx)
+        .await
+        .map_err(|err| {
+            format!(
+                "Error fetching person {}'s current scene UUID: {}",
+                person_uuid.clone().to_string(),
+                err
+            )
+        })?;
+
+        Ok(maybe_rec.map(|rec| SceneUuid::from_uuid(rec.scene_uuid)))
+    }
+
     async fn create_scene_snapshot(
         &self,
         new_scene_snapshot: NewSceneSnapshot,
