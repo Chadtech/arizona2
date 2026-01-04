@@ -33,6 +33,7 @@ pub struct ProcessMessageJob {
 pub enum Error {
     FailedToGetMessage(String),
     MessageNotFound,
+    FailedToMarkMessageRead(String),
     GetPersonReactionCompletionError(CompletionError),
     FailedToGetEvents(String),
     FailedToGetStateOfMind(String),
@@ -49,11 +50,6 @@ pub enum Error {
         person_uuid: PersonUuid,
         error: String,
     },
-    CouldNotLoadScene {
-        scene_uuid: SceneUuid,
-        details: String,
-        subject: String,
-    },
     PersonCouldNotSayInScene {
         scene_uuid: SceneUuid,
         details: String,
@@ -63,6 +59,11 @@ pub enum Error {
         person_uuid: PersonUuid,
         details: String,
     },
+    FailedToGetSendersName {
+        person_uuid: PersonUuid,
+        details: String,
+    },
+    FailedToGetPersonsName(String),
 }
 
 impl NiceDisplay for Error {
@@ -72,6 +73,9 @@ impl NiceDisplay for Error {
                 format!("Failed to get message: {}", details)
             }
             Error::MessageNotFound => "Message not found".to_string(),
+            Error::FailedToMarkMessageRead(details) => {
+                format!("Failed to mark message as read: {}", details)
+            }
             Error::GetPersonReactionCompletionError(err) => {
                 format!("Failed to get person reaction: {}", err.message())
             }
@@ -106,18 +110,6 @@ impl NiceDisplay for Error {
             Error::PersonCouldNotWait { person_uuid, error } => {
                 format!("Person {} could not wait: {}", person_uuid.to_uuid(), error)
             }
-            Error::CouldNotLoadScene {
-                scene_uuid,
-                details,
-                subject,
-            } => {
-                format!(
-                    "Could not load scene {} for {}: {}",
-                    scene_uuid.to_uuid(),
-                    subject,
-                    details
-                )
-            }
             Error::PersonCouldNotSayInScene {
                 scene_uuid,
                 details,
@@ -129,6 +121,29 @@ impl NiceDisplay for Error {
                     scene_uuid.to_uuid(),
                     details
                 )
+            }
+            Error::CouldNotGetPersonsScene {
+                person_uuid,
+                details,
+            } => {
+                format!(
+                    "Could not get current scene for person {}: {}",
+                    person_uuid.to_uuid(),
+                    details
+                )
+            }
+            Error::FailedToGetSendersName {
+                person_uuid,
+                details,
+            } => {
+                format!(
+                    "Failed to get person's name for {}: {}",
+                    person_uuid.to_uuid(),
+                    details
+                )
+            }
+            Error::FailedToGetPersonsName(err) => {
+                format!("Failed to get person's name: {}", err)
             }
         }
     }
@@ -199,7 +214,9 @@ impl ProcessMessageJob {
                                 content: comment,
                                 random_seed: random_seed.clone(),
                             };
+
                             let job_kind = JobKind::SendMessageToScene(send_message_to_scene_job);
+
                             worker.unshift_job(job_kind).await.map_err(|err| {
                                 Error::PersonCouldNotSayInScene {
                                     scene_uuid: scene_uuid,
@@ -211,8 +228,15 @@ impl ProcessMessageJob {
                     }
                 }
             }
-            MessageRecipient::RealWorldUser => {}
+            MessageRecipient::RealWorldUser => {
+                //
+            }
         }
+
+        worker
+            .mark_message_read(&self.message_uuid)
+            .await
+            .map_err(Error::FailedToMarkMessageRead)?;
 
         // Placeholder for additional processing logic on the message
 
@@ -235,13 +259,10 @@ async fn process_message_for_person<
     message: &'a Message,
     person_uuid: &'a PersonUuid,
 ) -> Result<Vec<PersonAction>, Error> {
-    let persons_name: PersonName =
-        worker
-            .get_persons_name(person_uuid.clone())
-            .await
-            .map_err(|err| {
-                Error::FailedToGetMessage(format!("Failed to get person's name: {}", err))
-            })?;
+    let persons_name: PersonName = worker
+        .get_persons_name(person_uuid.clone())
+        .await
+        .map_err(Error::FailedToGetPersonsName)?;
 
     let message_type_args = match &message.scene_uuid {
         None => MessageTypeArgs::Direct {
@@ -275,12 +296,26 @@ async fn process_message_for_person<
         })?,
     };
 
+    let sender_name = match &message.sender {
+        MessageSender::AiPerson(sender_person_uuid) => worker
+            .get_persons_name(sender_person_uuid.clone())
+            .await
+            .map_err(|err| Error::FailedToGetSendersName {
+                person_uuid: sender_person_uuid.clone(),
+                details: err,
+            })?,
+        MessageSender::RealWorldUser => PersonName::from_string("Chadtech".to_string()),
+    };
+
+    let situation = format!("{} said:\n\n{}", sender_name.to_string(), message.content);
+
     let memories_prompt = worker
         .create_memory_query_prompt(
             persons_name,
             message_type_args,
             events,
             &state_of_mind.content,
+            &situation,
         )
         .await
         .map_err(Error::CouldNotCreateMemoriesPrompt)?;
@@ -306,7 +341,7 @@ async fn process_message_for_person<
     };
 
     let actions = worker
-        .get_reaction(memories, person_identity, state_of_mind.content)
+        .get_reaction(memories, person_identity, state_of_mind.content, situation)
         .await
         .map_err(Error::GetPersonReactionCompletionError)?;
 

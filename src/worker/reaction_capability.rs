@@ -12,10 +12,11 @@ impl ReactionCapability for Worker {
         memories: Vec<Memory>,
         person_identity: String,
         state_of_mind: String,
+        situation: String,
     ) -> Result<Vec<PersonAction>, CompletionError> {
         let mut completion = Completion::new(open_ai::model::Model::Gpt4p1);
 
-        completion.add_message(Role::System, "You are a person simulation framework. You have deep insights into the human mind and are very good at predicting people's reactions. When given a description of a person, their state of mind, and some of their recent memories, respond as the person would in.");
+        completion.add_message(Role::System, "You are a person simulation framework. You have deep insights into the human mind and are very good at predicting people's reactions to given situations. When given a description of a person, their state of mind, and some of their recent memories, respond as the person would in this situation.");
 
         let memories_list = memories
             .iter()
@@ -34,6 +35,8 @@ impl ReactionCapability for Worker {
             Role::User,
             format!("State of Mind: {}", state_of_mind).as_str(),
         );
+
+        completion.add_message(Role::User, format!("Situation: {}", situation).as_str());
 
         for person_action_kind in PersonActionKind::all() {
             completion.add_tool_call(person_action_kind.to_open_ai_tool());

@@ -16,4 +16,5 @@ pub trait MessageCapability {
         &self,
         message_uuid: &MessageUuid,
     ) -> Result<Option<Message>, String>;
+    async fn mark_message_read(&self, message_uuid: &MessageUuid) -> Result<(), String>;
 }

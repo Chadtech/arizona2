@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                UPDATE message\n                SET read_at = NOW()\n                WHERE uuid = $1::UUID\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "59f5fba5b237a453708226e8f844869b77d9e7d98044ab37d66260b053af4f9f"
+}

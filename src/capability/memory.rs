@@ -43,6 +43,7 @@ pub trait MemoryCapability: SceneCapability {
         message_type_args: MessageTypeArgs,
         recent_events: Vec<String>,
         state_of_mind: &String,
+        situation: &String,
     ) -> Result<MemoryQueryPrompt, String>;
     async fn search_memories(
         &self,

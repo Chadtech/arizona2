@@ -46,6 +46,7 @@ impl MemoryCapability for Worker {
         message_type_args: MessageTypeArgs,
         recent_events: Vec<String>,
         state_of_mind: &String,
+        situation: &String,
     ) -> Result<MemoryQueryPrompt, String> {
         let mut prompt = String::new();
 
@@ -161,6 +162,14 @@ impl MemoryCapability for Worker {
                 prompt.push_str(format!("- {}\n", person).as_str());
             }
         }
+
+        prompt.push_str(
+            format!(
+                "\n\nThe current situation is described as:\n{}\n",
+                situation
+            )
+            .as_str(),
+        );
 
         match message_type_args {
             MessageTypeArgs::Scene { people, .. } => {

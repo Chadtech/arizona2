@@ -1,10 +1,9 @@
 use super::s;
 use crate::capability::job::JobCapability;
-use crate::capability::message::{self, MessageCapability};
 use crate::capability::scene::{Scene, SceneCapability};
 use crate::domain::job::send_message_to_scene::SendMessageToSceneJob;
 use crate::domain::job::JobKind;
-use crate::domain::message::{Message, MessageSender};
+use crate::domain::message::MessageSender;
 use crate::domain::random_seed::RandomSeed;
 use crate::domain::scene_uuid::SceneUuid;
 use crate::worker::Worker;

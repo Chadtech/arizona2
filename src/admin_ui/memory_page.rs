@@ -18,6 +18,7 @@ pub struct Model {
     query_scene_description_field: String,
     query_recent_events_field: Vec<String>,
     query_state_of_mind_field: String,
+    query_situation_field: String,
     query_status: QueryStatus,
 }
 
@@ -55,6 +56,7 @@ pub enum Msg {
     QuerySceneDescriptionChanged(String),
     QueryRecentEventChanged(usize, String),
     QueryStateOfMindChanged(String),
+    QuerySituationChanged(String),
     ClickedAddRecentEvent,
     ClickedRemoveRecentEvent(usize),
     ClickedGeneratePrompt,
@@ -79,6 +81,8 @@ pub struct Storage {
     query_recent_events_field: Vec<String>,
     #[serde(default)]
     query_state_of_mind_field: String,
+    #[serde(default)]
+    query_situation_field: String,
 }
 
 impl Default for Storage {
@@ -92,6 +96,7 @@ impl Default for Storage {
             query_scene_description_field: String::new(),
             query_recent_events_field: Vec::new(),
             query_state_of_mind_field: String::new(),
+            query_situation_field: String::new(),
         }
     }
 }
@@ -108,6 +113,7 @@ impl Model {
             query_scene_description_field: storage.query_scene_description_field.clone(),
             query_recent_events_field: storage.query_recent_events_field.clone(),
             query_state_of_mind_field: storage.query_state_of_mind_field.clone(),
+            query_situation_field: storage.query_situation_field.clone(),
             query_status: QueryStatus::Ready,
         }
     }
@@ -135,6 +141,9 @@ impl Model {
             w::text("State of Mind"),
             w::text_input("", &self.query_state_of_mind_field)
                 .on_input(Msg::QueryStateOfMindChanged),
+            w::text("Situation"),
+            w::text_input("", &self.query_situation_field)
+                .on_input(Msg::QuerySituationChanged),
             w::text("Recent Events"),
         ]
         .spacing(s::S4);
@@ -167,6 +176,7 @@ impl Model {
             query_scene_description_field: self.query_scene_description_field.clone(),
             query_recent_events_field: self.query_recent_events_field.clone(),
             query_state_of_mind_field: self.query_state_of_mind_field.clone(),
+            query_situation_field: self.query_situation_field.clone(),
         }
     }
 
@@ -228,6 +238,10 @@ impl Model {
                 self.query_state_of_mind_field = value;
                 Task::none()
             }
+            Msg::QuerySituationChanged(value) => {
+                self.query_situation_field = value;
+                Task::none()
+            }
             Msg::ClickedAddRecentEvent => {
                 self.query_recent_events_field.push(String::new());
                 Task::none()
@@ -253,6 +267,7 @@ impl Model {
                 let scene_description = self.query_scene_description_field.clone();
                 let recent_events = self.query_recent_events_field.clone();
                 let state_of_mind = self.query_state_of_mind_field.clone();
+                let situation = self.query_situation_field.clone();
 
                 Task::perform(
                     async move {
@@ -264,6 +279,7 @@ impl Model {
                             scene_description,
                             recent_events,
                             state_of_mind,
+                            situation,
                         )
                         .await
                     },
@@ -344,6 +360,7 @@ async fn generate_prompt_and_search_memories(
     scene_description: String,
     recent_events: Vec<String>,
     state_of_mind: String,
+    situation: String,
 ) -> Result<MemoryQueryResult, String> {
     let message_type_args = capability::memory::MessageTypeArgs::Scene {
         scene_name: scene_name.clone(),
@@ -357,6 +374,7 @@ async fn generate_prompt_and_search_memories(
             message_type_args,
             recent_events,
             &state_of_mind,
+            &situation,
         )
         .await?;
 

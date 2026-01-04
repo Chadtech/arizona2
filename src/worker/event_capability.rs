@@ -2,7 +2,6 @@ use crate::capability::event::{EventCapability, GetArgs};
 use crate::domain::event::{Event, EventType};
 use crate::domain::message::MessageSender;
 use crate::worker::Worker;
-use chrono::{DateTime, Utc};
 
 impl EventCapability for Worker {
     async fn get_events(&self, args: GetArgs) -> Result<Vec<Event>, String> {

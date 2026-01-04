@@ -120,4 +120,20 @@ impl MessageCapability for Worker {
             None => Ok(None),
         }
     }
+
+    async fn mark_message_read(&self, message_uuid: &MessageUuid) -> Result<(), String> {
+        sqlx::query!(
+            r#"
+                UPDATE message
+                SET read_at = NOW()
+                WHERE uuid = $1::UUID
+            "#,
+            message_uuid.to_uuid()
+        )
+        .execute(&self.sqlx)
+        .await
+        .map_err(|err| format!("Error marking message as read: {}", err))?;
+
+        Ok(())
+    }
 }

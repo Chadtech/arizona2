@@ -1,4 +1,3 @@
-use crate::capability::scene::SceneCapability;
 use crate::domain::{event::Event, person_uuid::PersonUuid, scene_uuid::SceneUuid};
 
 pub struct GetArgs {

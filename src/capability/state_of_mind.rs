@@ -1,7 +1,7 @@
 use crate::domain::state_of_mind::StateOfMind;
 use crate::domain::{
     person_name::PersonName,
-    person_uuid::{self, PersonUuid},
+    person_uuid::PersonUuid,
     state_of_mind_uuid::StateOfMindUuid,
 };
 use async_trait::async_trait;
