@@ -22,6 +22,12 @@ pub enum Error {
     RunJobError((JobUuid, RunJobError)),
 }
 
+#[derive(Debug, Clone, Copy)]
+pub enum RunNextJobResult {
+    NoJob,
+    RanJob,
+}
+
 pub enum RunJobError {
     FailedToMarkJobFinished(String),
     FailedToMarkJobFailed(String),
@@ -82,15 +88,42 @@ impl NiceDisplay for RunJobError {
     }
 }
 pub async fn run() -> Result<(), Error> {
-    let mut worker = Worker::new().await.map_err(Error::WorkerInitError)?;
+    let worker = Worker::new().await.map_err(Error::WorkerInitError)?;
     tracing::info!("Job runner started, polling for jobs");
     loop {
-        let random_seed = worker.get_random_seed();
+        let random_seed = match worker.get_random_seed() {
+            Ok(seed) => seed,
+            Err(err) => {
+                tracing::error!("Job runner seed error: {}", err);
+                continue;
+            }
+        };
         if let Err(err) = run_next_job(worker.clone(), random_seed).await {
             // Log the error but continue processing other jobs
             tracing::error!("Job runner error: {}", err.to_nice_error().to_string());
         }
     }
+}
+
+pub async fn run_one_job(
+    worker: Worker,
+    random_seed: RandomSeed,
+) -> Result<RunNextJobResult, Error> {
+    let job = match worker.pop_next_job().await.map_err(Error::PopJobError)? {
+        Some(j) => j,
+        None => {
+            return Ok(RunNextJobResult::NoJob);
+        }
+    };
+
+    let job_uuid = job.uuid.clone();
+    tracing::info!("Processing job {} of type {:?}", job_uuid, job.kind);
+
+    run_job(worker, random_seed, job)
+        .await
+        .map_err(|err| Error::RunJobError((job_uuid, err)))?;
+
+    Ok(RunNextJobResult::RanJob)
 }
 
 async fn run_next_job<

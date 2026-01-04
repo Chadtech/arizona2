@@ -13,6 +13,7 @@ use crate::{db, nice_display::NiceDisplay, open_ai_key::OpenAiKey};
 use sqlx::postgres::PgPoolOptions;
 use sqlx::Postgres;
 use std::env::VarError;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 #[derive(Clone, Debug)]
@@ -20,7 +21,7 @@ pub struct Worker {
     pub open_ai_key: OpenAiKey,
     pub reqwest_client: reqwest::Client,
     pub sqlx: sqlx::Pool<Postgres>,
-    pub random_seed: RandomSeed,
+    pub random_seed: Arc<Mutex<RandomSeed>>,
 }
 
 #[derive(Debug)]
@@ -84,7 +85,7 @@ impl Worker {
             open_ai_key,
             reqwest_client: reqwest::Client::new(),
             sqlx: sqlx_pool,
-            random_seed: RandomSeed::new(),
+            random_seed: Arc::new(Mutex::new(RandomSeed::new())),
         })
     }
 
@@ -96,11 +97,13 @@ impl Worker {
         Ok(())
     }
 
-    pub fn get_random_seed(&mut self) -> RandomSeed {
-        let (seed1, seed2) = self.random_seed.split();
-
-        self.random_seed = seed2;
-
-        seed1
+    pub fn get_random_seed(&self) -> Result<RandomSeed, String> {
+        let mut seed_guard = self
+            .random_seed
+            .lock()
+            .map_err(|err| format!("Random seed mutex poisoned: {:?}", err))?;
+        let (seed1, seed2) = seed_guard.split();
+        *seed_guard = seed2;
+        Ok(seed1)
     }
 }

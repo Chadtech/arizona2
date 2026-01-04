@@ -1,4 +1,4 @@
-use crate::capability::memory::MemoryCapability;
+use crate::capability::memory::{MemoryCapability, MemorySearchResult};
 use crate::domain::memory_uuid::MemoryUuid;
 use crate::domain::person_name::PersonName;
 use crate::worker::Worker;
@@ -30,15 +30,14 @@ enum Status {
 }
 
 #[derive(Clone, Debug)]
-struct MemoryQueryResult {
-    prompt: String,
-    memories: Vec<crate::capability::memory::MemorySearchResult>,
+pub struct MemoryQueryResult {
+    pub prompt: String,
+    pub memories: Vec<MemorySearchResult>,
 }
 
 enum QueryStatus {
     Ready,
     GeneratingPrompt,
-    SearchingMemories(String),
     Done(MemoryQueryResult),
     Failed(String),
 }
@@ -142,8 +141,7 @@ impl Model {
             w::text_input("", &self.query_state_of_mind_field)
                 .on_input(Msg::QueryStateOfMindChanged),
             w::text("Situation"),
-            w::text_input("", &self.query_situation_field)
-                .on_input(Msg::QuerySituationChanged),
+            w::text_input("", &self.query_situation_field).on_input(Msg::QuerySituationChanged),
             w::text("Recent Events"),
         ]
         .spacing(s::S4);
@@ -315,13 +313,6 @@ fn query_status_view(status: &QueryStatus) -> Element<'_, Msg> {
     match status {
         QueryStatus::Ready => w::text("Ready to generate prompt").into(),
         QueryStatus::GeneratingPrompt => w::text("Generating prompt...").into(),
-        QueryStatus::SearchingMemories(prompt) => w::column![
-            w::text("Generated Prompt:").size(16),
-            w::text(prompt),
-            w::text("Searching memories..."),
-        ]
-        .spacing(s::S4)
-        .into(),
         QueryStatus::Done(result) => {
             let mut col = w::column![
                 w::text("Generated Prompt:").size(16),

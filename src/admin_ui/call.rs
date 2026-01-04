@@ -1,7 +1,7 @@
 use crate::open_ai::completion::{Completion, CompletionError};
 use crate::open_ai::role::Role;
 use crate::open_ai_key::OpenAiKey;
-use crate::person_actions::{PersonAction, PersonActionKind};
+use crate::person_actions::{PersonAction, PersonActionError, PersonActionKind};
 use crate::{open_ai, person_actions};
 
 pub async fn submit_prompt(
@@ -61,7 +61,7 @@ pub async fn submit_reaction(
     let person_actions = tool_calls
         .into_iter()
         .map(|tool_call| PersonAction::from_open_ai_tool_call(tool_call))
-        .collect::<Result<Vec<PersonAction>, person_actions::PersonActionError>>()
+        .collect::<Result<Vec<PersonAction>, PersonActionError>>()
         .map_err(Into::into)?;
 
     Ok(person_actions)

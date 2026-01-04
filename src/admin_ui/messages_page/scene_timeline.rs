@@ -87,9 +87,6 @@ impl Model {
             items: timeline_items,
         })
     }
-    pub fn new(items: Vec<TimelineItem>) -> Self {
-        Self { items }
-    }
 
     pub fn update(&mut self, msg: Msg) -> Task<Msg> {
         match msg {

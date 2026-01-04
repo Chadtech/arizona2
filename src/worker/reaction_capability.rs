@@ -1,10 +1,10 @@
 use crate::capability::reaction::ReactionCapability;
 use crate::domain::memory::Memory;
+use crate::open_ai;
 use crate::open_ai::completion::{Completion, CompletionError};
 use crate::open_ai::role::Role;
-use crate::person_actions::{PersonAction, PersonActionKind};
+use crate::person_actions::{PersonAction, PersonActionError, PersonActionKind};
 use crate::worker::Worker;
-use crate::{open_ai, person_actions};
 
 impl ReactionCapability for Worker {
     async fn get_reaction(
@@ -24,19 +24,12 @@ impl ReactionCapability for Worker {
             .collect::<Vec<String>>()
             .join("\n");
 
-        completion.add_message(Role::User, format!("Memories:\n{}", memories_list).as_str());
-
-        completion.add_message(
-            Role::User,
-            format!("Person identity: {}", person_identity).as_str(),
+        let user_prompt = format!(
+            "Memories:\n{}\n\nPerson identity: {}\n\nState of mind: {}\n\nSituation: {}",
+            memories_list, person_identity, state_of_mind, situation
         );
 
-        completion.add_message(
-            Role::User,
-            format!("State of Mind: {}", state_of_mind).as_str(),
-        );
-
-        completion.add_message(Role::User, format!("Situation: {}", situation).as_str());
+        completion.add_message(Role::User, user_prompt.as_str());
 
         for person_action_kind in PersonActionKind::all() {
             completion.add_tool_call(person_action_kind.to_open_ai_tool());
@@ -51,7 +44,7 @@ impl ReactionCapability for Worker {
         let person_actions = tool_calls
             .into_iter()
             .map(|tool_call| PersonAction::from_open_ai_tool_call(tool_call))
-            .collect::<Result<Vec<PersonAction>, person_actions::PersonActionError>>()
+            .collect::<Result<Vec<PersonAction>, PersonActionError>>()
             .map_err(Into::into)?;
 
         Ok(person_actions)
