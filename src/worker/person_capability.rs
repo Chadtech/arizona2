@@ -36,4 +36,27 @@ impl PersonCapability for Worker {
 
         Ok(PersonName::from_string(rec.name))
     }
+
+    async fn get_person_uuid_by_name(
+        &self,
+        person_name: PersonName,
+    ) -> Result<PersonUuid, String> {
+        let rec = sqlx::query!(
+            r#"
+                SELECT uuid
+                FROM person
+                WHERE name = $1::TEXT;
+            "#,
+            person_name.to_string()
+        )
+        .fetch_optional(&self.sqlx)
+        .await
+        .map_err(|err| format!("Error fetching person UUID: {}", err))?;
+
+        let rec = rec.ok_or_else(|| {
+            format!("Person '{}' not found", person_name.to_string())
+        })?;
+
+        Ok(PersonUuid::from_uuid(rec.uuid))
+    }
 }

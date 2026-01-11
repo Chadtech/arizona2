@@ -2,12 +2,13 @@ use super::scene::SceneCapability;
 use crate::domain::memory_uuid::MemoryUuid;
 use crate::domain::message::MessageSender;
 use crate::domain::person_name::PersonName;
+use crate::domain::person_uuid::PersonUuid;
 use crate::domain::scene_uuid::SceneUuid;
 
 pub struct NewMemory {
     pub memory_uuid: MemoryUuid,
     pub content: String,
-    pub person_name: PersonName,
+    pub person_uuid: PersonUuid,
 }
 
 pub struct MemoryQueryPrompt {

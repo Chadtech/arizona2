@@ -1,4 +1,5 @@
 use crate::capability::memory::{MemoryCapability, MemorySearchResult};
+use crate::capability::person::PersonCapability;
 use crate::domain::memory_uuid::MemoryUuid;
 use crate::domain::person_name::PersonName;
 use crate::worker::Worker;
@@ -191,14 +192,11 @@ impl Model {
             Msg::ClickedCreateMemory => {
                 self.status = Status::CreatingMemory;
 
-                let new_memory = NewMemory {
-                    memory_uuid: MemoryUuid::new(),
-                    content: self.memory_field.clone(),
-                    person_name: PersonName::from_string(self.name_field.clone()),
-                };
+                let person_name = self.name_field.clone();
+                let content = self.memory_field.clone();
 
                 Task::perform(
-                    async move { create_new_memory(&worker, new_memory).await },
+                    async move { create_new_memory(&worker, person_name, content).await },
                     Msg::CreatedMemory,
                 )
             }
@@ -305,7 +303,19 @@ fn status_view(status: &Status) -> Element<'_, Msg> {
     }
 }
 
-async fn create_new_memory(worker: &Worker, new_memory: NewMemory) -> Result<MemoryUuid, String> {
+async fn create_new_memory(
+    worker: &Worker,
+    person_name: String,
+    content: String,
+) -> Result<MemoryUuid, String> {
+    let person_name = PersonName::from_string(person_name);
+    let person_uuid = worker.get_person_uuid_by_name(person_name).await?;
+    let new_memory = NewMemory {
+        memory_uuid: MemoryUuid::new(),
+        content,
+        person_uuid,
+    };
+
     worker.create_memory(new_memory).await
 }
 

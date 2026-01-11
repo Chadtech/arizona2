@@ -22,11 +22,11 @@ impl MemoryCapability for Worker {
         let rec = sqlx::query!(
             r#"
                 INSERT INTO memory (uuid, person_uuid, content, embedding)
-                VALUES ($1::UUID, (SELECT person.uuid FROM person WHERE name = $2::TEXT), $3::TEXT, $4)
+                VALUES ($1::UUID, $2::UUID, $3::TEXT, $4)
                 RETURNING uuid;
             "#,
             new_memory.memory_uuid.to_uuid(),
-            new_memory.person_name.to_string(),
+            new_memory.person_uuid.to_uuid(),
             new_memory.content,
             &embedding[..] as &[f32]
         )
