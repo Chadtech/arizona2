@@ -128,6 +128,7 @@ impl Model {
         match msg {
             Msg::ViewModeChanged(mode) => {
                 self.view_mode = mode;
+                self.send_status = SendStatus::Ready;
                 Task::none()
             }
             Msg::Person1Selected(person) => {
@@ -141,6 +142,7 @@ impl Model {
             Msg::SceneNameInputChanged(name) => {
                 self.scene_name_input = name;
                 self.scene_load_status = SceneLoadStatus::Ready;
+                self.send_status = SendStatus::Ready;
                 Task::none()
             }
             Msg::LoadScene => {
@@ -163,6 +165,7 @@ impl Model {
                     };
 
                     self.scene_load_status = SceneLoadStatus::Loaded(loaded_scene);
+                    self.send_status = SendStatus::Ready;
 
                     Task::perform(
                         async move { scene_timeline::Model::load(&worker, scene_uuid).await },
@@ -172,11 +175,13 @@ impl Model {
                 Ok(None) => {
                     self.scene_load_status =
                         SceneLoadStatus::NotFound(self.scene_name_input.clone());
+                    self.send_status = SendStatus::Ready;
 
                     Task::none()
                 }
                 Err(err) => {
                     self.scene_load_status = SceneLoadStatus::Error(err);
+                    self.send_status = SendStatus::Ready;
 
                     Task::none()
                 }
