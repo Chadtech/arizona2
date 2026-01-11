@@ -91,6 +91,18 @@ impl SendMessageToSceneJob {
         participants.shuffle(&mut rng);
 
         for participant in participants {
+            let is_sender = match (&self.sender, &participant.actor_uuid) {
+                (MessageSender::AiPerson(sender_uuid), ActorUuid::AiPerson(participant_uuid)) => {
+                    sender_uuid.to_uuid() == participant_uuid.to_uuid()
+                }
+                (MessageSender::RealWorldUser, ActorUuid::RealWorldUser) => true,
+                _ => false,
+            };
+
+            if is_sender {
+                continue;
+            }
+
             let new_message = NewMessage {
                 sender: self.sender.clone(),
                 recipient: MessageRecipient::from(&participant.actor_uuid),

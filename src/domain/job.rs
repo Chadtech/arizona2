@@ -203,6 +203,19 @@ impl JobKind {
                     Ok(JobKind::ProcessMessage(job))
                 }
             },
+            "person waiting" => match maybe_data {
+                None => Err(ParseError::NoJobDataForJobThatReuiresIt { job_name: name }),
+                Some(data) => {
+                    let job: PersonWaitingJob = serde_json::from_value(data).map_err(|error| {
+                        ParseError::FailedToParseJobData {
+                            job_name: name.clone(),
+                            details: error.to_string(),
+                        }
+                    })?;
+
+                    Ok(JobKind::PersonWaiting(job))
+                }
+            },
             _ => Err(ParseError::UnknownJobName(name)),
         }
     }

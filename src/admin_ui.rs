@@ -15,12 +15,13 @@ use crate::open_ai::completion::CompletionError;
 use crate::worker;
 use crate::worker::Worker;
 use iced;
-use iced::{widget as w, Color, Element, Task, Theme};
+use iced::{time, widget as w, Color, Element, Subscription, Task, Theme};
 use serde::{Deserialize, Serialize};
 use std::fs::File;
 use std::io::Write;
 use std::path::Path;
 use std::sync::Arc;
+use std::time::Instant;
 
 const STORAGE_FILE_PATH: &str = "storage.json";
 
@@ -38,6 +39,8 @@ struct Model {
     tab: Tab,
     worker: Arc<Worker>,
     error: Option<Error>,
+    time_running: bool,
+    last_time_tick: Option<Instant>,
 }
 
 impl Model {
@@ -224,12 +227,16 @@ enum Msg {
     JobPageMsg(job_page::Msg),
     ReactionPageMsg(reaction_page::Msg),
     WarmedUpDb,
+    TimeToggle,
+    TimeTick,
+    TimeTickPersisted(Result<(), String>),
 }
 
 #[derive(Debug)]
 pub enum Error {
     IcedRunError(iced::Error),
     WorkerInitError(worker::InitError),
+    ActiveClockError(String),
     StorageFileCreationError(std::io::Error),
     StorageFileWriteError(std::io::Error),
     StorageSerializationError(String),
@@ -242,6 +249,7 @@ impl NiceDisplay for Error {
         match self {
             Error::IcedRunError(err) => format!("Iced run error: {}", err),
             Error::WorkerInitError(err) => err.message(),
+            Error::ActiveClockError(err) => format!("Active clock error: {}", err),
             Error::StorageFileCreationError(err) => format!("Storage file creation error: {}", err),
             Error::StorageFileWriteError(err) => format!("Storage file write error: {}", err),
             Error::StorageSerializationError(msg) => {
@@ -273,6 +281,8 @@ impl Model {
             worker: Arc::new(flags.worker),
             error: None,
             state_of_mind_page: state_of_mind_page::Model::new(&flags.storage.state_of_mind),
+            time_running: false,
+            last_time_tick: None,
         };
 
         let worker2 = model.worker.clone();
@@ -403,10 +413,62 @@ impl Model {
 
                 task.map(Msg::ReactionPageMsg)
             }
+            Msg::TimeToggle => {
+                self.time_running = !self.time_running;
+                self.last_time_tick = if self.time_running {
+                    Some(Instant::now())
+                } else {
+                    None
+                };
+                Task::none()
+            }
+            Msg::TimeTick => {
+                if !self.time_running {
+                    return Task::none();
+                }
+
+                let now = Instant::now();
+                let delta_ms = match self.last_time_tick {
+                    Some(last) => now
+                        .duration_since(last)
+                        .as_millis()
+                        .try_into()
+                        .unwrap_or(i64::MAX),
+                    None => 0,
+                };
+                self.last_time_tick = Some(now);
+
+                if delta_ms <= 0 {
+                    return Task::none();
+                }
+
+                let worker = self.worker.clone();
+                Task::perform(
+                    async move { advance_active_clock(worker, delta_ms).await },
+                    Msg::TimeTickPersisted,
+                )
+            }
+            Msg::TimeTickPersisted(result) => {
+                if let Err(err) = result {
+                    self.error = Some(Error::ActiveClockError(err));
+                }
+                Task::none()
+            }
         }
     }
 
     fn view(&self) -> Element<'_, Msg> {
+        let time_toggle_label = if self.time_running {
+            "Pause Time"
+        } else {
+            "Play Time"
+        };
+        let time_status = if self.time_running {
+            "Time: Running"
+        } else {
+            "Time: Paused"
+        };
+
         let tabs = Tab::all()
             .iter()
             .map(|tab: &Tab| {
@@ -421,6 +483,11 @@ impl Model {
             .collect::<Vec<Element<Msg>>>();
 
         let tab_row = w::Row::with_children(tabs).spacing(s::S4);
+        let time_controls = w::row![
+            w::button(time_toggle_label).on_press(Msg::TimeToggle),
+            w::text(time_status),
+        ]
+        .spacing(s::S4);
 
         let tab_content: Element<Msg> = match self.tab {
             Tab::Prompt => {
@@ -453,9 +520,19 @@ impl Model {
 
         let scrollable_content = w::scrollable(tab_content);
 
-        w::container(w::column![tab_row, scrollable_content].spacing(s::S4))
+        w::container(
+            w::column![tab_row, time_controls, scrollable_content].spacing(s::S4),
+        )
             .padding(s::S4)
             .into()
+    }
+
+    fn subscription(&self) -> Subscription<Msg> {
+        if self.time_running {
+            time::every(std::time::Duration::from_secs(1)).map(|_| Msg::TimeTick)
+        } else {
+            Subscription::none()
+        }
     }
 
     fn theme(&self) -> Theme {
@@ -481,7 +558,24 @@ pub async fn run() -> Result<(), Error> {
 
     let iced_result = iced::application(Model::title, Model::update, Model::view)
         .theme(Model::theme)
+        .subscription(Model::subscription)
         .run_with(move || Model::new(flags));
 
     iced_result.map_err(Error::IcedRunError)
+}
+
+async fn advance_active_clock(worker: Arc<Worker>, delta_ms: i64) -> Result<(), String> {
+    sqlx::query(
+        r#"
+            UPDATE active_clock
+            SET active_ms = active_ms + $1
+            WHERE id = TRUE
+        "#,
+    )
+    .bind(delta_ms)
+    .execute(&worker.sqlx)
+    .await
+    .map_err(|err| format!("Error advancing active clock: {}", err))?;
+
+    Ok(())
 }

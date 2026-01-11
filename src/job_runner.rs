@@ -313,7 +313,8 @@ async fn run_job<
         JobKind::PersonWaiting(person_waiting_job) => {
             tracing::debug!("Executing PersonWaiting job");
             match person_waiting_job
-                .run(current_active_ms)
+                .run(&worker, random_seed, current_active_ms)
+                .await
                 .map_err(RunJobError::PersonWaitingError)?
             {
                 person_waiting::WaitOutcome::Ready => Ok(RunJobOutcome::Completed),

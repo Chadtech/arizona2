@@ -2,8 +2,8 @@ use super::s;
 use crate::capability::job::JobCapability;
 use crate::domain::job::{Job, JobKind};
 use crate::domain::job_uuid::JobUuid;
-use crate::nice_display::NiceDisplay;
 use crate::job_runner::{self, RunNextJobResult};
+use crate::nice_display::NiceDisplay;
 use crate::worker::Worker;
 use iced::widget::container;
 use iced::{widget as w, Alignment, Color, Element, Length, Task};
@@ -190,9 +190,7 @@ impl Model {
             ResetJobStatus::Resetting(job_uuid) => {
                 w::text(format!("Resetting job {}", job_uuid)).into()
             }
-            ResetJobStatus::ResetOk(job_uuid) => {
-                w::text(format!("Reset job {}", job_uuid)).into()
-            }
+            ResetJobStatus::ResetOk(job_uuid) => w::text(format!("Reset job {}", job_uuid)).into(),
             ResetJobStatus::ResetErr(err) => w::text(format!("Reset failed: {}", err)).into(),
         };
 
@@ -209,7 +207,7 @@ impl Model {
 
         let jobs_view: Element<Msg> = match &self.get_jobs_status {
             GetJobsStatus::Fetching => w::text("Loading jobs...").into(),
-            GetJobsStatus::Error(err) => w::text(format!("Error loading jobs: {}", err)).into(),
+            GetJobsStatus::Error(err) => w::text(format!("Error loading jobs:\n{}", err)).into(),
             GetJobsStatus::GotJobs(jobs) => {
                 if jobs.is_empty() {
                     w::text("No jobs yet").into()
@@ -293,6 +291,6 @@ async fn reset_job(worker: Arc<Worker>, job_uuid: JobUuid) -> Result<JobUuid, St
     worker
         .reset_job(&job_uuid)
         .await
-        .map_err(|err| format!("Error resetting job: {}", err))?;
+        .map_err(|err| format!("Error resetting job:\n{}", err))?;
     Ok(job_uuid)
 }
