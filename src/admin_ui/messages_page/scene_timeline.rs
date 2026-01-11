@@ -1,5 +1,4 @@
 use crate::admin_ui::style as s;
-use iced::Color;
 use crate::capability::message::MessageCapability;
 use crate::capability::person::PersonCapability;
 use crate::capability::scene::SceneCapability;
@@ -8,6 +7,8 @@ use crate::domain::person_uuid::PersonUuid;
 use crate::domain::scene_uuid::SceneUuid;
 use crate::worker::Worker;
 use chrono::{DateTime, Utc};
+use iced::clipboard;
+use iced::Color;
 use iced::{widget as w, Element, Length, Task};
 use std::collections::HashMap;
 
@@ -49,7 +50,7 @@ impl TimelineItem {
 
 #[derive(Debug, Clone)]
 pub enum Msg {
-    // Placeholder for future interactions
+    Copy(String),
 }
 
 impl Model {
@@ -85,8 +86,7 @@ impl Model {
                 timeline_items.push(left_item);
             }
 
-            let person_label =
-                person_label(worker, &mut name_cache, &event.person_uuid).await?;
+            let person_label = person_label(worker, &mut name_cache, &event.person_uuid).await?;
             let joined_item = TimelineItem::PersonJoined {
                 person_label,
                 timestamp: event.joined_at,
@@ -104,7 +104,7 @@ impl Model {
 
     pub fn update(&mut self, msg: Msg) -> Task<Msg> {
         match msg {
-            // No messages yet
+            Msg::Copy(contents) => clipboard::write(contents),
         }
     }
 
@@ -115,7 +115,9 @@ impl Model {
             let timeline = self
                 .items
                 .iter()
-                .fold(w::column![], |col, item| col.push(self.view_timeline_item(item)))
+                .fold(w::column![], |col, item| {
+                    col.push(self.view_timeline_item(item))
+                })
                 .spacing(s::S2);
 
             w::scrollable(timeline).width(Length::Fill).into()
@@ -131,13 +133,18 @@ impl Model {
             } => {
                 let time_str = timestamp.format("%Y-%m-%d %H:%M:%S").to_string();
                 let header_color = Color::from_rgb(0.78, 0.72, 0.46);
+                let header_text = format!("[{}] {}", time_str, sender_label);
+                let copy_text = format!("{}\n{}", header_text, content);
 
                 w::column![
-                    w::text(format!("[{}] {}", time_str, sender_label))
-                        .size(s::S3)
-                        .style(move |_| w::text::Style {
-                            color: Some(header_color),
-                        }),
+                    w::row![
+                        w::text(header_text).size(s::S3).color(header_color),
+                        w::button(w::text("Copy").size(s::S3))
+                            .style(w::button::text)
+                            .padding(0)
+                            .on_press(Msg::Copy(copy_text)),
+                    ]
+                    .spacing(s::S1),
                     w::text(content),
                 ]
                 .spacing(s::S1)
@@ -149,11 +156,17 @@ impl Model {
                 timestamp,
             } => {
                 let time_str = timestamp.format("%H:%M:%S").to_string();
-                w::text(format!(
-                    "[{}] → {} joined the scene",
-                    time_str, person_label
-                ))
-                .size(s::S3)
+                let message = format!("[{}] → {} joined the scene", time_str, person_label);
+                let copy_text = message.clone();
+                w::row![
+                    w::text(message).size(s::S3),
+                    w::button(w::text("Copy").size(s::S3))
+                        .style(w::button::text)
+                        .padding(0)
+                        .on_press(Msg::Copy(copy_text)),
+                ]
+                .spacing(s::S1)
+                .padding(s::S1)
                 .into()
             }
             TimelineItem::PersonLeft {
@@ -161,11 +174,17 @@ impl Model {
                 timestamp,
             } => {
                 let time_str = timestamp.format("%H:%M:%S").to_string();
-                w::text(format!(
-                    "[{}] ← {} left the scene",
-                    time_str, person_label
-                ))
-                .size(s::S3)
+                let message = format!("[{}] ← {} left the scene", time_str, person_label);
+                let copy_text = message.clone();
+                w::row![
+                    w::text(message).size(s::S3),
+                    w::button(w::text("Copy").size(s::S3))
+                        .style(w::button::text)
+                        .padding(0)
+                        .on_press(Msg::Copy(copy_text)),
+                ]
+                .spacing(s::S1)
+                .padding(s::S1)
                 .into()
             }
         }
