@@ -15,25 +15,35 @@ use crate::domain::random_seed::RandomSeed;
 use crate::nice_display::NiceDisplay;
 use crate::worker;
 use crate::worker::Worker;
+use sqlx::Row;
+use std::time::Instant;
 
 pub enum Error {
     WorkerInitError(worker::InitError),
+    ActiveClockError(String),
     PopJobError(String),
     RunJobError((JobUuid, RunJobError)),
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub enum RunNextJobResult {
     NoJob,
-    RanJob,
+    RanJob { job_uuid: JobUuid, job_kind: String },
+    Deferred { job_uuid: JobUuid, job_kind: String },
 }
 
 pub enum RunJobError {
     FailedToMarkJobFinished(String),
     FailedToMarkJobFailed(String),
+    FailedToResetJob(String),
     ProcessMessageError(process_message::Error),
     SendMessageToSceneError(send_message_to_scene::Error),
     PersonWaitingError(person_waiting::Error),
+}
+
+enum RunJobOutcome {
+    Completed,
+    Deferred,
 }
 
 impl NiceDisplay for Error {
@@ -42,11 +52,68 @@ impl NiceDisplay for Error {
             Error::WorkerInitError(err) => {
                 format!("Worker initialization error\n{}", err.message())
             }
+            Error::ActiveClockError(err) => {
+                format!("Active clock error\n{}", err)
+            }
             Error::RunJobError(err) => err.message(),
             Error::PopJobError(err) => {
                 format!("Failed to pop next job\n{}", err)
             }
         }
+    }
+}
+
+struct ActiveClock {
+    base_active_ms: i64,
+    start: Instant,
+}
+
+impl ActiveClock {
+    async fn load(worker: &Worker) -> Result<Self, String> {
+        let row = sqlx::query(
+            r#"
+                SELECT active_ms
+                FROM active_clock
+                WHERE id = TRUE
+            "#,
+        )
+        .fetch_optional(&worker.sqlx)
+        .await
+        .map_err(|err| format!("Error loading active clock: {}", err))?;
+
+        let base_active_ms = match row {
+            Some(row) => row
+                .try_get::<i64, _>("active_ms")
+                .map_err(|err| format!("Error reading active_ms: {}", err))?,
+            None => 0,
+        };
+
+        Ok(Self {
+            base_active_ms,
+            start: Instant::now(),
+        })
+    }
+
+    fn current_ms(&self) -> i64 {
+        let elapsed = self.start.elapsed();
+        let elapsed_ms = i64::try_from(elapsed.as_millis()).unwrap_or(i64::MAX);
+        self.base_active_ms.saturating_add(elapsed_ms)
+    }
+
+    async fn persist(&self, worker: &Worker) -> Result<(), String> {
+        sqlx::query(
+            r#"
+                UPDATE active_clock
+                SET active_ms = $1
+                WHERE id = TRUE
+            "#,
+        )
+        .bind(self.current_ms())
+        .execute(&worker.sqlx)
+        .await
+        .map_err(|err| format!("Error storing active clock: {}", err))?;
+
+        Ok(())
     }
 }
 
@@ -81,6 +148,12 @@ impl NiceDisplay for RunJobError {
                     err
                 )
             }
+            RunJobError::FailedToResetJob(err) => {
+                format!(
+                    "I ran into the following problem trying to reset the job\n{}",
+                    err
+                )
+            }
             RunJobError::PersonWaitingError(err) => {
                 format!("Error processing person waiting job\n{}", err.message())
             }
@@ -89,7 +162,12 @@ impl NiceDisplay for RunJobError {
 }
 pub async fn run() -> Result<(), Error> {
     let worker = Worker::new().await.map_err(Error::WorkerInitError)?;
+    let active_clock = ActiveClock::load(&worker)
+        .await
+        .map_err(Error::ActiveClockError)?;
     tracing::info!("Job runner started, polling for jobs");
+    let shutdown = tokio::signal::ctrl_c();
+    tokio::pin!(shutdown);
     loop {
         let random_seed = match worker.get_random_seed() {
             Ok(seed) => seed,
@@ -98,18 +176,41 @@ pub async fn run() -> Result<(), Error> {
                 continue;
             }
         };
-        if let Err(err) = run_next_job(worker.clone(), random_seed).await {
-            // Log the error but continue processing other jobs
-            tracing::error!("Job runner error: {}", err.to_nice_error().to_string());
+        let current_active_ms = active_clock.current_ms();
+        let job_fut = run_next_job(worker.clone(), random_seed, current_active_ms);
+
+        tokio::select! {
+            _ = &mut shutdown => {
+                if let Err(err) = active_clock.persist(&worker).await {
+                    tracing::error!("Job runner active clock error: {}", err);
+                }
+                tracing::info!("Job runner shutting down");
+                break;
+            }
+            res = job_fut => {
+                if let Err(err) = res {
+                    // Log the error but continue processing other jobs
+                    tracing::error!("Job runner error: {}", err.to_nice_error().to_string());
+                }
+            }
         }
     }
+    Ok(())
 }
 
 pub async fn run_one_job(
     worker: Worker,
     random_seed: RandomSeed,
 ) -> Result<RunNextJobResult, Error> {
-    let job = match worker.pop_next_job().await.map_err(Error::PopJobError)? {
+    let active_clock = ActiveClock::load(&worker)
+        .await
+        .map_err(Error::ActiveClockError)?;
+    let current_active_ms = active_clock.current_ms();
+
+    let job = match worker
+        .pop_next_job(current_active_ms)
+        .await
+        .map_err(Error::PopJobError)? {
         Some(j) => j,
         None => {
             return Ok(RunNextJobResult::NoJob);
@@ -117,13 +218,22 @@ pub async fn run_one_job(
     };
 
     let job_uuid = job.uuid.clone();
+    let job_kind = job.kind.to_name();
     tracing::info!("Processing job {} of type {:?}", job_uuid, job.kind);
 
-    run_job(worker, random_seed, job)
+    let outcome = run_job(worker.clone(), random_seed, current_active_ms, job)
         .await
-        .map_err(|err| Error::RunJobError((job_uuid, err)))?;
+        .map_err(|err| Error::RunJobError((job_uuid.clone(), err)))?;
 
-    Ok(RunNextJobResult::RanJob)
+    active_clock
+        .persist(&worker)
+        .await
+        .map_err(Error::ActiveClockError)?;
+
+    match outcome {
+        RunJobOutcome::Completed => Ok(RunNextJobResult::RanJob { job_uuid, job_kind }),
+        RunJobOutcome::Deferred => Ok(RunNextJobResult::Deferred { job_uuid, job_kind }),
+    }
 }
 
 async fn run_next_job<
@@ -139,8 +249,12 @@ async fn run_next_job<
 >(
     worker: W,
     random_seed: RandomSeed,
+    current_active_ms: i64,
 ) -> Result<(), Error> {
-    let job = match worker.pop_next_job().await.map_err(Error::PopJobError)? {
+    let job = match worker
+        .pop_next_job(current_active_ms)
+        .await
+        .map_err(Error::PopJobError)? {
         Some(j) => j,
         None => {
             return Ok(());
@@ -150,9 +264,12 @@ async fn run_next_job<
     let job_uuid = job.uuid.clone();
     tracing::info!("Processing job {} of type {:?}", job_uuid, job.kind);
 
-    run_job(worker, random_seed, job)
+    match run_job(worker, random_seed, current_active_ms, job)
         .await
-        .map_err(|err| Error::RunJobError((job_uuid, err)))
+        .map_err(|err| Error::RunJobError((job_uuid, err)))? {
+        RunJobOutcome::Completed => Ok(()),
+        RunJobOutcome::Deferred => Ok(()),
+    }
 }
 
 async fn run_job<
@@ -168,13 +285,14 @@ async fn run_job<
 >(
     worker: W,
     random_seed: RandomSeed,
+    current_active_ms: i64,
     job: PoppedJob,
-) -> Result<(), RunJobError> {
-    let res: Result<(), RunJobError> = match job.kind {
+) -> Result<RunJobOutcome, RunJobError> {
+    let res: Result<RunJobOutcome, RunJobError> = match job.kind {
         JobKind::Ping => {
             tracing::debug!("Ping job received");
             println!("Pong");
-            Ok(())
+            Ok(RunJobOutcome::Completed)
         }
         JobKind::SendMessageToScene(job_data) => {
             tracing::debug!("Executing SendMessageToScene job");
@@ -182,31 +300,44 @@ async fn run_job<
                 .run(&worker)
                 .await
                 .map_err(RunJobError::SendMessageToSceneError)
+                .map(|_| RunJobOutcome::Completed)
         }
         JobKind::ProcessMessage(process_message_job) => {
             tracing::debug!("Executing ProcessMessage job");
             process_message_job
-                .run(&worker, random_seed)
+                .run(&worker, random_seed, current_active_ms)
                 .await
                 .map_err(RunJobError::ProcessMessageError)
+                .map(|_| RunJobOutcome::Completed)
         }
         JobKind::PersonWaiting(person_waiting_job) => {
             tracing::debug!("Executing PersonWaiting job");
-            person_waiting_job
-                .run(&worker)
-                .await
-                .map_err(RunJobError::PersonWaitingError)
+            match person_waiting_job
+                .run(current_active_ms)
+                .map_err(RunJobError::PersonWaitingError)?
+            {
+                person_waiting::WaitOutcome::Ready => Ok(RunJobOutcome::Completed),
+                person_waiting::WaitOutcome::NotReady => {
+                    worker
+                        .reset_job(&job.uuid)
+                        .await
+                        .map_err(RunJobError::FailedToResetJob)?;
+                    Ok(RunJobOutcome::Deferred)
+                }
+            }
         }
     };
 
     match res {
-        Ok(_) => {
+        Ok(RunJobOutcome::Completed) => {
             tracing::info!("Job {} completed successfully", job.uuid);
             worker
                 .mark_job_finished(&job.uuid)
                 .await
-                .map_err(RunJobError::FailedToMarkJobFinished)
+                .map_err(RunJobError::FailedToMarkJobFinished)?;
+            Ok(RunJobOutcome::Completed)
         }
+        Ok(RunJobOutcome::Deferred) => Ok(RunJobOutcome::Deferred),
         Err(ref err) => {
             tracing::error!(
                 "Job {} failed: {}",
@@ -216,7 +347,8 @@ async fn run_job<
             worker
                 .mark_job_failed(&job.uuid, err.to_nice_error().to_string().as_str())
                 .await
-                .map_err(RunJobError::FailedToMarkJobFailed)
+                .map_err(RunJobError::FailedToMarkJobFailed)?;
+            Ok(RunJobOutcome::Completed)
         }
     }
 }
@@ -302,7 +434,7 @@ mod tests {
             );
             Ok(())
         }
-        async fn pop_next_job(&self) -> Result<Option<PoppedJob>, String> {
+        async fn pop_next_job(&self, _current_active_ms: i64) -> Result<Option<PoppedJob>, String> {
             let mut st = self.state.lock().await;
             Ok(st.jobs.pop())
         }
@@ -369,7 +501,7 @@ mod tests {
     #[tokio::test]
     async fn returns_ok_when_no_job_available() {
         let mock = MockWorker::empty();
-        let res = run_next_job(mock.clone()).await;
+        let res = run_next_job(mock.clone(), RandomSeed::from_u64(0), 0).await;
         assert!(res.is_ok());
     }
 
@@ -381,7 +513,7 @@ mod tests {
             kind: JobKind::Ping,
         };
         let mock = MockWorker::with_next_job(popped);
-        let res = run_next_job(mock.clone()).await;
+        let res = run_next_job(mock.clone(), RandomSeed::from_u64(0), 0).await;
         assert!(res.is_ok());
         let st = mock.state.lock().await;
         assert!(st.finished_jobs.contains(&job_uuid));

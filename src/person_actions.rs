@@ -12,7 +12,7 @@ impl PersonActionKind {
     pub fn to_name(&self) -> String {
         match self {
             PersonActionKind::Wait => "wait".to_string(),
-            PersonActionKind::SayInScene => "say in scene".to_string(),
+            PersonActionKind::SayInScene => "say_in_scene".to_string(),
         }
     }
     pub fn to_open_ai_tool_function(&self) -> open_ai::tool::ToolFunction {
@@ -124,7 +124,7 @@ impl PersonAction {
     pub fn from_open_ai_tool_call(tool_call: ToolCall) -> Result<Self, PersonActionError> {
         let tool_call_name = tool_call.name;
         match tool_call_name.as_str() {
-            "say in scene" => {
+            "say_in_scene" => {
                 let mut maybe_comment = None;
 
                 for (key, value) in tool_call.arguments {

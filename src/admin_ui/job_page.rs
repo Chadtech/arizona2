@@ -1,11 +1,12 @@
 use super::s;
 use crate::capability::job::JobCapability;
 use crate::domain::job::{Job, JobKind};
+use crate::domain::job_uuid::JobUuid;
 use crate::nice_display::NiceDisplay;
 use crate::job_runner::{self, RunNextJobResult};
 use crate::worker::Worker;
 use iced::widget::container;
-use iced::{widget as w, Color, Element, Length, Task};
+use iced::{widget as w, Alignment, Color, Element, Length, Task};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -13,6 +14,7 @@ pub struct Model {
     add_ping_status: AddPingStatus,
     get_jobs_status: GetJobsStatus,
     process_next_status: ProcessNextStatus,
+    reset_job_status: ResetJobStatus,
 }
 
 enum GetJobsStatus {
@@ -31,9 +33,17 @@ enum AddPingStatus {
 enum ProcessNextStatus {
     Ready,
     Processing,
-    Processed,
+    Processed { job_uuid: String, job_kind: String },
+    Deferred { job_uuid: String, job_kind: String },
     NoJob,
     Failed(String),
+}
+
+enum ResetJobStatus {
+    Ready,
+    Resetting(JobUuid),
+    ResetOk(JobUuid),
+    ResetErr(String),
 }
 
 #[derive(Debug, Clone)]
@@ -43,6 +53,8 @@ pub enum Msg {
     AddedPing(Result<(), String>),
     ClickedProcessNext,
     ProcessedNext(Result<RunNextJobResult, String>),
+    ClickedResetJob(JobUuid),
+    ResetJobResult(Result<JobUuid, String>),
     LoadedRecent(Result<Vec<Job>, String>),
 }
 
@@ -61,6 +73,7 @@ impl Model {
             add_ping_status: AddPingStatus::Ready,
             get_jobs_status: GetJobsStatus::Fetching,
             process_next_status: ProcessNextStatus::Ready,
+            reset_job_status: ResetJobStatus::Ready,
         }
     }
 
@@ -95,8 +108,19 @@ impl Model {
                 Task::perform(process_next_job(worker), Msg::ProcessedNext)
             }
             Msg::ProcessedNext(res) => match res {
-                Ok(RunNextJobResult::RanJob) => {
-                    self.process_next_status = ProcessNextStatus::Processed;
+                Ok(RunNextJobResult::RanJob { job_uuid, job_kind }) => {
+                    self.process_next_status = ProcessNextStatus::Processed {
+                        job_uuid: job_uuid.to_string(),
+                        job_kind,
+                    };
+                    let worker = worker.clone();
+                    Task::perform(get_jobs(worker), |m| m)
+                }
+                Ok(RunNextJobResult::Deferred { job_uuid, job_kind }) => {
+                    self.process_next_status = ProcessNextStatus::Deferred {
+                        job_uuid: job_uuid.to_string(),
+                        job_kind,
+                    };
                     let worker = worker.clone();
                     Task::perform(get_jobs(worker), |m| m)
                 }
@@ -106,6 +130,22 @@ impl Model {
                 }
                 Err(err) => {
                     self.process_next_status = ProcessNextStatus::Failed(err);
+                    Task::none()
+                }
+            },
+            Msg::ClickedResetJob(job_uuid) => {
+                self.reset_job_status = ResetJobStatus::Resetting(job_uuid.clone());
+                let worker = worker.clone();
+                Task::perform(reset_job(worker, job_uuid), Msg::ResetJobResult)
+            }
+            Msg::ResetJobResult(res) => match res {
+                Ok(job_uuid) => {
+                    self.reset_job_status = ResetJobStatus::ResetOk(job_uuid);
+                    let worker = worker.clone();
+                    Task::perform(get_jobs(worker), |m| m)
+                }
+                Err(err) => {
+                    self.reset_job_status = ResetJobStatus::ResetErr(err);
                     Task::none()
                 }
             },
@@ -133,11 +173,27 @@ impl Model {
         let process_status_view: Element<Msg> = match &self.process_next_status {
             ProcessNextStatus::Ready => w::text("Ready to process next job").into(),
             ProcessNextStatus::Processing => w::text("Processing next job...").into(),
-            ProcessNextStatus::Processed => w::text("Processed next job").into(),
+            ProcessNextStatus::Processed { job_uuid, job_kind } => {
+                w::text(format!("Processed {} ({})", job_kind, job_uuid)).into()
+            }
+            ProcessNextStatus::Deferred { job_uuid, job_kind } => {
+                w::text(format!("Deferred {} ({})", job_kind, job_uuid)).into()
+            }
             ProcessNextStatus::NoJob => w::text("No jobs to process").into(),
             ProcessNextStatus::Failed(err) => {
                 w::text(format!("Failed to process job: {}", err)).into()
             }
+        };
+
+        let reset_status_view: Element<Msg> = match &self.reset_job_status {
+            ResetJobStatus::Ready => w::text("Ready to reset job").into(),
+            ResetJobStatus::Resetting(job_uuid) => {
+                w::text(format!("Resetting job {}", job_uuid)).into()
+            }
+            ResetJobStatus::ResetOk(job_uuid) => {
+                w::text(format!("Reset job {}", job_uuid)).into()
+            }
+            ResetJobStatus::ResetErr(err) => w::text(format!("Reset failed: {}", err)).into(),
         };
 
         // Disable the button while adding to prevent duplicates
@@ -160,7 +216,21 @@ impl Model {
                 } else {
                     let mut col = w::column![];
                     for job in jobs {
-                        col = col.push(w::text(job.to_info_string()));
+                        let reset_control: Element<Msg> = if job.finished_at().is_none() {
+                            w::button("Reset")
+                                .style(w::button::text)
+                                .padding(s::S1)
+                                .on_press(Msg::ClickedResetJob(job.uuid().clone()))
+                                .into()
+                        } else {
+                            w::text("Finished").into()
+                        };
+
+                        col = col.push(
+                            w::row![w::text(job.to_info_string()), reset_control]
+                                .spacing(s::S4)
+                                .align_y(Alignment::Center),
+                        );
                     }
                     w::scrollable(col).width(Length::Fill).into()
                 }
@@ -190,7 +260,8 @@ impl Model {
             ]
             .spacing(s::S4),
             status_view,
-            process_status_view
+            process_status_view,
+            reset_status_view
         ]
         .spacing(s::S4)
         .width(Length::Fill)
@@ -216,4 +287,12 @@ async fn process_next_job(worker: Arc<Worker>) -> Result<RunNextJobResult, Strin
     job_runner::run_one_job(worker.as_ref().clone(), random_seed)
         .await
         .map_err(|err| err.to_nice_error().to_string())
+}
+
+async fn reset_job(worker: Arc<Worker>, job_uuid: JobUuid) -> Result<JobUuid, String> {
+    worker
+        .reset_job(&job_uuid)
+        .await
+        .map_err(|err| format!("Error resetting job: {}", err))?;
+    Ok(job_uuid)
 }

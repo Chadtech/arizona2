@@ -1,0 +1,8 @@
+CREATE TABLE IF NOT EXISTS active_clock (
+    id BOOLEAN PRIMARY KEY DEFAULT TRUE,
+    active_ms BIGINT NOT NULL DEFAULT 0
+);
+
+INSERT INTO active_clock (id, active_ms)
+VALUES (TRUE, 0)
+ON CONFLICT (id) DO NOTHING;

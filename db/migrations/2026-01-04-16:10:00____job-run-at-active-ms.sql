@@ -1,0 +1,2 @@
+ALTER TABLE job
+ADD COLUMN IF NOT EXISTS run_at_active_ms BIGINT;

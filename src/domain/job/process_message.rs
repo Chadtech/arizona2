@@ -164,6 +164,7 @@ impl ProcessMessageJob {
         self,
         worker: &W,
         random_seed: RandomSeed,
+        current_active_ms: i64,
     ) -> Result<(), Error> {
         let maybe_message = worker
             .get_message_by_uuid(&self.message_uuid)
@@ -184,7 +185,8 @@ impl ProcessMessageJob {
                         PersonAction::Wait { duration } => {
                             // Cap at i64::MAX if u64 exceeds it
                             let duration_i64: i64 = duration.min(i64::MAX as u64) as i64;
-                            let person_waiting_job = PersonWaitingJob::new(duration_i64);
+                            let person_waiting_job =
+                                PersonWaitingJob::new(duration_i64, current_active_ms);
                             let wait_job = JobKind::PersonWaiting(person_waiting_job);
                             worker.unshift_job(wait_job).await.map_err(|err| {
                                 Error::PersonCouldNotWait {

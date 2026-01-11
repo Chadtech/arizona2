@@ -15,7 +15,9 @@ use std::fmt::Display;
 pub struct Job {
     uuid: JobUuid,
     kind: JobKind,
+    started_at: Option<DateTime<Utc>>,
     finished_at: Option<DateTime<Utc>>,
+    error: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -104,7 +106,9 @@ impl Display for JobUuid {
 impl Job {
     pub fn parse(
         uuid: JobUuid,
+        started_at: Option<DateTime<Utc>>,
         finished_at: Option<DateTime<Utc>>,
+        error: Option<String>,
         name: String,
         maybe_data: Option<serde_json::Value>,
     ) -> Result<Job, ParseError> {
@@ -113,17 +117,24 @@ impl Job {
         Ok(Job {
             uuid,
             kind: job_kind,
+            started_at,
             finished_at,
+            error,
         })
     }
 
     pub fn to_info_string(&self) -> String {
-        let status_string = match self.finished_at {
-            Some(ts) => {
-                let date: String = ts.format("%Y-%m-%d %H:%M:%S UTC").to_string();
-                format!("finished at {}", date)
-            }
-            None => "not started".to_string(),
+        let status_string = if self.finished_at.is_some() {
+            let date: String = self
+                .finished_at
+                .unwrap()
+                .format("%Y-%m-%d %H:%M:%S UTC")
+                .to_string();
+            format!("finished at {}", date)
+        } else if self.error.is_some() || self.started_at.is_some() {
+            "failed".to_string()
+        } else {
+            "not started".to_string()
         };
 
         format!(
@@ -132,6 +143,14 @@ impl Job {
             self.uuid.to_string(),
             status_string
         )
+    }
+
+    pub fn uuid(&self) -> &JobUuid {
+        &self.uuid
+    }
+
+    pub fn finished_at(&self) -> Option<DateTime<Utc>> {
+        self.finished_at
     }
 }
 
