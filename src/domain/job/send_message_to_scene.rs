@@ -95,7 +95,6 @@ impl SendMessageToSceneJob {
                 (MessageSender::AiPerson(sender_uuid), ActorUuid::AiPerson(participant_uuid)) => {
                     sender_uuid.to_uuid() == participant_uuid.to_uuid()
                 }
-                (MessageSender::RealWorldUser, ActorUuid::RealWorldUser) => true,
                 _ => false,
             };
 
@@ -128,6 +127,24 @@ impl SendMessageToSceneJob {
                     message_uuid,
                     details: err,
                 })?;
+        }
+
+        if let MessageSender::RealWorldUser = self.sender {
+            // No-op: avoid creating a self-to-self message for the real-world user.
+        } else {
+            let new_message = NewMessage {
+                sender: self.sender.clone(),
+                recipient: MessageRecipient::RealWorldUser,
+                content: self.content.clone(),
+                scene_uuid: Some(self.scene_uuid.clone()),
+            };
+
+            worker.send_message(new_message).await.map_err(|err| {
+                Error::FailedToSendMessage {
+                    participant: ActorUuid::RealWorldUser,
+                    details: err,
+                }
+            })?;
         }
 
         Ok(())

@@ -214,15 +214,11 @@ impl Model {
                 } else {
                     let mut col = w::column![];
                     for job in jobs {
-                        let reset_control: Element<Msg> = if job.finished_at().is_none() {
-                            w::button("Reset")
-                                .style(w::button::text)
-                                .padding(s::S1)
-                                .on_press(Msg::ClickedResetJob(job.uuid().clone()))
-                                .into()
-                        } else {
-                            w::text("Finished").into()
-                        };
+                        let reset_control: Element<Msg> = w::button("Reset")
+                            .style(w::button::text)
+                            .padding(s::S1)
+                            .on_press(Msg::ClickedResetJob(job.uuid().clone()))
+                            .into();
 
                         col = col.push(
                             w::row![w::text(job.to_info_string()), reset_control]

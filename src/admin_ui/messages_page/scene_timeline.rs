@@ -1,5 +1,7 @@
 use crate::admin_ui::style as s;
+use iced::Color;
 use crate::capability::message::MessageCapability;
+use crate::capability::person::PersonCapability;
 use crate::capability::scene::SceneCapability;
 use crate::domain::message::MessageSender;
 use crate::domain::person_uuid::PersonUuid;
@@ -7,6 +9,7 @@ use crate::domain::scene_uuid::SceneUuid;
 use crate::worker::Worker;
 use chrono::{DateTime, Utc};
 use iced::{widget as w, Element, Length, Task};
+use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
 pub struct Model {
@@ -16,16 +19,16 @@ pub struct Model {
 #[derive(Debug, Clone)]
 pub enum TimelineItem {
     Message {
-        sender: MessageSender,
+        sender_label: String,
         content: String,
         timestamp: DateTime<Utc>,
     },
     PersonJoined {
-        person_uuid: PersonUuid,
+        person_label: String,
         timestamp: DateTime<Utc>,
     },
     PersonLeft {
-        person_uuid: PersonUuid,
+        person_label: String,
         timestamp: DateTime<Utc>,
     },
 }
@@ -52,11 +55,18 @@ pub enum Msg {
 impl Model {
     pub async fn load(worker: &Worker, scene_uuid: SceneUuid) -> Result<Model, String> {
         let mut timeline_items = vec![];
+        let mut name_cache: HashMap<String, String> = HashMap::new();
         let messages = worker.get_messages_in_scene(&scene_uuid).await?;
 
         for message in messages {
+            let sender_label = match &message.sender {
+                MessageSender::AiPerson(uuid) => {
+                    person_label(worker, &mut name_cache, uuid).await?
+                }
+                MessageSender::RealWorldUser => "You".to_string(),
+            };
             timeline_items.push(TimelineItem::Message {
-                sender: message.sender,
+                sender_label,
                 content: message.content,
                 timestamp: message.sent_at,
             });
@@ -66,15 +76,19 @@ impl Model {
 
         for event in participation {
             if let Some(left_at) = event.left_at {
+                let person_label =
+                    person_label(worker, &mut name_cache, &event.person_uuid).await?;
                 let left_item = TimelineItem::PersonLeft {
-                    person_uuid: event.person_uuid.clone(),
+                    person_label,
                     timestamp: left_at,
                 };
                 timeline_items.push(left_item);
             }
 
+            let person_label =
+                person_label(worker, &mut name_cache, &event.person_uuid).await?;
             let joined_item = TimelineItem::PersonJoined {
-                person_uuid: event.person_uuid,
+                person_label,
                 timestamp: event.joined_at,
             };
 
@@ -98,9 +112,11 @@ impl Model {
         if self.items.is_empty() {
             w::text("No messages or events in this scene").into()
         } else {
-            let timeline = self.items.iter().fold(w::column![], |col, item| {
-                col.push(self.view_timeline_item(item))
-            });
+            let timeline = self
+                .items
+                .iter()
+                .fold(w::column![], |col, item| col.push(self.view_timeline_item(item)))
+                .spacing(s::S2);
 
             w::scrollable(timeline).width(Length::Fill).into()
         }
@@ -109,51 +125,65 @@ impl Model {
     fn view_timeline_item<'a>(&'a self, item: &'a TimelineItem) -> Element<'a, Msg> {
         match item {
             TimelineItem::Message {
-                sender,
+                sender_label,
                 content,
                 timestamp,
             } => {
-                let time_str = timestamp.format("%H:%M:%S").to_string();
+                let time_str = timestamp.format("%Y-%m-%d %H:%M:%S").to_string();
+                let header_color = Color::from_rgb(0.78, 0.72, 0.46);
 
-                let sender_name = match sender {
-                    MessageSender::AiPerson(uuid) => {
-                        format!("AI Person {}", uuid.to_uuid())
-                    }
-                    MessageSender::RealWorldUser => "You".to_string(),
-                };
                 w::column![
-                    w::text(format!("[{}] {}", time_str, sender_name)).size(12),
+                    w::text(format!("[{}] {}", time_str, sender_label))
+                        .size(s::S3)
+                        .style(move |_| w::text::Style {
+                            color: Some(header_color),
+                        }),
                     w::text(content),
                 ]
                 .spacing(s::S1)
+                .padding(s::S1)
                 .into()
             }
             TimelineItem::PersonJoined {
-                person_uuid,
+                person_label,
                 timestamp,
             } => {
                 let time_str = timestamp.format("%H:%M:%S").to_string();
                 w::text(format!(
-                    "[{}] → Person {} joined the scene",
-                    time_str,
-                    person_uuid.to_uuid()
+                    "[{}] → {} joined the scene",
+                    time_str, person_label
                 ))
-                .size(12)
+                .size(s::S3)
                 .into()
             }
             TimelineItem::PersonLeft {
-                person_uuid,
+                person_label,
                 timestamp,
             } => {
                 let time_str = timestamp.format("%H:%M:%S").to_string();
                 w::text(format!(
-                    "[{}] ← Person {} left the scene",
-                    time_str,
-                    person_uuid.to_uuid()
+                    "[{}] ← {} left the scene",
+                    time_str, person_label
                 ))
-                .size(12)
+                .size(s::S3)
                 .into()
             }
         }
     }
+}
+
+async fn person_label(
+    worker: &Worker,
+    cache: &mut HashMap<String, String>,
+    person_uuid: &PersonUuid,
+) -> Result<String, String> {
+    let key = person_uuid.to_string();
+    if let Some(label) = cache.get(&key) {
+        return Ok(label.clone());
+    }
+
+    let name = worker.get_persons_name(person_uuid.clone()).await?;
+    let label = name.to_string().to_string();
+    cache.insert(key, label.clone());
+    Ok(label)
 }
