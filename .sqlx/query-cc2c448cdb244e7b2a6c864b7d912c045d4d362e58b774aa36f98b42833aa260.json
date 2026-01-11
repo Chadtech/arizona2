@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n                INSERT INTO memory (uuid, person_uuid, content, embedding)\n                VALUES ($1::UUID, (SELECT person.uuid FROM person WHERE name = $2::TEXT), $3::TEXT, $4)\n                RETURNING uuid;\n            ",
+  "query": "\n                INSERT INTO memory (uuid, person_uuid, content, embedding)\n                VALUES ($1::UUID, $2::UUID, $3::TEXT, $4)\n                RETURNING uuid;\n            ",
   "describe": {
     "columns": [
       {
@@ -12,7 +12,7 @@
     "parameters": {
       "Left": [
         "Uuid",
-        "Text",
+        "Uuid",
         "Text",
         {
           "Custom": {
@@ -26,5 +26,5 @@
       false
     ]
   },
-  "hash": "19119a84ef8fe745d4fa1771737f0c7f5bae30e786e0b78ef802f9ec69b9830c"
+  "hash": "cc2c448cdb244e7b2a6c864b7d912c045d4d362e58b774aa36f98b42833aa260"
 }
