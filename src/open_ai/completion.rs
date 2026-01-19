@@ -66,6 +66,49 @@ impl Response {
     pub fn as_tool_calls(&self) -> Result<Vec<ToolCall>, tool_call::ToolCallDecodeError> {
         ToolCall::from_json(&self.json)
     }
+
+    pub fn maybe_tool_calls(
+        &self,
+    ) -> Result<Option<Vec<ToolCall>>, tool_call::ToolCallDecodeError> {
+        let choices_json = self
+            .json
+            .get("choices")
+            .ok_or_else(|| tool_call::ToolCallDecodeError::MissingField {
+                field: "choices".to_string(),
+                json: self.json.clone(),
+            })?
+            .as_array()
+            .ok_or_else(|| tool_call::ToolCallDecodeError::FieldWasNotArray {
+                field: "choices".to_string(),
+                json: self.json.clone(),
+            })?
+            .first()
+            .ok_or_else(|| tool_call::ToolCallDecodeError::ArrayWasEmpty {
+                which: "choices".to_string(),
+            })?;
+
+        let message = choices_json
+            .get("message")
+            .ok_or_else(|| tool_call::ToolCallDecodeError::MissingField {
+                field: "message".to_string(),
+                json: choices_json.clone(),
+            })?;
+
+        let tool_calls_value = message.get("tool_calls");
+        match tool_calls_value {
+            None => Ok(None),
+            Some(value) if value.is_null() => Ok(None),
+            Some(value) => {
+                value
+                    .as_array()
+                    .ok_or_else(|| tool_call::ToolCallDecodeError::FieldWasNotArray {
+                        field: "tool_calls".to_string(),
+                        json: message.clone(),
+                    })?;
+                ToolCall::from_json(&self.json).map(Some)
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone)]

@@ -60,7 +60,7 @@ impl SceneCapability for Worker {
             "#,
             SceneParticipantUuid::new().to_uuid(),
             scene_uuid.to_uuid(),
-            person_name.to_string(),
+            person_name.as_str(),
         )
         .fetch_one(&self.sqlx)
         .await
@@ -86,7 +86,7 @@ impl SceneCapability for Worker {
                 RETURNING uuid;
             "#,
             scene_uuid.to_uuid(),
-            person_name.to_string(),
+            person_name.as_str(),
         )
         .fetch_one(&self.sqlx)
         .await
@@ -114,7 +114,7 @@ impl SceneCapability for Worker {
                 ORDER BY scene_participant.joined_at DESC
                 LIMIT 1;
             "#,
-            person_name.to_string(),
+            person_name.as_str(),
         )
         .fetch_optional(&self.sqlx)
         .await

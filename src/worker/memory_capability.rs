@@ -2,6 +2,7 @@ use super::Worker;
 use crate::capability::memory::{
     MemoryCapability, MemoryQueryPrompt, MemorySearchResult, MessageTypeArgs, NewMemory,
 };
+use crate::capability::person::PersonCapability;
 use crate::capability::scene::SceneCapability;
 use crate::domain::memory_uuid::MemoryUuid;
 use crate::domain::message::MessageSender;
@@ -11,6 +12,8 @@ use crate::open_ai;
 use crate::open_ai::completion::Completion;
 use crate::open_ai::embedding::EmbeddingRequest;
 use crate::open_ai::role::Role;
+use crate::open_ai::tool::{ToolFunction, ToolFunctionParameter};
+use crate::open_ai::tool_call::ToolCall;
 
 impl MemoryCapability for Worker {
     async fn create_memory(&self, new_memory: NewMemory) -> Result<MemoryUuid, String> {
@@ -30,14 +33,75 @@ impl MemoryCapability for Worker {
             new_memory.content,
             &embedding[..] as &[f32]
         )
-            .fetch_one(&self.sqlx)
-            .await
-            .map_err(|err| {
-                eprintln!("Error details: {:?}", err);
-                format!("Error inserting new memory: {}", err)
-            })?;
+        .fetch_one(&self.sqlx)
+        .await
+        .map_err(|err| {
+            eprintln!("Error details: {:?}", err);
+            format!("Error inserting new memory: {}", err)
+        })?;
 
         Ok(MemoryUuid::from_uuid(rec.uuid))
+    }
+
+    async fn maybe_create_memories_from_description(
+        &self,
+        person_uuid: crate::domain::person_uuid::PersonUuid,
+        description: String,
+    ) -> Result<Vec<MemoryUuid>, String> {
+        let person_name = self
+            .get_persons_name(person_uuid.clone())
+            .await
+            .map_err(|err| format!("Failed to get person name: {}", err))?;
+
+        let mut completion = Completion::new(open_ai::model::Model::Gpt4p1);
+        completion.add_message(
+            Role::System,
+            "You decide whether a person should store a memory of a recent event. If the event is not meaningful or lasting, do not call any tool.",
+        );
+
+        let user_prompt = format!(
+            "Person: {}\n\nEvent description:\n{}",
+            person_name.as_str(),
+            description
+        );
+        completion.add_message(Role::User, user_prompt.as_str());
+
+        let tool = ToolFunction::new(
+            "create_memory".to_string(),
+            "Store a memory if the event is worth remembering.".to_string(),
+            vec![ToolFunctionParameter::StringParam {
+                name: "content".to_string(),
+                description: "The memory to store.".to_string(),
+                required: true,
+            }],
+        );
+        completion.add_tool_call(tool.into());
+        let response = completion
+            .send_request(&self.open_ai_key, reqwest::Client::new())
+            .await
+            .map_err(|err| err.message())?;
+
+        let tool_calls = response.maybe_tool_calls().map_err(|err| err.message())?;
+
+        let new_memories: Vec<String> = match tool_calls {
+            None => vec![],
+            Some(tool_calls) => extract_memory_content(tool_calls)?,
+        };
+
+        let mut ret = vec![];
+        for memory_content in new_memories.into_iter() {
+            let new_memory = NewMemory {
+                memory_uuid: MemoryUuid::new(),
+                content: memory_content,
+                person_uuid: person_uuid.clone(),
+            };
+
+            let memory_uuid = self.create_memory(new_memory).await?;
+
+            ret.push(memory_uuid);
+        }
+
+        Ok(ret)
     }
 
     async fn create_memory_query_prompt(
@@ -59,7 +123,7 @@ impl MemoryCapability for Worker {
             prompt.push_str(
                 format!(
                     "{} is in a scene called '{}'. The scene is described as: {}.\n\n",
-                    person_recalling.to_string(),
+                    person_recalling.as_str(),
                     scene_name,
                     scene_description
                 )
@@ -136,7 +200,7 @@ impl MemoryCapability for Worker {
                 prompt.push_str(
                     format!(
                         "{} has received a direct message from {}.\n\n",
-                        person_recalling.to_string(),
+                        person_recalling.as_str(),
                         sender_name
                     )
                     .as_str(),
@@ -149,7 +213,7 @@ impl MemoryCapability for Worker {
         prompt.push_str(
             format!(
                 "{}'s state of mind is {}",
-                person_recalling.to_string(),
+                person_recalling.as_str(),
                 state_of_mind
             )
             .as_str(),
@@ -187,7 +251,7 @@ impl MemoryCapability for Worker {
 
                 let participant_names: Vec<String> = scene_participants
                     .iter()
-                    .map(|participant| participant.person_name.to_string().to_owned())
+                    .map(|participant| participant.person_name.as_str().to_owned())
                     .collect();
 
                 add_people_to_prompt(&mut prompt, &participant_names);
@@ -264,4 +328,26 @@ impl MemoryCapability for Worker {
             })
             .collect())
     }
+}
+
+fn extract_memory_content(tool_calls: Vec<ToolCall>) -> Result<Vec<String>, String> {
+    let mut ret = vec![];
+
+    for call in tool_calls
+        .into_iter()
+        .filter(|call| call.name == "create_memory")
+    {
+        if let Some(value) = call
+            .arguments
+            .iter()
+            .find(|(name, _)| name == "content")
+            .and_then(|(_, value)| value.as_str())
+        {
+            ret.push(value.to_string());
+        } else {
+            Err("Missing 'content' argument in 'create_memory' tool call".to_string())?;
+        }
+    }
+
+    Ok(ret)
 }

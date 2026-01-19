@@ -306,7 +306,7 @@ fn scene_loaded_view(scene_model: &SceneModel) -> Element<'_, SceneLookUpMsg> {
             scene_model
                 .participants
                 .iter()
-                .map(|p| w::text(p.person_name.to_string()).into())
+                .map(|p| w::text(p.person_name.as_str()).into())
                 .collect::<Vec<_>>(),
         )
         .into()

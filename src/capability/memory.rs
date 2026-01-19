@@ -38,6 +38,11 @@ pub enum MessageTypeArgs {
 
 pub trait MemoryCapability: SceneCapability {
     async fn create_memory(&self, new_memory: NewMemory) -> Result<MemoryUuid, String>;
+    async fn maybe_create_memories_from_description(
+        &self,
+        person_uuid: PersonUuid,
+        description: String,
+    ) -> Result<Vec<MemoryUuid>, String>;
     async fn create_memory_query_prompt(
         &self,
         person_recalling: PersonName,

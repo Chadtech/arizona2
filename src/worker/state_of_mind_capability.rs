@@ -21,7 +21,7 @@ impl StateOfMindCapability for Worker {
             "#,
             new_state_of_mind.uuid.to_uuid(),
             new_state_of_mind.state_of_mind,
-            new_state_of_mind.person_name.to_string()
+            new_state_of_mind.person_name.as_str()
         )
         .fetch_one(&self.sqlx)
         .await

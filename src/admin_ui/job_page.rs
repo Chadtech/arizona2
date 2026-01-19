@@ -226,7 +226,10 @@ impl Model {
                                 .align_y(Alignment::Center),
                         );
                     }
-                    w::scrollable(col).width(Length::Fill).into()
+                    w::scrollable(col)
+                        .width(Length::Fill)
+                        .height(Length::Fixed(s::LIST_HEIGHT))
+                        .into()
                 }
             }
         };

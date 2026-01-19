@@ -10,7 +10,7 @@ use chrono::{DateTime, Utc};
 use iced::clipboard;
 use iced::Color;
 use iced::{widget as w, Element, Length, Task};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone)]
 pub struct Model {
@@ -57,9 +57,25 @@ impl Model {
     pub async fn load(worker: &Worker, scene_uuid: SceneUuid) -> Result<Model, String> {
         let mut timeline_items = vec![];
         let mut name_cache: HashMap<String, String> = HashMap::new();
+        let mut seen_messages: HashSet<String> = HashSet::new();
         let messages = worker.get_messages_in_scene(&scene_uuid).await?;
 
         for message in messages {
+            let sender_key = match &message.sender {
+                MessageSender::AiPerson(uuid) => uuid.to_uuid().to_string(),
+                MessageSender::RealWorldUser => "real_world_user".to_string(),
+            };
+            let message_key = format!(
+                "{}|{}|{}",
+                sender_key,
+                message.content,
+                message.sent_at.timestamp()
+            );
+
+            if !seen_messages.insert(message_key) {
+                continue;
+            }
+
             let sender_label = match &message.sender {
                 MessageSender::AiPerson(uuid) => {
                     person_label(worker, &mut name_cache, uuid).await?
@@ -120,7 +136,10 @@ impl Model {
                 })
                 .spacing(s::S2);
 
-            w::scrollable(timeline).width(Length::Fill).into()
+            w::scrollable(timeline)
+                .width(Length::Fill)
+                .height(Length::Fixed(s::LIST_HEIGHT))
+                .into()
         }
     }
 
@@ -202,7 +221,7 @@ async fn person_label(
     }
 
     let name = worker.get_persons_name(person_uuid.clone()).await?;
-    let label = name.to_string().to_string();
+    let label = name.as_str().to_string();
     cache.insert(key, label.clone());
     Ok(label)
 }

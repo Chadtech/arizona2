@@ -24,6 +24,7 @@ use crate::{
     nice_display::NiceDisplay,
 };
 use serde::{Deserialize, Serialize};
+use tracing::error;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProcessMessageJob {
@@ -64,6 +65,25 @@ pub enum Error {
         details: String,
     },
     FailedToGetPersonsName(String),
+    FailedToGetSceneName {
+        scene_uuid: SceneUuid,
+        details: String,
+    },
+    SceneNameNotFound {
+        scene_uuid: SceneUuid,
+    },
+    FailedToGetSceneDescription {
+        scene_uuid: SceneUuid,
+        details: String,
+    },
+    SceneDescriptionNotFound {
+        scene_uuid: SceneUuid,
+    },
+    FailedToGetSceneParticipants {
+        scene_uuid: SceneUuid,
+        details: String,
+    },
+    FailedToCreateMemory(String),
 }
 
 impl NiceDisplay for Error {
@@ -145,6 +165,45 @@ impl NiceDisplay for Error {
             Error::FailedToGetPersonsName(err) => {
                 format!("Failed to get person's name: {}", err)
             }
+            Error::FailedToGetSceneName {
+                scene_uuid,
+                details,
+            } => {
+                format!(
+                    "Failed to get scene name for {}: {}",
+                    scene_uuid.to_uuid(),
+                    details
+                )
+            }
+            Error::SceneNameNotFound { scene_uuid } => {
+                format!("Scene name not found for {}", scene_uuid.to_uuid())
+            }
+            Error::FailedToGetSceneDescription {
+                scene_uuid,
+                details,
+            } => {
+                format!(
+                    "Failed to get scene description for {}: {}",
+                    scene_uuid.to_uuid(),
+                    details
+                )
+            }
+            Error::SceneDescriptionNotFound { scene_uuid } => {
+                format!("Scene description not found for {}", scene_uuid.to_uuid())
+            }
+            Error::FailedToGetSceneParticipants {
+                scene_uuid,
+                details,
+            } => {
+                format!(
+                    "Failed to get scene participants for {}: {}",
+                    scene_uuid.to_uuid(),
+                    details
+                )
+            }
+            Error::FailedToCreateMemory(err) => {
+                format!("Failed to create memory:\n{}", err)
+            }
         }
     }
 }
@@ -180,11 +239,11 @@ impl ProcessMessageJob {
             MessageRecipient::Person(ref person_uuid) => {
                 let actions = process_message_for_person(worker, &message, person_uuid).await?;
 
-                for action in actions {
+                for action in &actions {
                     match action {
                         PersonAction::Wait { duration } => {
                             // Cap at i64::MAX if u64 exceeds it
-                            let duration_i64: i64 = duration.min(i64::MAX as u64) as i64;
+                            let duration_i64: i64 = (*duration).min(i64::MAX as u64) as i64;
                             let person_waiting_job = PersonWaitingJob::new(
                                 person_uuid.clone(),
                                 duration_i64,
@@ -216,7 +275,7 @@ impl ProcessMessageJob {
                             let send_message_to_scene_job = SendMessageToSceneJob {
                                 sender,
                                 scene_uuid: scene_uuid.clone(),
-                                content: comment,
+                                content: comment.clone(),
                                 random_seed: random_seed.clone(),
                             };
 
@@ -232,6 +291,29 @@ impl ProcessMessageJob {
                         }
                     }
                 }
+
+                let sender_label: String = match &message.sender {
+                    MessageSender::AiPerson(sender_person_uuid) => worker
+                        .get_persons_name(sender_person_uuid.clone())
+                        .await
+                        .map(|name| name.to_string())
+                        .map_err(Error::FailedToGetPersonsName)?
+                        .to_string(),
+                    MessageSender::RealWorldUser => "Chadtech".to_string(),
+                };
+
+                let situation = build_situation(worker, &message).await?;
+                let action_summary = summarize_actions(&actions);
+                let description = if action_summary.is_empty() {
+                    situation
+                } else {
+                    format!("{}\n\nResponse:\n{}", situation, action_summary)
+                };
+
+                worker
+                    .maybe_create_memories_from_description(person_uuid.clone(), description)
+                    .await
+                    .map_err(Error::FailedToCreateMemory)?;
             }
             MessageRecipient::RealWorldUser => {
                 //
@@ -246,6 +328,98 @@ impl ProcessMessageJob {
         // Placeholder for additional processing logic on the message
 
         Ok(())
+    }
+}
+
+fn summarize_actions(actions: &[PersonAction]) -> String {
+    let mut lines = Vec::new();
+
+    for action in actions {
+        match action {
+            PersonAction::Wait { duration } => {
+                lines.push(format!("Waited for {} seconds.", duration));
+            }
+            PersonAction::SayInScene { comment } => {
+                lines.push(format!("Spoke in scene: {}", comment));
+            }
+        }
+    }
+
+    lines.join("\n")
+}
+
+async fn build_situation<W: SceneCapability + PersonCapability>(
+    worker: &W,
+    message: &Message,
+) -> Result<String, Error> {
+    let sender_name = match &message.sender {
+        MessageSender::AiPerson(sender_person_uuid) => worker
+            .get_persons_name(sender_person_uuid.clone())
+            .await
+            .map_err(|err| Error::FailedToGetSendersName {
+                person_uuid: sender_person_uuid.clone(),
+                details: err,
+            })?,
+        MessageSender::RealWorldUser => PersonName::from_string("Chadtech".to_string()),
+    };
+
+    match &message.scene_uuid {
+        Some(scene_uuid) => {
+            let scene_name = worker
+                .get_scene_name(scene_uuid)
+                .await
+                .map_err(|err| Error::FailedToGetSceneName {
+                    scene_uuid: scene_uuid.clone(),
+                    details: err,
+                })?
+                .ok_or_else(|| Error::SceneNameNotFound {
+                    scene_uuid: scene_uuid.clone(),
+                })?;
+
+            let scene_description = worker
+                .get_scene_description(scene_uuid)
+                .await
+                .map_err(|err| Error::FailedToGetSceneDescription {
+                    scene_uuid: scene_uuid.clone(),
+                    details: err,
+                })?
+                .ok_or_else(|| Error::SceneDescriptionNotFound {
+                    scene_uuid: scene_uuid.clone(),
+                })?;
+
+            let participants = worker
+                .get_scene_current_participants(scene_uuid)
+                .await
+                .map_err(|err| Error::FailedToGetSceneParticipants {
+                    scene_uuid: scene_uuid.clone(),
+                    details: err,
+                })?;
+
+            let participant_names = participants
+                .iter()
+                .map(|participant| participant.person_name.to_string())
+                .collect::<Vec<String>>();
+
+            let participant_list = if participant_names.is_empty() {
+                "none".to_string()
+            } else {
+                participant_names.join(", ")
+            };
+
+            Ok(format!(
+                "You are in the scene \"{}\". {}\n\nOther people present: {}\n\n{} said:\n\n{}",
+                scene_name,
+                scene_description,
+                participant_list,
+                sender_name.as_str(),
+                message.content
+            ))
+        }
+        None => Ok(format!(
+            "You received a direct message from {}:\n\n{}",
+            sender_name.as_str(),
+            message.content
+        )),
     }
 }
 
@@ -301,18 +475,7 @@ async fn process_message_for_person<
         })?,
     };
 
-    let sender_name = match &message.sender {
-        MessageSender::AiPerson(sender_person_uuid) => worker
-            .get_persons_name(sender_person_uuid.clone())
-            .await
-            .map_err(|err| Error::FailedToGetSendersName {
-                person_uuid: sender_person_uuid.clone(),
-                details: err,
-            })?,
-        MessageSender::RealWorldUser => PersonName::from_string("Chadtech".to_string()),
-    };
-
-    let situation = format!("{} said:\n\n{}", sender_name.to_string(), message.content);
+    let situation = build_situation(worker, message).await?;
 
     let memories_prompt = worker
         .create_memory_query_prompt(

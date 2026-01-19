@@ -23,6 +23,7 @@ This is a Rust workspace with source in `src/`. Core areas include:
 - Follow standard Rust style (rustfmt defaults, 4-space indentation).
 - Use `snake_case` for modules/functions and `CamelCase` for types/traits.
 - Prefer explicit error types that implement `NiceDisplay` (`src/nice_display.rs`).
+- Avoid `unwrap`/`expect` and placeholder `unwrap_or_else` defaults; return errors instead.
 - Keep modules focused; place domain logic in `src/domain/` and IO in capabilities.
 
 ## Testing Guidelines

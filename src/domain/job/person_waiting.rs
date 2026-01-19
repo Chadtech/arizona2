@@ -147,8 +147,7 @@ impl PersonWaitingJob {
     }
 
     pub fn run_at_active_ms(&self) -> i64 {
-        self.start_active_ms
-            .saturating_add(self.duration_ms.max(0))
+        self.start_active_ms.saturating_add(self.duration_ms.max(0))
     }
 
     pub async fn run<
@@ -171,8 +170,8 @@ impl PersonWaitingJob {
 
         let elapsed = current_active_ms.saturating_sub(self.start_active_ms);
         if elapsed >= self.duration_ms {
-            let get_args = crate::capability::event::GetArgs::new()
-                .with_person_uuid(person_uuid.clone());
+            let get_args =
+                crate::capability::event::GetArgs::new().with_person_uuid(person_uuid.clone());
             let events = worker
                 .get_events(get_args)
                 .await
@@ -223,7 +222,7 @@ impl PersonWaitingJob {
             let minutes_waiting = (self.duration_ms / 60000).max(0);
             let situation = format!(
                 "{} decided to wait {} minutes, and nothing happened.",
-                persons_name.to_string(),
+                persons_name.as_str(),
                 minutes_waiting
             );
 
