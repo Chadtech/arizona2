@@ -1,6 +1,6 @@
 use super::s;
 use crate::capability::job::JobCapability;
-use crate::domain::job::{Job, JobKind};
+use crate::domain::job::{Job, JobKind, JobStatus};
 use crate::domain::job_uuid::JobUuid;
 use crate::job_runner::{self, RunNextJobResult};
 use crate::nice_display::NiceDisplay;
@@ -220,10 +220,26 @@ impl Model {
                             .on_press(Msg::ClickedResetJob(job.uuid().clone()))
                             .into();
 
+                        let status_color = match job.status() {
+                            JobStatus::Finished => Color::from_rgb(0.55, 0.78, 0.54),
+                            JobStatus::Failed => Color::from_rgb(0.85, 0.45, 0.45),
+                            JobStatus::NotStarted => Color::from_rgb(0.65, 0.65, 0.65),
+                        };
+
+                        let job_label = format!(
+                            "{}, uuid: {}",
+                            job.kind_label(),
+                            job.uuid().to_string()
+                        );
+
                         col = col.push(
-                            w::row![w::text(job.to_info_string()), reset_control]
-                                .spacing(s::S4)
-                                .align_y(Alignment::Center),
+                            w::row![
+                                w::text(job_label),
+                                w::text(job.status_label()).color(status_color),
+                                reset_control
+                            ]
+                            .spacing(s::S4)
+                            .align_y(Alignment::Center),
                         );
                     }
                     w::scrollable(col)

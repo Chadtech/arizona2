@@ -26,6 +26,13 @@ pub struct PoppedJob {
     pub kind: JobKind,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum JobStatus {
+    Finished,
+    Failed,
+    NotStarted,
+}
+
 #[derive(Debug, Clone)]
 pub enum JobKind {
     Ping,
@@ -104,6 +111,35 @@ impl Display for JobUuid {
 }
 
 impl Job {
+    pub fn status(&self) -> JobStatus {
+        if self.finished_at.is_some() {
+            JobStatus::Finished
+        } else if self.error.is_some() || self.started_at.is_some() {
+            JobStatus::Failed
+        } else {
+            JobStatus::NotStarted
+        }
+    }
+
+    pub fn status_label(&self) -> String {
+        match self.status() {
+            JobStatus::Finished => {
+                let date: String = self
+                    .finished_at
+                    .unwrap()
+                    .format("%Y-%m-%d %H:%M:%S UTC")
+                    .to_string();
+                format!("finished at {}", date)
+            }
+            JobStatus::Failed => "failed".to_string(),
+            JobStatus::NotStarted => "not started".to_string(),
+        }
+    }
+
+    pub fn kind_label(&self) -> String {
+        self.kind.to_name()
+    }
+
     pub fn parse(
         uuid: JobUuid,
         started_at: Option<DateTime<Utc>>,
@@ -124,24 +160,11 @@ impl Job {
     }
 
     pub fn to_info_string(&self) -> String {
-        let status_string = if self.finished_at.is_some() {
-            let date: String = self
-                .finished_at
-                .unwrap()
-                .format("%Y-%m-%d %H:%M:%S UTC")
-                .to_string();
-            format!("finished at {}", date)
-        } else if self.error.is_some() || self.started_at.is_some() {
-            "failed".to_string()
-        } else {
-            "not started".to_string()
-        };
-
         format!(
             "{}, uuid: {}, {}",
             self.kind.to_name(),
             self.uuid.to_string(),
-            status_string
+            self.status_label()
         )
     }
 
