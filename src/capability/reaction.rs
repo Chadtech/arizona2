@@ -9,5 +9,5 @@ pub trait ReactionCapability {
         person_identity: String,
         state_of_mind: String,
         situation: String,
-    ) -> Result<Vec<PersonAction>, CompletionError>;
+    ) -> Result<PersonAction, String>;
 }

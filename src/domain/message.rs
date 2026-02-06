@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 pub struct Message {
     pub uuid: MessageUuid,
     pub sender: MessageSender,
-    pub recipient: MessageRecipient,
+    pub recipient: Option<MessageRecipient>,
     pub scene_uuid: Option<SceneUuid>,
     pub content: String,
     pub sent_at: DateTime<Utc>,

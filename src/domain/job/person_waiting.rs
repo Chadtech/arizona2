@@ -48,7 +48,7 @@ pub enum Error {
     FailedToGetPersonsName(String),
     CouldNotCreateMemoriesPrompt(String),
     FailedToSearchMemories(String),
-    GetPersonReactionCompletionError(CompletionError),
+    GetPersonReactionError(String),
     CouldNotGetPersonsScene {
         person_uuid: PersonUuid,
         details: String,
@@ -104,8 +104,8 @@ impl NiceDisplay for Error {
             Error::FailedToSearchMemories(err) => {
                 format!("Failed to search memories: {}", err)
             }
-            Error::GetPersonReactionCompletionError(err) => {
-                format!("Failed to get person reaction: {}", err.message())
+            Error::GetPersonReactionError(err) => {
+                format!("Failed to get person reaction: {}", err)
             }
             Error::CouldNotGetPersonsScene {
                 person_uuid,
@@ -257,58 +257,53 @@ impl PersonWaitingJob {
                 })?,
             };
 
-            let actions = worker
+            let action = worker
                 .get_reaction(memories, person_identity, state_of_mind.content, situation)
                 .await
-                .map_err(Error::GetPersonReactionCompletionError)?;
+                .map_err(Error::GetPersonReactionError)?;
 
-            for action in actions {
-                match action {
-                    PersonAction::Wait { duration } => {
-                        let duration_i64: i64 = duration.min(i64::MAX as u64) as i64;
-                        let person_waiting_job = PersonWaitingJob::new(
-                            person_uuid.clone(),
-                            duration_i64,
-                            current_active_ms,
-                        );
-                        let wait_job = JobKind::PersonWaiting(person_waiting_job);
-                        worker.unshift_job(wait_job).await.map_err(|err| {
-                            Error::PersonCouldNotWait {
-                                person_uuid: person_uuid.clone(),
-                                error: err,
-                            }
+            match action {
+                PersonAction::Wait { duration } => {
+                    let duration_i64: i64 = duration.min(i64::MAX as u64) as i64;
+                    let person_waiting_job =
+                        PersonWaitingJob::new(person_uuid.clone(), duration_i64, current_active_ms);
+                    let wait_job = JobKind::PersonWaiting(person_waiting_job);
+                    worker.unshift_job(wait_job).await.map_err(|err| {
+                        Error::PersonCouldNotWait {
+                            person_uuid: person_uuid.clone(),
+                            error: err,
+                        }
+                    })?;
+                }
+                PersonAction::SayInScene { comment } => {
+                    let sender = MessageSender::AiPerson(person_uuid.clone());
+
+                    let scene_uuid = worker
+                        .get_persons_current_scene_uuid(&person_uuid)
+                        .await
+                        .map_err(|err| Error::CouldNotGetPersonsScene {
+                            person_uuid: person_uuid.clone(),
+                            details: err,
+                        })?
+                        .ok_or(Error::CouldNotGetPersonsScene {
+                            person_uuid: person_uuid.clone(),
+                            details: "Person is not in any scene".to_string(),
                         })?;
-                    }
-                    PersonAction::SayInScene { comment } => {
-                        let sender = MessageSender::AiPerson(person_uuid.clone());
 
-                        let scene_uuid = worker
-                            .get_persons_current_scene_uuid(&person_uuid)
-                            .await
-                            .map_err(|err| Error::CouldNotGetPersonsScene {
-                                person_uuid: person_uuid.clone(),
-                                details: err,
-                            })?
-                            .ok_or(Error::CouldNotGetPersonsScene {
-                                person_uuid: person_uuid.clone(),
-                                details: "Person is not in any scene".to_string(),
-                            })?;
-
-                        let send_message_to_scene_job = SendMessageToSceneJob {
-                            sender,
-                            scene_uuid: scene_uuid.clone(),
-                            content: comment,
-                            random_seed: random_seed.clone(),
-                        };
-                        let job_kind = JobKind::SendMessageToScene(send_message_to_scene_job);
-                        worker.unshift_job(job_kind).await.map_err(|err| {
-                            Error::PersonCouldNotSayInScene {
-                                scene_uuid: scene_uuid,
-                                details: err,
-                                subject: person_uuid.to_uuid().to_string(),
-                            }
-                        })?;
-                    }
+                    let send_message_to_scene_job = SendMessageToSceneJob {
+                        sender,
+                        scene_uuid: scene_uuid.clone(),
+                        content: comment,
+                        random_seed: random_seed.clone(),
+                    };
+                    let job_kind = JobKind::SendMessageToScene(send_message_to_scene_job);
+                    worker.unshift_job(job_kind).await.map_err(|err| {
+                        Error::PersonCouldNotSayInScene {
+                            scene_uuid: scene_uuid,
+                            details: err,
+                            subject: person_uuid.to_uuid().to_string(),
+                        }
+                    })?;
                 }
             }
 

@@ -8,6 +8,7 @@ use crate::domain::scene_uuid::SceneUuid;
 use crate::worker::Worker;
 use chrono::{DateTime, Utc};
 use iced::clipboard;
+use iced::widget::scrollable;
 use iced::Color;
 use iced::{widget as w, Element, Length, Task};
 use std::collections::{HashMap, HashSet};
@@ -15,6 +16,7 @@ use std::collections::{HashMap, HashSet};
 #[derive(Debug, Clone)]
 pub struct Model {
     items: Vec<TimelineItem>,
+    scrollable_id: scrollable::Id,
 }
 
 #[derive(Debug, Clone)]
@@ -115,6 +117,7 @@ impl Model {
 
         Ok(Model {
             items: timeline_items,
+            scrollable_id: scrollable::Id::unique(),
         })
     }
 
@@ -122,6 +125,10 @@ impl Model {
         match msg {
             Msg::Copy(contents) => clipboard::write(contents),
         }
+    }
+
+    pub fn scroll_to_bottom(&self) -> Task<Msg> {
+        scrollable::snap_to(self.scrollable_id.clone(), scrollable::RelativeOffset::END)
     }
 
     pub fn view(&self) -> Element<'_, Msg> {
@@ -137,6 +144,7 @@ impl Model {
                 .spacing(s::S2);
 
             w::scrollable(timeline)
+                .id(self.scrollable_id.clone())
                 .width(Length::Fill)
                 .height(Length::Fixed(s::LIST_HEIGHT))
                 .into()

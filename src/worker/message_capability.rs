@@ -39,6 +39,36 @@ impl MessageCapability for Worker {
         Ok(message_uuid)
     }
 
+    async fn send_scene_message(
+        &self,
+        sender: MessageSender,
+        scene_uuid: SceneUuid,
+        content: String,
+    ) -> Result<MessageUuid, String> {
+        let message_uuid = MessageUuid::new();
+
+        let sender_uuid = match sender {
+            MessageSender::AiPerson(person_uuid) => Some(person_uuid.to_uuid()),
+            MessageSender::RealWorldUser => None,
+        };
+
+        sqlx::query!(
+            r#"
+                INSERT INTO message (uuid, sender_person_uuid, receiver_person_uuid, scene_uuid, content)
+                VALUES ($1::UUID, $2::UUID, NULL, $3::UUID, $4::TEXT)
+            "#,
+            message_uuid.to_uuid(),
+            sender_uuid,
+            scene_uuid.to_uuid(),
+            content
+        )
+        .execute(&self.sqlx)
+        .await
+        .map_err(|err| format!("Error inserting scene message: {}", err))?;
+
+        Ok(message_uuid)
+    }
+
     async fn get_messages_in_scene(&self, scene_uuid: &SceneUuid) -> Result<Vec<Message>, String> {
         let rows = sqlx::query!(
             r#"
@@ -55,23 +85,26 @@ impl MessageCapability for Worker {
 
         let messages = rows
             .into_iter()
-            .map(|row| Message {
-                uuid: MessageUuid::from_uuid(row.uuid),
-                sender: match row.sender_person_uuid {
-                    Some(uuid) => MessageSender::AiPerson(PersonUuid::from_uuid(uuid)),
-                    None => MessageSender::RealWorldUser,
-                },
-                recipient: match row.receiver_person_uuid {
-                    Some(uuid) => MessageRecipient::Person(PersonUuid::from_uuid(uuid)),
-                    None => MessageRecipient::RealWorldUser,
-                },
-                scene_uuid: match row.scene_uuid {
-                    Some(uuid) => Some(SceneUuid::from_uuid(uuid)),
-                    None => None,
-                },
-                content: row.content,
-                sent_at: row.sent_at,
-                read_at: row.read_at,
+            .map(|row| {
+                let scene_uuid = row.scene_uuid.map(SceneUuid::from_uuid);
+                let recipient = match (row.receiver_person_uuid, &scene_uuid) {
+                    (Some(uuid), _) => Some(MessageRecipient::Person(PersonUuid::from_uuid(uuid))),
+                    (None, None) => Some(MessageRecipient::RealWorldUser),
+                    (None, Some(_)) => None,
+                };
+
+                Message {
+                    uuid: MessageUuid::from_uuid(row.uuid),
+                    sender: match row.sender_person_uuid {
+                        Some(uuid) => MessageSender::AiPerson(PersonUuid::from_uuid(uuid)),
+                        None => MessageSender::RealWorldUser,
+                    },
+                    recipient,
+                    scene_uuid,
+                    content: row.content,
+                    sent_at: row.sent_at,
+                    read_at: row.read_at,
+                }
             })
             .collect();
 
@@ -96,9 +129,11 @@ impl MessageCapability for Worker {
 
         match row {
             Some(row) => {
-                let recipient = match row.receiver_person_uuid {
-                    Some(uuid) => MessageRecipient::Person(PersonUuid::from_uuid(uuid)),
-                    None => MessageRecipient::RealWorldUser,
+                let scene_uuid = row.scene_uuid.map(SceneUuid::from_uuid);
+                let recipient = match (row.receiver_person_uuid, &scene_uuid) {
+                    (Some(uuid), _) => Some(MessageRecipient::Person(PersonUuid::from_uuid(uuid))),
+                    (None, None) => Some(MessageRecipient::RealWorldUser),
+                    (None, Some(_)) => None,
                 };
 
                 Ok(Some(Message {
@@ -107,10 +142,7 @@ impl MessageCapability for Worker {
                         Some(uuid) => MessageSender::AiPerson(PersonUuid::from_uuid(uuid)),
                         None => MessageSender::RealWorldUser,
                     },
-                    scene_uuid: match row.scene_uuid {
-                        Some(uuid) => Some(SceneUuid::from_uuid(uuid)),
-                        None => None,
-                    },
+                    scene_uuid,
                     recipient,
                     content: row.content,
                     sent_at: row.sent_at,

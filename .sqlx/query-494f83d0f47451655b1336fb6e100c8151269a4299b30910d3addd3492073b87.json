@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                INSERT INTO message (uuid, sender_person_uuid, receiver_person_uuid, scene_uuid, content)\n                VALUES ($1::UUID, $2::UUID, NULL, $3::UUID, $4::TEXT)\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "494f83d0f47451655b1336fb6e100c8151269a4299b30910d3addd3492073b87"
+}

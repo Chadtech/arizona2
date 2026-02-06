@@ -1,9 +1,8 @@
 use crate::capability::job::JobCapability;
-use crate::capability::message::{MessageCapability, NewMessage};
+use crate::capability::message::MessageCapability;
 use crate::domain::actor_uuid::ActorUuid;
 use crate::domain::job::process_message::ProcessMessageJob;
 use crate::domain::job::JobKind;
-use crate::domain::message::MessageRecipient;
 use crate::domain::message_uuid::MessageUuid;
 use crate::domain::random_seed::RandomSeed;
 use crate::domain::scene_uuid::SceneUuid;
@@ -90,6 +89,14 @@ impl SendMessageToSceneJob {
         let mut rng = rand::rngs::SmallRng::seed_from_u64(self.random_seed.value());
         participants.shuffle(&mut rng);
 
+        let message_uuid = worker
+            .send_scene_message(self.sender.clone(), self.scene_uuid.clone(), self.content.clone())
+            .await
+            .map_err(|err| Error::FailedToSendMessage {
+                participant: ActorUuid::RealWorldUser,
+                details: err,
+            })?;
+
         for participant in participants {
             let is_sender = match (&self.sender, &participant.actor_uuid) {
                 (MessageSender::AiPerson(sender_uuid), ActorUuid::AiPerson(participant_uuid)) => {
@@ -102,23 +109,14 @@ impl SendMessageToSceneJob {
                 continue;
             }
 
-            let new_message = NewMessage {
-                sender: self.sender.clone(),
-                recipient: MessageRecipient::from(&participant.actor_uuid),
-                content: self.content.clone(),
-                scene_uuid: Some(self.scene_uuid.clone()),
-            };
-
-            let message_uuid = worker.send_message(new_message).await.map_err(|err| {
-                Error::FailedToSendMessage {
-                    participant: participant.actor_uuid,
-                    details: err,
-                }
-            })?;
-
-            let process_message_job = ProcessMessageJob {
-                message_uuid: message_uuid.clone(),
-            };
+                let message_uuid = message_uuid.clone();
+                let process_message_job = ProcessMessageJob {
+                    message_uuid: message_uuid.clone(),
+                    recipient_person_uuid: match participant.actor_uuid {
+                        ActorUuid::AiPerson(person_uuid) => Some(person_uuid),
+                        ActorUuid::RealWorldUser => None,
+                    },
+                };
 
             worker
                 .unshift_job(JobKind::ProcessMessage(process_message_job))
@@ -127,24 +125,6 @@ impl SendMessageToSceneJob {
                     message_uuid,
                     details: err,
                 })?;
-        }
-
-        if let MessageSender::RealWorldUser = self.sender {
-            // No-op: avoid creating a self-to-self message for the real-world user.
-        } else {
-            let new_message = NewMessage {
-                sender: self.sender.clone(),
-                recipient: MessageRecipient::RealWorldUser,
-                content: self.content.clone(),
-                scene_uuid: Some(self.scene_uuid.clone()),
-            };
-
-            worker.send_message(new_message).await.map_err(|err| {
-                Error::FailedToSendMessage {
-                    participant: ActorUuid::RealWorldUser,
-                    details: err,
-                }
-            })?;
         }
 
         Ok(())

@@ -188,10 +188,17 @@ impl Model {
             },
             Msg::TimelineLoaded(res) => {
                 if let SceneLoadStatus::Loaded(loaded_scene) = &mut self.scene_load_status {
-                    loaded_scene.messages = match res {
-                        Ok(timeline_model) => MessagesStatus::Loaded(timeline_model),
-                        Err(err) => MessagesStatus::Error(err),
-                    };
+                    match res {
+                        Ok(timeline_model) => {
+                            let scroll_task =
+                                timeline_model.scroll_to_bottom().map(Msg::GotTimelineMsg);
+                            loaded_scene.messages = MessagesStatus::Loaded(timeline_model);
+                            return scroll_task;
+                        }
+                        Err(err) => {
+                            loaded_scene.messages = MessagesStatus::Error(err);
+                        }
+                    }
                 }
                 Task::none()
             }

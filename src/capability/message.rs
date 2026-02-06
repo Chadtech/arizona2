@@ -11,6 +11,12 @@ pub struct NewMessage {
 
 pub trait MessageCapability {
     async fn send_message(&self, new_message: NewMessage) -> Result<MessageUuid, String>;
+    async fn send_scene_message(
+        &self,
+        sender: MessageSender,
+        scene_uuid: SceneUuid,
+        content: String,
+    ) -> Result<MessageUuid, String>;
     async fn get_messages_in_scene(&self, scene_uuid: &SceneUuid) -> Result<Vec<Message>, String>;
     async fn get_message_by_uuid(
         &self,

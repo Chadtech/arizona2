@@ -29,13 +29,15 @@ use tracing::error;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProcessMessageJob {
     pub message_uuid: MessageUuid,
+    #[serde(default)]
+    pub recipient_person_uuid: Option<PersonUuid>,
 }
 
 pub enum Error {
     FailedToGetMessage(String),
     MessageNotFound,
     FailedToMarkMessageRead(String),
-    GetPersonReactionCompletionError(CompletionError),
+    GetPersonReactionError(String),
     FailedToGetEvents(String),
     FailedToGetStateOfMind(String),
     NoStateOfMindFound {
@@ -96,8 +98,8 @@ impl NiceDisplay for Error {
             Error::FailedToMarkMessageRead(details) => {
                 format!("Failed to mark message as read: {}", details)
             }
-            Error::GetPersonReactionCompletionError(err) => {
-                format!("Failed to get person reaction: {}", err.message())
+            Error::GetPersonReactionError(err) => {
+                format!("Failed to get person reaction: {}", err)
             }
             Error::FailedToGetEvents(err) => {
                 format!("Failed to get events: {}", err)
@@ -232,78 +234,74 @@ impl ProcessMessageJob {
 
         let message = match maybe_message {
             Some(msg) => msg,
-            None => return Err(Error::MessageNotFound),
+            None => Err(Error::MessageNotFound)?,
         };
 
-        match message.recipient {
-            MessageRecipient::Person(ref person_uuid) => {
-                let actions = process_message_for_person(worker, &message, person_uuid).await?;
+        let person_uuid = if let Some(ref person_uuid) = self.recipient_person_uuid {
+            Some(person_uuid)
+        } else if let Some(MessageRecipient::Person(ref person_uuid)) = message.recipient {
+            Some(person_uuid)
+        } else {
+            None
+        };
 
-                for action in &actions {
-                    match action {
-                        PersonAction::Wait { duration } => {
-                            // Cap at i64::MAX if u64 exceeds it
-                            let duration_i64: i64 = (*duration).min(i64::MAX as u64) as i64;
-                            let person_waiting_job = PersonWaitingJob::new(
-                                person_uuid.clone(),
-                                duration_i64,
-                                current_active_ms,
-                            );
-                            let wait_job = JobKind::PersonWaiting(person_waiting_job);
-                            worker.unshift_job(wait_job).await.map_err(|err| {
-                                Error::PersonCouldNotWait {
-                                    person_uuid: person_uuid.clone(),
-                                    error: err,
-                                }
+        match person_uuid {
+            Some(person_uuid) => {
+                let action = process_message_for_person(worker, &message, &person_uuid).await?;
+
+                match &action {
+                    PersonAction::Wait { duration } => {
+                        // Cap at i64::MAX if u64 exceeds it
+                        let duration_i64: i64 = (*duration).min(i64::MAX as u64) as i64;
+                        let person_waiting_job = PersonWaitingJob::new(
+                            person_uuid.clone(),
+                            duration_i64,
+                            current_active_ms,
+                        );
+                        let wait_job = JobKind::PersonWaiting(person_waiting_job);
+                        worker.unshift_job(wait_job).await.map_err(|err| {
+                            Error::PersonCouldNotWait {
+                                person_uuid: person_uuid.clone(),
+                                error: err,
+                            }
+                        })?;
+                    }
+                    PersonAction::SayInScene { comment } => {
+                        let sender = MessageSender::AiPerson(person_uuid.clone());
+
+                        let scene_uuid = worker
+                            .get_persons_current_scene_uuid(&person_uuid)
+                            .await
+                            .map_err(|err| Error::CouldNotGetPersonsScene {
+                                person_uuid: person_uuid.clone(),
+                                details: err,
+                            })?
+                            .ok_or(Error::CouldNotGetPersonsScene {
+                                person_uuid: person_uuid.clone(),
+                                details: "Person is not in any scene".to_string(),
                             })?;
-                        }
-                        PersonAction::SayInScene { comment } => {
-                            let sender = MessageSender::AiPerson(person_uuid.clone());
 
-                            let scene_uuid = worker
-                                .get_persons_current_scene_uuid(person_uuid)
-                                .await
-                                .map_err(|err| Error::CouldNotGetPersonsScene {
-                                    person_uuid: person_uuid.clone(),
-                                    details: err,
-                                })?
-                                .ok_or(Error::CouldNotGetPersonsScene {
-                                    person_uuid: person_uuid.clone(),
-                                    details: "Person is not in any scene".to_string(),
-                                })?;
+                        let send_message_to_scene_job = SendMessageToSceneJob {
+                            sender,
+                            scene_uuid: scene_uuid.clone(),
+                            content: comment.clone(),
+                            random_seed: random_seed.clone(),
+                        };
 
-                            let send_message_to_scene_job = SendMessageToSceneJob {
-                                sender,
-                                scene_uuid: scene_uuid.clone(),
-                                content: comment.clone(),
-                                random_seed: random_seed.clone(),
-                            };
+                        let job_kind = JobKind::SendMessageToScene(send_message_to_scene_job);
 
-                            let job_kind = JobKind::SendMessageToScene(send_message_to_scene_job);
-
-                            worker.unshift_job(job_kind).await.map_err(|err| {
-                                Error::PersonCouldNotSayInScene {
-                                    scene_uuid: scene_uuid,
-                                    details: err,
-                                    subject: person_uuid.to_uuid().to_string(),
-                                }
-                            })?;
-                        }
+                        worker.unshift_job(job_kind).await.map_err(|err| {
+                            Error::PersonCouldNotSayInScene {
+                                scene_uuid: scene_uuid,
+                                details: err,
+                                subject: person_uuid.to_uuid().to_string(),
+                            }
+                        })?;
                     }
                 }
 
-                let sender_label: String = match &message.sender {
-                    MessageSender::AiPerson(sender_person_uuid) => worker
-                        .get_persons_name(sender_person_uuid.clone())
-                        .await
-                        .map(|name| name.to_string())
-                        .map_err(Error::FailedToGetPersonsName)?
-                        .to_string(),
-                    MessageSender::RealWorldUser => "Chadtech".to_string(),
-                };
-
                 let situation = build_situation(worker, &message).await?;
-                let action_summary = summarize_actions(&actions);
+                let action_summary = summarize_action(action);
                 let description = if action_summary.is_empty() {
                     situation
                 } else {
@@ -315,7 +313,7 @@ impl ProcessMessageJob {
                     .await
                     .map_err(Error::FailedToCreateMemory)?;
             }
-            MessageRecipient::RealWorldUser => {
+            None => {
                 //
             }
         }
@@ -331,21 +329,15 @@ impl ProcessMessageJob {
     }
 }
 
-fn summarize_actions(actions: &[PersonAction]) -> String {
-    let mut lines = Vec::new();
-
-    for action in actions {
-        match action {
-            PersonAction::Wait { duration } => {
-                lines.push(format!("Waited for {} seconds.", duration));
-            }
-            PersonAction::SayInScene { comment } => {
-                lines.push(format!("Spoke in scene: {}", comment));
-            }
+fn summarize_action(action: PersonAction) -> String {
+    match action {
+        PersonAction::Wait { duration } => {
+            format!("Waited for {} seconds.", duration)
+        }
+        PersonAction::SayInScene { comment } => {
+            format!("Spoke in scene: {}", comment)
         }
     }
-
-    lines.join("\n")
 }
 
 async fn build_situation<W: SceneCapability + PersonCapability>(
@@ -437,7 +429,7 @@ async fn process_message_for_person<
     worker: &W,
     message: &'a Message,
     person_uuid: &'a PersonUuid,
-) -> Result<Vec<PersonAction>, Error> {
+) -> Result<PersonAction, Error> {
     let persons_name: PersonName = worker
         .get_persons_name(person_uuid.clone())
         .await
@@ -508,10 +500,8 @@ async fn process_message_for_person<
         })?,
     };
 
-    let actions = worker
+    worker
         .get_reaction(memories, person_identity, state_of_mind.content, situation)
         .await
-        .map_err(Error::GetPersonReactionCompletionError)?;
-
-    Ok(actions)
+        .map_err(Error::GetPersonReactionError)
 }
