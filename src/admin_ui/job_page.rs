@@ -6,7 +6,7 @@ use crate::job_runner::{self, RunNextJobResult};
 use crate::nice_display::NiceDisplay;
 use crate::worker::Worker;
 use iced::widget::container;
-use iced::{widget as w, Alignment, Color, Element, Length, Task};
+use iced::{clipboard, widget as w, Alignment, Background, Color, Element, Length, Task};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -14,7 +14,6 @@ pub struct Model {
     add_ping_status: AddPingStatus,
     get_jobs_status: GetJobsStatus,
     process_next_status: ProcessNextStatus,
-    reset_job_status: ResetJobStatus,
     selected_job_status: SelectedJobStatus,
 }
 
@@ -42,8 +41,8 @@ enum ProcessNextStatus {
 
 enum ResetJobStatus {
     Ready,
-    Resetting(JobUuid),
-    ResetOk(JobUuid),
+    Resetting,
+    ResetOk,
     ResetErr(String),
 }
 
@@ -57,13 +56,14 @@ enum SelectedJobStatus {
 struct SelectedJobModel {
     job: Job,
     delete_status: DeleteStatus,
+    reset_status: ResetJobStatus,
 }
 
 enum DeleteStatus {
     Ready,
-    Confirming(JobUuid),
-    Deleting(JobUuid),
-    Deleted(JobUuid),
+    Confirming,
+    Deleting,
+    Deleted,
     Error(String),
 }
 
@@ -83,6 +83,7 @@ pub enum Msg {
     ClickedConfirmDelete(JobUuid),
     ClickedCancelDelete,
     DeletedJob(Result<JobUuid, String>),
+    ClickedCopyJobUuid(String),
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -100,7 +101,6 @@ impl Model {
             add_ping_status: AddPingStatus::Ready,
             get_jobs_status: GetJobsStatus::Fetching,
             process_next_status: ProcessNextStatus::Ready,
-            reset_job_status: ResetJobStatus::Ready,
             selected_job_status: SelectedJobStatus::None,
         }
     }
@@ -162,18 +162,28 @@ impl Model {
                 }
             },
             Msg::ClickedResetJob(job_uuid) => {
-                self.reset_job_status = ResetJobStatus::Resetting(job_uuid.clone());
+                if let SelectedJobStatus::Loaded(selected_job) = &mut self.selected_job_status {
+                    if selected_job.job.uuid() == &job_uuid {
+                        selected_job.reset_status = ResetJobStatus::Resetting;
+                    }
+                }
                 let worker = worker.clone();
                 Task::perform(reset_job(worker, job_uuid), Msg::ResetJobResult)
             }
             Msg::ResetJobResult(res) => match res {
                 Ok(job_uuid) => {
-                    self.reset_job_status = ResetJobStatus::ResetOk(job_uuid);
+                    if let SelectedJobStatus::Loaded(selected_job) = &mut self.selected_job_status {
+                        if selected_job.job.uuid() == &job_uuid {
+                            selected_job.reset_status = ResetJobStatus::ResetOk;
+                        }
+                    }
                     let worker = worker.clone();
                     Task::perform(get_jobs(worker), |m| m)
                 }
                 Err(err) => {
-                    self.reset_job_status = ResetJobStatus::ResetErr(err);
+                    if let SelectedJobStatus::Loaded(selected_job) = &mut self.selected_job_status {
+                        selected_job.reset_status = ResetJobStatus::ResetErr(err);
+                    }
                     Task::none()
                 }
             },
@@ -194,6 +204,7 @@ impl Model {
                     Ok(Some(job)) => SelectedJobStatus::Loaded(SelectedJobModel {
                         job,
                         delete_status: DeleteStatus::Ready,
+                        reset_status: ResetJobStatus::Ready,
                     }),
                     Ok(None) => SelectedJobStatus::Error("Job not found".to_string()),
                     Err(err) => SelectedJobStatus::Error(err),
@@ -202,14 +213,13 @@ impl Model {
             }
             Msg::ClickedDeleteSelected => {
                 if let SelectedJobStatus::Loaded(selected_job) = &mut self.selected_job_status {
-                    selected_job.delete_status =
-                        DeleteStatus::Confirming(selected_job.job.uuid().clone());
+                    selected_job.delete_status = DeleteStatus::Confirming;
                 }
                 Task::none()
             }
             Msg::ClickedConfirmDelete(job_uuid) => {
                 if let SelectedJobStatus::Loaded(selected_job) = &mut self.selected_job_status {
-                    selected_job.delete_status = DeleteStatus::Deleting(job_uuid.clone());
+                    selected_job.delete_status = DeleteStatus::Deleting;
                 }
                 let worker = worker.clone();
                 Task::perform(delete_job(worker, job_uuid), Msg::DeletedJob)
@@ -221,9 +231,9 @@ impl Model {
                 Task::none()
             }
             Msg::DeletedJob(res) => match res {
-                Ok(job_uuid) => {
+                Ok(_) => {
                     if let SelectedJobStatus::Loaded(selected_job) = &mut self.selected_job_status {
-                        selected_job.delete_status = DeleteStatus::Deleted(job_uuid.clone());
+                        selected_job.delete_status = DeleteStatus::Deleted;
                     }
                     self.selected_job_status = SelectedJobStatus::None;
                     let worker = worker.clone();
@@ -236,6 +246,7 @@ impl Model {
                     Task::none()
                 }
             },
+            Msg::ClickedCopyJobUuid(uuid) => clipboard::write(uuid),
         }
     }
 
@@ -265,15 +276,6 @@ impl Model {
             }
         };
 
-        let reset_status_view: Element<Msg> = match &self.reset_job_status {
-            ResetJobStatus::Ready => w::text("Ready to reset job").into(),
-            ResetJobStatus::Resetting(job_uuid) => {
-                w::text(format!("Resetting job {}", job_uuid)).into()
-            }
-            ResetJobStatus::ResetOk(job_uuid) => w::text(format!("Reset job {}", job_uuid)).into(),
-            ResetJobStatus::ResetErr(err) => w::text(format!("Reset failed: {}", err)).into(),
-        };
-
         // Disable the button while adding to prevent duplicates
         let add_button = match self.add_ping_status {
             AddPingStatus::AddingPing => w::button("Adding..."),
@@ -294,18 +296,6 @@ impl Model {
                 } else {
                     let mut col = w::column![];
                     for job in jobs {
-                        let reset_control: Element<Msg> = w::button("Reset")
-                            .style(w::button::text)
-                            .padding(s::S1)
-                            .on_press(Msg::ClickedResetJob(job.uuid().clone()))
-                            .into();
-
-                        let details_control: Element<Msg> = w::button("Details")
-                            .style(w::button::text)
-                            .padding(s::S1)
-                            .on_press(Msg::ClickedSelectJob(job.uuid().clone()))
-                            .into();
-
                         let status_color = match job.status() {
                             JobStatus::Finished => s::GREEN_SOFT,
                             JobStatus::Failed => s::RED_SOFT,
@@ -315,15 +305,20 @@ impl Model {
                         let job_label =
                             format!("{}, uuid: {}", job.kind_label(), job.uuid().to_string());
 
+                        let row = w::row![
+                            w::text(job_label),
+                            w::text(job.status_label()).color(status_color),
+                        ]
+                        .spacing(s::S4)
+                        .align_y(Alignment::Center)
+                        .width(Length::Fill);
+
                         col = col.push(
-                            w::row![
-                                w::text(job_label),
-                                w::text(job.status_label()).color(status_color),
-                                details_control,
-                                reset_control
-                            ]
-                            .spacing(s::S4)
-                            .align_y(Alignment::Center),
+                            w::button(row)
+                                .padding([s::S1, s::S2])
+                                .style(job_row_style)
+                                .width(Length::Fill)
+                                .on_press(Msg::ClickedSelectJob(job.uuid().clone())),
                         );
                     }
                     w::scrollable(col)
@@ -341,7 +336,7 @@ impl Model {
             .style(|_| container::Style {
                 border: iced::border::Border {
                     width: 1.0,
-                    color: Color::from_rgb(0.8, 0.8, 0.8),
+                    color: s::GRAY_SOFT,
                     ..Default::default()
                 },
                 ..Default::default()
@@ -359,7 +354,6 @@ impl Model {
             .spacing(s::S4),
             status_view,
             process_status_view,
-            reset_status_view
         ]
         .spacing(s::S4)
         .width(Length::Fill)
@@ -392,26 +386,49 @@ fn selected_job_view(selected: &SelectedJobStatus) -> Element<'_, Msg> {
                 None => "Error: none".to_string(),
             };
 
+            let reset_controls: Element<Msg> = match &selected_job.reset_status {
+                ResetJobStatus::Resetting => w::text("Resetting job...").into(),
+                ResetJobStatus::ResetOk => w::text("Job reset").into(),
+                ResetJobStatus::ResetErr(err) => w::text(format!("Reset failed: {}", err)).into(),
+                ResetJobStatus::Ready => w::button("Reset job")
+                    .on_press(Msg::ClickedResetJob(selected_job.job.uuid().clone()))
+                    .into(),
+            };
+
             let delete_controls: Element<Msg> = match &selected_job.delete_status {
-                DeleteStatus::Confirming(job_uuid) => w::row![
+                DeleteStatus::Confirming => w::row![
                     w::text("Delete this job permanently?"),
-                    w::button("Confirm").on_press(Msg::ClickedConfirmDelete(job_uuid.clone())),
+                    w::button("Confirm")
+                        .on_press(Msg::ClickedConfirmDelete(selected_job.job.uuid().clone())),
                     w::button("Cancel").on_press(Msg::ClickedCancelDelete),
                 ]
                 .spacing(s::S4)
                 .into(),
-                DeleteStatus::Deleting(_) => w::text("Deleting job...").into(),
-                DeleteStatus::Deleted(_) => w::text("Job deleted").into(),
+                DeleteStatus::Deleting => w::text("Deleting job...").into(),
+                DeleteStatus::Deleted => w::text("Job deleted").into(),
                 DeleteStatus::Error(err) => w::text(format!("Delete failed: {}", err)).into(),
                 DeleteStatus::Ready => w::button("Delete job")
                     .on_press(Msg::ClickedDeleteSelected)
                     .into(),
             };
 
+            let action_row: Element<Msg> = w::row![reset_controls, delete_controls]
+                .spacing(s::S4)
+                .into();
+
             w::column![
                 w::text("Selected Job"),
                 w::text(format!("Kind: {}", selected_job.job.kind_label())),
-                w::text(format!("UUID: {}", selected_job.job.uuid().to_string())),
+                w::row![
+                    w::text(format!("UUID: {}", selected_job.job.uuid().to_string())),
+                    w::button(w::text("Copy").size(s::S3))
+                        .style(w::button::text)
+                        .padding(0)
+                        .on_press(Msg::ClickedCopyJobUuid(
+                            selected_job.job.uuid().to_string()
+                        )),
+                ]
+                .spacing(s::S2),
                 w::row![
                     w::text("Status:"),
                     w::text(selected_job.job.status_label()).color(status_color)
@@ -421,7 +438,7 @@ fn selected_job_view(selected: &SelectedJobStatus) -> Element<'_, Msg> {
                 w::text(finished_at),
                 w::text(deleted_at),
                 w::text(error_text),
-                delete_controls
+                action_row
             ]
             .spacing(s::S2)
             .into()
@@ -434,12 +451,26 @@ fn selected_job_view(selected: &SelectedJobStatus) -> Element<'_, Msg> {
         .style(|_| container::Style {
             border: iced::border::Border {
                 width: 1.0,
-                color: Color::from_rgb(0.35, 0.35, 0.35),
+                color: s::GRAY_DEEP,
                 ..Default::default()
             },
             ..Default::default()
         })
         .into()
+}
+
+fn job_row_style(_theme: &iced::Theme, status: w::button::Status) -> w::button::Style {
+    let mut style = w::button::Style::default();
+    style.text_color = s::GRAY_VERY_SOFT;
+
+    match status {
+        w::button::Status::Hovered | w::button::Status::Pressed => {
+            style.background = Some(Background::Color(s::GRAY_VERY_DEEP));
+        }
+        _ => {}
+    }
+
+    style
 }
 
 fn format_job_time(label: &str, timestamp: Option<chrono::DateTime<chrono::Utc>>) -> String {

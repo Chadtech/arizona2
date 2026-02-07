@@ -159,7 +159,7 @@ impl Model {
                 timestamp,
             } => {
                 let time_str = timestamp.format("%Y-%m-%d %H:%M:%S").to_string();
-                let header_color = Color::from_rgb(0.78, 0.72, 0.46);
+                let header_color = s::GOLD_SOFT;
                 let header_text = format!("[{}] {}", time_str, sender_label);
                 let copy_text = format!("{}\n{}", header_text, content);
 

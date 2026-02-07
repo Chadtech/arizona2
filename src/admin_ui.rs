@@ -15,7 +15,7 @@ use crate::open_ai::completion::CompletionError;
 use crate::worker;
 use crate::worker::Worker;
 use iced;
-use iced::{time, widget as w, Color, Element, Subscription, Task, Theme};
+use iced::{time, widget as w, Element, Subscription, Task, Theme};
 use serde::{Deserialize, Serialize};
 use std::fs::File;
 use std::io::Write;
@@ -520,34 +520,28 @@ impl Model {
 
         let scrollable_content = w::scrollable(tab_content);
 
-        w::container(
-            w::column![tab_row, time_controls, scrollable_content].spacing(s::S4),
-        )
+        w::container(w::column![tab_row, time_controls, scrollable_content].spacing(s::S4))
             .padding(s::S4)
             .into()
     }
 
     fn subscription(&self) -> Subscription<Msg> {
         if self.time_running {
-            time::every(std::time::Duration::from_secs(1)).map(|_| Msg::TimeTick)
+            time::every(time::Duration::from_secs(1)).map(|_| Msg::TimeTick)
         } else {
             Subscription::none()
         }
     }
 
     fn theme(&self) -> Theme {
-        fn from_ints(r: u8, g: u8, b: u8) -> Color {
-            Color::from_rgb(r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0)
-        }
-
         Theme::custom(
             "arizona2".to_string(),
             iced::theme::Palette {
-                background: from_ints(3, 9, 7),
-                text: from_ints(176, 166, 154),
-                primary: from_ints(227, 211, 75),
-                success: from_ints(10, 202, 26),
-                danger: from_ints(242, 29, 35),
+                background: s::GRAY_VERY_DEEP,
+                text: s::GRAY_VERY_SOFT,
+                primary: s::GOLD_SOFT,
+                success: s::GREEN_SOFT,
+                danger: s::RED_SOFT,
             },
         )
     }
