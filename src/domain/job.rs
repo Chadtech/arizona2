@@ -18,6 +18,7 @@ pub struct Job {
     started_at: Option<DateTime<Utc>>,
     finished_at: Option<DateTime<Utc>>,
     error: Option<String>,
+    deleted_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Clone)]
@@ -124,12 +125,13 @@ impl Job {
     pub fn status_label(&self) -> String {
         match self.status() {
             JobStatus::Finished => {
-                let date: String = self
-                    .finished_at
-                    .unwrap()
-                    .format("%Y-%m-%d %H:%M:%S UTC")
-                    .to_string();
-                format!("finished at {}", date)
+                match self.finished_at {
+                    Some(finished_at) => {
+                        let date = finished_at.format("%Y-%m-%d %H:%M:%S UTC").to_string();
+                        format!("finished at {}", date)
+                    }
+                    None => "finished".to_string(),
+                }
             }
             JobStatus::Failed => "failed".to_string(),
             JobStatus::NotStarted => "not started".to_string(),
@@ -145,6 +147,7 @@ impl Job {
         started_at: Option<DateTime<Utc>>,
         finished_at: Option<DateTime<Utc>>,
         error: Option<String>,
+        deleted_at: Option<DateTime<Utc>>,
         name: String,
         maybe_data: Option<serde_json::Value>,
     ) -> Result<Job, ParseError> {
@@ -156,6 +159,7 @@ impl Job {
             started_at,
             finished_at,
             error,
+            deleted_at,
         })
     }
 
@@ -174,6 +178,18 @@ impl Job {
 
     pub fn finished_at(&self) -> Option<DateTime<Utc>> {
         self.finished_at
+    }
+
+    pub fn started_at(&self) -> Option<DateTime<Utc>> {
+        self.started_at
+    }
+
+    pub fn error(&self) -> Option<&String> {
+        self.error.as_ref()
+    }
+
+    pub fn deleted_at(&self) -> Option<DateTime<Utc>> {
+        self.deleted_at
     }
 }
 

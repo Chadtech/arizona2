@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                UPDATE job\n                SET deleted_at = NOW()\n                WHERE uuid = $1::UUID\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "72cfc0aebfaf7d8caf68fb96ba7302b8feb702e286444db7007557dca0d96062"
+}

@@ -270,7 +270,7 @@ impl ProcessMessageJob {
                         let sender = MessageSender::AiPerson(person_uuid.clone());
 
                         let scene_uuid = worker
-                            .get_persons_current_scene_uuid(&person_uuid)
+                            .get_persons_current_scene_uuid(person_uuid)
                             .await
                             .map_err(|err| Error::CouldNotGetPersonsScene {
                                 person_uuid: person_uuid.clone(),

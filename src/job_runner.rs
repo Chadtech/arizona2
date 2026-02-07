@@ -364,7 +364,7 @@ mod tests {
     };
     use crate::domain::job::{JobKind, PoppedJob};
     use crate::domain::job_uuid::JobUuid;
-    use crate::domain::message::Message;
+    use crate::domain::message::{Message, MessageSender};
     use crate::domain::message_uuid::MessageUuid;
     use crate::domain::person_name::PersonName;
     use crate::domain::scene_participant_uuid::SceneParticipantUuid;
@@ -408,6 +408,15 @@ mod tests {
             Ok(MessageUuid::new())
         }
 
+        async fn send_scene_message(
+            &self,
+            _sender: MessageSender,
+            _scene_uuid: SceneUuid,
+            _content: String,
+        ) -> Result<MessageUuid, String> {
+            Ok(MessageUuid::new())
+        }
+
         async fn get_messages_in_scene(
             &self,
             _scene_uuid: &SceneUuid,
@@ -420,6 +429,10 @@ mod tests {
             _message_uuid: &MessageUuid,
         ) -> Result<Option<Message>, String> {
             Ok(None)
+        }
+
+        async fn mark_message_read(&self, _message_uuid: &MessageUuid) -> Result<(), String> {
+            Ok(())
         }
     }
 
@@ -442,11 +455,29 @@ mod tests {
         async fn recent_jobs(&self, _limit: i64) -> Result<Vec<crate::domain::job::Job>, String> {
             Ok(vec![])
         }
+        async fn get_job_by_uuid(
+            &self,
+            _job_uuid: &JobUuid,
+        ) -> Result<Option<crate::domain::job::Job>, String> {
+            Ok(None)
+        }
         async fn mark_job_finished(&self, job_uuid: &JobUuid) -> Result<(), String> {
             let mut st = self.state.lock().await;
 
             st.finished_jobs.insert(job_uuid.clone());
 
+            Ok(())
+        }
+
+        async fn mark_job_failed(&self, _job_uuid: &JobUuid, _details: &str) -> Result<(), String> {
+            Ok(())
+        }
+
+        async fn reset_job(&self, _job_uuid: &JobUuid) -> Result<(), String> {
+            Ok(())
+        }
+
+        async fn delete_job(&self, _job_uuid: &JobUuid) -> Result<(), String> {
             Ok(())
         }
     }

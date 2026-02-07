@@ -15,6 +15,7 @@ pub struct Model {
     get_jobs_status: GetJobsStatus,
     process_next_status: ProcessNextStatus,
     reset_job_status: ResetJobStatus,
+    selected_job_status: SelectedJobStatus,
 }
 
 enum GetJobsStatus {
@@ -46,6 +47,26 @@ enum ResetJobStatus {
     ResetErr(String),
 }
 
+enum SelectedJobStatus {
+    None,
+    Loading(JobUuid),
+    Loaded(SelectedJobModel),
+    Error(String),
+}
+
+struct SelectedJobModel {
+    job: Job,
+    delete_status: DeleteStatus,
+}
+
+enum DeleteStatus {
+    Ready,
+    Confirming(JobUuid),
+    Deleting(JobUuid),
+    Deleted(JobUuid),
+    Error(String),
+}
+
 #[derive(Debug, Clone)]
 pub enum Msg {
     ClickedRefresh,
@@ -56,6 +77,12 @@ pub enum Msg {
     ClickedResetJob(JobUuid),
     ResetJobResult(Result<JobUuid, String>),
     LoadedRecent(Result<Vec<Job>, String>),
+    ClickedSelectJob(JobUuid),
+    LoadedJob(Result<Option<Job>, String>),
+    ClickedDeleteSelected,
+    ClickedConfirmDelete(JobUuid),
+    ClickedCancelDelete,
+    DeletedJob(Result<JobUuid, String>),
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -74,6 +101,7 @@ impl Model {
             get_jobs_status: GetJobsStatus::Fetching,
             process_next_status: ProcessNextStatus::Ready,
             reset_job_status: ResetJobStatus::Ready,
+            selected_job_status: SelectedJobStatus::None,
         }
     }
 
@@ -156,6 +184,58 @@ impl Model {
                 };
                 Task::none()
             }
+            Msg::ClickedSelectJob(job_uuid) => {
+                self.selected_job_status = SelectedJobStatus::Loading(job_uuid.clone());
+                let worker = worker.clone();
+                Task::perform(get_job(worker, job_uuid), Msg::LoadedJob)
+            }
+            Msg::LoadedJob(res) => {
+                self.selected_job_status = match res {
+                    Ok(Some(job)) => SelectedJobStatus::Loaded(SelectedJobModel {
+                        job,
+                        delete_status: DeleteStatus::Ready,
+                    }),
+                    Ok(None) => SelectedJobStatus::Error("Job not found".to_string()),
+                    Err(err) => SelectedJobStatus::Error(err),
+                };
+                Task::none()
+            }
+            Msg::ClickedDeleteSelected => {
+                if let SelectedJobStatus::Loaded(selected_job) = &mut self.selected_job_status {
+                    selected_job.delete_status =
+                        DeleteStatus::Confirming(selected_job.job.uuid().clone());
+                }
+                Task::none()
+            }
+            Msg::ClickedConfirmDelete(job_uuid) => {
+                if let SelectedJobStatus::Loaded(selected_job) = &mut self.selected_job_status {
+                    selected_job.delete_status = DeleteStatus::Deleting(job_uuid.clone());
+                }
+                let worker = worker.clone();
+                Task::perform(delete_job(worker, job_uuid), Msg::DeletedJob)
+            }
+            Msg::ClickedCancelDelete => {
+                if let SelectedJobStatus::Loaded(selected_job) = &mut self.selected_job_status {
+                    selected_job.delete_status = DeleteStatus::Ready;
+                }
+                Task::none()
+            }
+            Msg::DeletedJob(res) => match res {
+                Ok(job_uuid) => {
+                    if let SelectedJobStatus::Loaded(selected_job) = &mut self.selected_job_status {
+                        selected_job.delete_status = DeleteStatus::Deleted(job_uuid.clone());
+                    }
+                    self.selected_job_status = SelectedJobStatus::None;
+                    let worker = worker.clone();
+                    Task::perform(get_jobs(worker), |m| m)
+                }
+                Err(err) => {
+                    if let SelectedJobStatus::Loaded(selected_job) = &mut self.selected_job_status {
+                        selected_job.delete_status = DeleteStatus::Error(err);
+                    }
+                    Task::none()
+                }
+            },
         }
     }
 
@@ -220,22 +300,26 @@ impl Model {
                             .on_press(Msg::ClickedResetJob(job.uuid().clone()))
                             .into();
 
+                        let details_control: Element<Msg> = w::button("Details")
+                            .style(w::button::text)
+                            .padding(s::S1)
+                            .on_press(Msg::ClickedSelectJob(job.uuid().clone()))
+                            .into();
+
                         let status_color = match job.status() {
-                            JobStatus::Finished => Color::from_rgb(0.55, 0.78, 0.54),
-                            JobStatus::Failed => Color::from_rgb(0.85, 0.45, 0.45),
-                            JobStatus::NotStarted => Color::from_rgb(0.65, 0.65, 0.65),
+                            JobStatus::Finished => s::GREEN_SOFT,
+                            JobStatus::Failed => s::RED_SOFT,
+                            JobStatus::NotStarted => s::GRAY_MID,
                         };
 
-                        let job_label = format!(
-                            "{}, uuid: {}",
-                            job.kind_label(),
-                            job.uuid().to_string()
-                        );
+                        let job_label =
+                            format!("{}, uuid: {}", job.kind_label(), job.uuid().to_string());
 
                         col = col.push(
                             w::row![
                                 w::text(job_label),
                                 w::text(job.status_label()).color(status_color),
+                                details_control,
                                 reset_control
                             ]
                             .spacing(s::S4)
@@ -266,6 +350,7 @@ impl Model {
         w::column![
             w::text("Jobs"),
             jobs_container,
+            selected_job_view(&self.selected_job_status),
             w::row![
                 process_next_button,
                 add_button,
@@ -283,6 +368,84 @@ impl Model {
 
     pub fn to_storage(&self) -> Storage {
         Storage {}
+    }
+}
+
+fn selected_job_view(selected: &SelectedJobStatus) -> Element<'_, Msg> {
+    let content: Element<Msg> = match selected {
+        SelectedJobStatus::None => w::text("Select a job to see details").into(),
+        SelectedJobStatus::Loading(_) => w::text("Loading job details...").into(),
+        SelectedJobStatus::Error(err) => w::text(format!("Job load error: {}", err)).into(),
+        SelectedJobStatus::Loaded(selected_job) => {
+            let status_color = match selected_job.job.status() {
+                JobStatus::Finished => s::GREEN_SOFT,
+                JobStatus::Failed => s::RED_SOFT,
+                JobStatus::NotStarted => s::GRAY_MID,
+            };
+
+            let started_at = format_job_time("Started", selected_job.job.started_at());
+            let finished_at = format_job_time("Finished", selected_job.job.finished_at());
+            let deleted_at = format_job_time("Deleted", selected_job.job.deleted_at());
+
+            let error_text = match selected_job.job.error() {
+                Some(err) => format!("Error: {}", err),
+                None => "Error: none".to_string(),
+            };
+
+            let delete_controls: Element<Msg> = match &selected_job.delete_status {
+                DeleteStatus::Confirming(job_uuid) => w::row![
+                    w::text("Delete this job permanently?"),
+                    w::button("Confirm").on_press(Msg::ClickedConfirmDelete(job_uuid.clone())),
+                    w::button("Cancel").on_press(Msg::ClickedCancelDelete),
+                ]
+                .spacing(s::S4)
+                .into(),
+                DeleteStatus::Deleting(_) => w::text("Deleting job...").into(),
+                DeleteStatus::Deleted(_) => w::text("Job deleted").into(),
+                DeleteStatus::Error(err) => w::text(format!("Delete failed: {}", err)).into(),
+                DeleteStatus::Ready => w::button("Delete job")
+                    .on_press(Msg::ClickedDeleteSelected)
+                    .into(),
+            };
+
+            w::column![
+                w::text("Selected Job"),
+                w::text(format!("Kind: {}", selected_job.job.kind_label())),
+                w::text(format!("UUID: {}", selected_job.job.uuid().to_string())),
+                w::row![
+                    w::text("Status:"),
+                    w::text(selected_job.job.status_label()).color(status_color)
+                ]
+                .spacing(s::S2),
+                w::text(started_at),
+                w::text(finished_at),
+                w::text(deleted_at),
+                w::text(error_text),
+                delete_controls
+            ]
+            .spacing(s::S2)
+            .into()
+        }
+    };
+
+    w::container(content)
+        .padding(s::S2)
+        .width(Length::Fill)
+        .style(|_| container::Style {
+            border: iced::border::Border {
+                width: 1.0,
+                color: Color::from_rgb(0.35, 0.35, 0.35),
+                ..Default::default()
+            },
+            ..Default::default()
+        })
+        .into()
+}
+
+fn format_job_time(label: &str, timestamp: Option<chrono::DateTime<chrono::Utc>>) -> String {
+    match timestamp {
+        Some(time) => format!("{}: {}", label, time.format("%Y-%m-%d %H:%M:%S UTC")),
+        None => format!("{}: none", label),
     }
 }
 
@@ -307,5 +470,20 @@ async fn reset_job(worker: Arc<Worker>, job_uuid: JobUuid) -> Result<JobUuid, St
         .reset_job(&job_uuid)
         .await
         .map_err(|err| format!("Error resetting job:\n{}", err))?;
+    Ok(job_uuid)
+}
+
+async fn get_job(worker: Arc<Worker>, job_uuid: JobUuid) -> Result<Option<Job>, String> {
+    worker
+        .get_job_by_uuid(&job_uuid)
+        .await
+        .map_err(|err| format!("Error fetching job:\n{}", err))
+}
+
+async fn delete_job(worker: Arc<Worker>, job_uuid: JobUuid) -> Result<JobUuid, String> {
+    worker
+        .delete_job(&job_uuid)
+        .await
+        .map_err(|err| format!("Error deleting job:\n{}", err))?;
     Ok(job_uuid)
 }

@@ -41,12 +41,13 @@ impl JobCapability for Worker {
                 WHERE uuid = (
                     SELECT uuid
                     FROM job
-                    WHERE started_at IS NULL
-                      AND finished_at IS NULL
-                      AND (run_at_active_ms IS NULL OR run_at_active_ms <= $1)
-                    ORDER BY created_at ASC
-                    LIMIT 1
-                )
+                WHERE started_at IS NULL
+                  AND finished_at IS NULL
+                  AND deleted_at IS NULL
+                  AND (run_at_active_ms IS NULL OR run_at_active_ms <= $1)
+                ORDER BY created_at ASC
+                LIMIT 1
+            )
                 RETURNING uuid;
             "#,
         )
@@ -93,8 +94,9 @@ impl JobCapability for Worker {
     async fn recent_jobs(&self, limit: i64) -> Result<Vec<Job>, String> {
         let rows = sqlx::query(
             r#"
-                SELECT uuid, name, started_at, finished_at, error, data
+                SELECT uuid, name, started_at, finished_at, error, deleted_at, data
                 FROM job
+                WHERE deleted_at IS NULL
                 ORDER BY created_at DESC
                 LIMIT $1
             "#,
@@ -127,16 +129,61 @@ impl JobCapability for Worker {
                 .try_get::<Option<String>, _>("error")
                 .map_err(|err| format!("Error reading error from row: {}", err))?;
 
+            let deleted_at = row
+                .try_get::<Option<DateTime<Utc>>, _>("deleted_at")
+                .map_err(|err| format!("Error reading deleted_at from row: {}", err))?;
+
             let job_data: Option<serde_json::Value> = row
                 .try_get::<Option<serde_json::Value>, _>("data")
                 .map_err(|err| format!("Error reading job data from row: {}", err))?;
 
-            let job = Job::parse(JobUuid::from_uuid(uuid), started_at, finished_at, error, name, job_data)
-                .map_err(|err| format!("Error parsing job\n{}", err.to_nice_error().to_string()))?;
+            let job = Job::parse(
+                JobUuid::from_uuid(uuid),
+                started_at,
+                finished_at,
+                error,
+                deleted_at,
+                name,
+                job_data,
+            )
+            .map_err(|err| format!("Error parsing job\n{}", err.to_nice_error().to_string()))?;
             jobs.push(job);
         }
 
         Ok(jobs)
+    }
+
+    async fn get_job_by_uuid(&self, job_uuid: &JobUuid) -> Result<Option<Job>, String> {
+        let row = sqlx::query!(
+            r#"
+                SELECT uuid, name, started_at, finished_at, error, deleted_at, data
+                FROM job
+                WHERE uuid = $1::UUID
+                  AND deleted_at IS NULL
+            "#,
+            job_uuid.to_uuid()?
+        )
+        .fetch_optional(&self.sqlx)
+        .await
+        .map_err(|err| format!("Error fetching job by uuid: {}", err))?;
+
+        let row = match row {
+            Some(row) => row,
+            None => return Ok(None),
+        };
+
+        let job = Job::parse(
+            JobUuid::from_uuid(row.uuid),
+            row.started_at,
+            row.finished_at,
+            row.error,
+            row.deleted_at,
+            row.name,
+            row.data,
+        )
+        .map_err(|err| format!("Error parsing job\n{}", err.to_nice_error().to_string()))?;
+
+        Ok(Some(job))
     }
 
     async fn mark_job_finished(&self, job_uuid: &JobUuid) -> Result<(), String> {
@@ -186,6 +233,22 @@ impl JobCapability for Worker {
         .execute(&self.sqlx)
         .await
         .map_err(|err| format!("Error resetting job: {}", err))?;
+
+        Ok(())
+    }
+
+    async fn delete_job(&self, job_uuid: &JobUuid) -> Result<(), String> {
+        sqlx::query!(
+            r#"
+                UPDATE job
+                SET deleted_at = NOW()
+                WHERE uuid = $1::UUID
+            "#,
+            job_uuid.to_uuid()?
+        )
+        .execute(&self.sqlx)
+        .await
+        .map_err(|err| format!("Error deleting job: {}", err))?;
 
         Ok(())
     }

@@ -5,7 +5,9 @@ pub trait JobCapability {
     async fn unshift_job(&self, job: JobKind) -> Result<(), String>;
     async fn pop_next_job(&self, current_active_ms: i64) -> Result<Option<PoppedJob>, String>;
     async fn recent_jobs(&self, limit: i64) -> Result<Vec<Job>, String>;
+    async fn get_job_by_uuid(&self, job_uuid: &JobUuid) -> Result<Option<Job>, String>;
     async fn mark_job_finished(&self, job_uuid: &JobUuid) -> Result<(), String>;
     async fn mark_job_failed(&self, job_uuid: &JobUuid, details: &str) -> Result<(), String>;
     async fn reset_job(&self, job_uuid: &JobUuid) -> Result<(), String>;
+    async fn delete_job(&self, job_uuid: &JobUuid) -> Result<(), String>;
 }
