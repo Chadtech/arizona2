@@ -31,6 +31,7 @@ pub struct PoppedJob {
 pub enum JobStatus {
     Finished,
     Failed,
+    InProgress,
     NotStarted,
 }
 
@@ -115,8 +116,10 @@ impl Job {
     pub fn status(&self) -> JobStatus {
         if self.finished_at.is_some() {
             JobStatus::Finished
-        } else if self.error.is_some() || self.started_at.is_some() {
+        } else if self.error.is_some() {
             JobStatus::Failed
+        } else if self.started_at.is_some() {
+            JobStatus::InProgress
         } else {
             JobStatus::NotStarted
         }
@@ -134,6 +137,7 @@ impl Job {
                 }
             }
             JobStatus::Failed => "failed".to_string(),
+            JobStatus::InProgress => "not finished".to_string(),
             JobStatus::NotStarted => "not started".to_string(),
         }
     }

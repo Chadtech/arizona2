@@ -177,8 +177,18 @@ impl Model {
                             selected_job.reset_status = ResetJobStatus::ResetOk;
                         }
                     }
+                    let mut tasks = vec![];
                     let worker = worker.clone();
-                    Task::perform(get_jobs(worker), |m| m)
+                    tasks.push(Task::perform(get_jobs(worker.clone()), |m| m));
+
+                    if let SelectedJobStatus::Loaded(selected_job) = &self.selected_job_status {
+                        if selected_job.job.uuid() == &job_uuid {
+                            let worker = worker.clone();
+                            tasks.push(Task::perform(get_job(worker, job_uuid), Msg::LoadedJob));
+                        }
+                    }
+
+                    Task::batch(tasks)
                 }
                 Err(err) => {
                     if let SelectedJobStatus::Loaded(selected_job) = &mut self.selected_job_status {
@@ -299,6 +309,7 @@ impl Model {
                         let status_color = match job.status() {
                             JobStatus::Finished => s::GREEN_SOFT,
                             JobStatus::Failed => s::RED_SOFT,
+                            JobStatus::InProgress => s::GOLD_SOFT,
                             JobStatus::NotStarted => s::GRAY_MID,
                         };
 
@@ -374,6 +385,7 @@ fn selected_job_view(selected: &SelectedJobStatus) -> Element<'_, Msg> {
             let status_color = match selected_job.job.status() {
                 JobStatus::Finished => s::GREEN_SOFT,
                 JobStatus::Failed => s::RED_SOFT,
+                JobStatus::InProgress => s::GOLD_SOFT,
                 JobStatus::NotStarted => s::GRAY_MID,
             };
 
@@ -424,9 +436,7 @@ fn selected_job_view(selected: &SelectedJobStatus) -> Element<'_, Msg> {
                     w::button(w::text("Copy").size(s::S3))
                         .style(w::button::text)
                         .padding(0)
-                        .on_press(Msg::ClickedCopyJobUuid(
-                            selected_job.job.uuid().to_string()
-                        )),
+                        .on_press(Msg::ClickedCopyJobUuid(selected_job.job.uuid().to_string())),
                 ]
                 .spacing(s::S2),
                 w::row![
