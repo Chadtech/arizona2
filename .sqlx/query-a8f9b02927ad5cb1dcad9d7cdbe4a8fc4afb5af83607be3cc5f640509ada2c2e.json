@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                    INSERT INTO scene_message_recipient (message_uuid, person_uuid)\n                    VALUES ($1::UUID, $2::UUID)\n                    ON CONFLICT DO NOTHING\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "a8f9b02927ad5cb1dcad9d7cdbe4a8fc4afb5af83607be3cc5f640509ada2c2e"
+}
