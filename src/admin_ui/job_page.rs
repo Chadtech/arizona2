@@ -84,6 +84,7 @@ pub enum Msg {
     ClickedCancelDelete,
     DeletedJob(Result<JobUuid, String>),
     ClickedCopyJobUuid(String),
+    ClickedRefreshSelected,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -224,6 +225,18 @@ impl Model {
             Msg::ClickedDeleteSelected => {
                 if let SelectedJobStatus::Loaded(selected_job) = &mut self.selected_job_status {
                     selected_job.delete_status = DeleteStatus::Confirming;
+                }
+                Task::none()
+            }
+            Msg::ClickedRefreshSelected => {
+                if let SelectedJobStatus::Loaded(selected_job) = &self.selected_job_status {
+                    let selected_job_uuid = selected_job.job.uuid().clone();
+
+                    self.selected_job_status =
+                        SelectedJobStatus::Loading(selected_job_uuid.clone());
+
+                    let worker = worker.clone();
+                    return Task::perform(get_job(worker, selected_job_uuid), Msg::LoadedJob);
                 }
                 Task::none()
             }
@@ -429,7 +442,14 @@ fn selected_job_view(selected: &SelectedJobStatus) -> Element<'_, Msg> {
                 .into();
 
             w::column![
-                w::text("Selected Job"),
+                w::row![
+                    w::text("Selected Job"),
+                    w::button("Refresh")
+                        .style(w::button::text)
+                        .padding(s::S1)
+                        .on_press(Msg::ClickedRefreshSelected),
+                ]
+                .spacing(s::S2),
                 w::text(format!("Kind: {}", selected_job.job.kind_label())),
                 w::row![
                     w::text(format!("UUID: {}", selected_job.job.uuid().to_string())),

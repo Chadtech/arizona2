@@ -367,6 +367,7 @@ mod tests {
     use crate::domain::message::{Message, MessageSender};
     use crate::domain::message_uuid::MessageUuid;
     use crate::domain::person_name::PersonName;
+    use crate::domain::person_uuid::PersonUuid;
     use crate::domain::scene_participant_uuid::SceneParticipantUuid;
     use crate::domain::scene_uuid::SceneUuid;
     use async_trait::async_trait;
@@ -417,6 +418,14 @@ mod tests {
             Ok(MessageUuid::new())
         }
 
+        async fn add_scene_message_recipients(
+            &self,
+            _message_uuid: &MessageUuid,
+            _recipients: Vec<PersonUuid>,
+        ) -> Result<(), String> {
+            Ok(())
+        }
+
         async fn get_messages_in_scene(
             &self,
             _scene_uuid: &SceneUuid,
@@ -432,6 +441,22 @@ mod tests {
         }
 
         async fn mark_message_read(&self, _message_uuid: &MessageUuid) -> Result<(), String> {
+            Ok(())
+        }
+
+        async fn get_unhandled_scene_messages_for_person(
+            &self,
+            _person_uuid: &PersonUuid,
+            _scene_uuid: &SceneUuid,
+        ) -> Result<Vec<Message>, String> {
+            Ok(vec![])
+        }
+
+        async fn mark_scene_messages_handled_for_person(
+            &self,
+            _person_uuid: &PersonUuid,
+            _message_uuids: Vec<MessageUuid>,
+        ) -> Result<(), String> {
             Ok(())
         }
     }

@@ -11,7 +11,7 @@ use crate::worker::Worker;
 pub enum Error {
     CompletionError(CompletionError),
     NoPersonActionFound,
-    MoreThanOnePersonActionFound,
+    MoreThanOnePersonActionFound(Vec<PersonAction>),
 }
 
 impl ReactionCapability for Worker {
@@ -27,8 +27,13 @@ impl ReactionCapability for Worker {
             .map_err(|err| match err {
                 Error::CompletionError(completion_err) => completion_err.message(),
                 Error::NoPersonActionFound => "No person action found".to_string(),
-                Error::MoreThanOnePersonActionFound => {
-                    "More than one person action found".to_string()
+                Error::MoreThanOnePersonActionFound(actions) => {
+                    let actions_str = actions
+                        .into_iter()
+                        .map(|action| format!("{:?}", action))
+                        .collect::<Vec<String>>()
+                        .join(",\n");
+                    format!("More than one person action found: \n{}", actions_str)
                 }
             })
     }
@@ -84,7 +89,7 @@ async fn get_reaction_helper(
         None => Err(Error::NoPersonActionFound)?,
         Some(first) => {
             if person_actions.len() > 1 {
-                Err(Error::MoreThanOnePersonActionFound)?
+                Err(Error::MoreThanOnePersonActionFound(person_actions))?
             } else {
                 Ok(first.clone())
             }

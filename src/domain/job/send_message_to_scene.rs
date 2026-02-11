@@ -97,6 +97,9 @@ impl SendMessageToSceneJob {
                 details: err,
             })?;
 
+        let mut recipient_uuids = Vec::new();
+        let mut recipient_participants = Vec::new();
+
         for participant in participants {
             let is_sender = match (&self.sender, &participant.actor_uuid) {
                 (MessageSender::AiPerson(sender_uuid), ActorUuid::AiPerson(participant_uuid)) => {
@@ -109,14 +112,30 @@ impl SendMessageToSceneJob {
                 continue;
             }
 
-                let message_uuid = message_uuid.clone();
-                let process_message_job = ProcessMessageJob {
-                    message_uuid: message_uuid.clone(),
-                    recipient_person_uuid: match participant.actor_uuid {
-                        ActorUuid::AiPerson(person_uuid) => Some(person_uuid),
-                        ActorUuid::RealWorldUser => None,
-                    },
-                };
+            if let ActorUuid::AiPerson(person_uuid) = participant.actor_uuid.clone() {
+                recipient_uuids.push(person_uuid);
+            }
+
+            recipient_participants.push(participant);
+        }
+
+        worker
+            .add_scene_message_recipients(&message_uuid, recipient_uuids)
+            .await
+            .map_err(|err| Error::FailedToSendMessage {
+                participant: ActorUuid::RealWorldUser,
+                details: err,
+            })?;
+
+        for participant in recipient_participants {
+            let message_uuid = message_uuid.clone();
+            let process_message_job = ProcessMessageJob {
+                message_uuid: message_uuid.clone(),
+                recipient_person_uuid: match participant.actor_uuid {
+                    ActorUuid::AiPerson(person_uuid) => Some(person_uuid),
+                    ActorUuid::RealWorldUser => None,
+                },
+            };
 
             worker
                 .unshift_job(JobKind::ProcessMessage(process_message_job))
