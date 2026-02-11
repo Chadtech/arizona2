@@ -6,8 +6,8 @@ use crate::capability::person::PersonCapability;
 use crate::capability::person_identity::PersonIdentityCapability;
 use crate::capability::reaction::ReactionCapability;
 use crate::capability::state_of_mind::StateOfMindCapability;
-use crate::domain::actor_uuid::ActorUuid;
 use crate::domain::job::person_waiting::PersonWaitingJob;
+use crate::domain::job::send_message_to_scene::send_scene_message_and_enqueue_recipients;
 use crate::domain::job::JobKind;
 use crate::domain::memory::Memory;
 use crate::domain::message::{Message, MessageRecipient, MessageSender};
@@ -54,16 +54,6 @@ pub enum Error {
         error: String,
     },
     FailedToSendSceneMessage {
-        scene_uuid: SceneUuid,
-        details: String,
-        subject: String,
-    },
-    FailedToAddSceneMessageRecipients {
-        scene_uuid: SceneUuid,
-        details: String,
-        subject: String,
-    },
-    FailedToEnqueueProcessMessage {
         scene_uuid: SceneUuid,
         details: String,
         subject: String,
@@ -160,30 +150,6 @@ impl NiceDisplay for Error {
             } => {
                 format!(
                     "Person {} could not send message in scene {}: {}",
-                    subject,
-                    scene_uuid.to_uuid(),
-                    details
-                )
-            }
-            Error::FailedToAddSceneMessageRecipients {
-                scene_uuid,
-                details,
-                subject,
-            } => {
-                format!(
-                    "Person {} could not add scene recipients in {}: {}",
-                    subject,
-                    scene_uuid.to_uuid(),
-                    details
-                )
-            }
-            Error::FailedToEnqueueProcessMessage {
-                scene_uuid,
-                details,
-                subject,
-            } => {
-                format!(
-                    "Person {} could not enqueue process message in {}: {}",
                     subject,
                     scene_uuid.to_uuid(),
                     details
@@ -485,74 +451,19 @@ async fn handle_person_action<
                     details: "Person is not in any scene".to_string(),
                 })?;
 
-            let message_uuid = worker
-                .send_scene_message(sender, scene_uuid.clone(), comment.clone())
-                .await
-                .map_err(|err| Error::FailedToSendSceneMessage {
-                    scene_uuid: scene_uuid.clone(),
-                    details: err,
-                    subject: person_uuid.to_uuid().to_string(),
-                })?;
-
-            let participants = worker
-                .get_scene_current_participants(&scene_uuid)
-                .await
-                .map_err(|err| Error::FailedToGetSceneParticipants {
-                    scene_uuid: scene_uuid.clone(),
-                    details: err,
-                })?;
-
-            let mut recipient_uuids = Vec::new();
-            let mut recipient_participants = Vec::new();
-
-            for participant in participants {
-                let is_sender = match &participant.actor_uuid {
-                    ActorUuid::AiPerson(participant_uuid) => {
-                        participant_uuid.to_uuid() == person_uuid.to_uuid()
-                    }
-                    _ => false,
-                };
-
-                if is_sender {
-                    continue;
-                }
-
-                if let crate::domain::actor_uuid::ActorUuid::AiPerson(person_uuid) =
-                    participant.actor_uuid.clone()
-                {
-                    recipient_uuids.push(person_uuid);
-                }
-
-                recipient_participants.push(participant);
-            }
-
-            worker
-                .add_scene_message_recipients(&message_uuid, recipient_uuids)
-                .await
-                .map_err(|err| Error::FailedToAddSceneMessageRecipients {
-                    scene_uuid: scene_uuid.clone(),
-                    details: err,
-                    subject: person_uuid.to_uuid().to_string(),
-                })?;
-
-            for participant in recipient_participants {
-                let process_message_job = ProcessMessageJob {
-                    message_uuid: message_uuid.clone(),
-                    recipient_person_uuid: match participant.actor_uuid {
-                        ActorUuid::AiPerson(person_uuid) => Some(person_uuid),
-                        ActorUuid::RealWorldUser => None,
-                    },
-                };
-
-                worker
-                    .unshift_job(JobKind::ProcessMessage(process_message_job))
-                    .await
-                    .map_err(|err| Error::FailedToEnqueueProcessMessage {
-                        scene_uuid: scene_uuid.clone(),
-                        details: err,
-                        subject: person_uuid.to_uuid().to_string(),
-                    })?;
-            }
+            send_scene_message_and_enqueue_recipients(
+                worker,
+                sender,
+                scene_uuid.clone(),
+                comment.clone(),
+                random_seed,
+            )
+            .await
+            .map_err(|err| Error::FailedToSendSceneMessage {
+                scene_uuid: scene_uuid.clone(),
+                details: err.to_nice_error().to_string(),
+                subject: person_uuid.to_uuid().to_string(),
+            })?;
         }
     }
 

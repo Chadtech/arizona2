@@ -27,6 +27,7 @@ This is a Rust workspace with source in `src/`. Core areas include:
 - Keep modules focused; place domain logic in `src/domain/` and IO in capabilities.
 - For admin UI colors, define and reuse constants in `src/admin_ui/style.rs`; avoid inline color literals.
 - Color naming uses `COLOR_DEPTH` (e.g., `GRAY_VERY_SOFT`, `GOLD_SOFT`, `GRAY_DEEP`).
+- Prefer importing types unqualified instead of using fully qualified paths at call sites; keep `style` aliased as `s` as an exception.
 
 ## Testing Guidelines
 - Tests live inline (e.g., `src/job_runner.rs`), using Rust’s built-in test framework.

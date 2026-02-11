@@ -77,75 +77,96 @@ impl SendMessageToSceneJob {
         self,
         worker: &W,
     ) -> Result<(), Error> {
-        let mut participants = worker
-            .get_scene_current_participants(&self.scene_uuid)
-            .await
-            .map_err(|err| Error::FailedToGetSceneParticipants {
-                scene_uuid: self.scene_uuid.clone(),
-                details: err,
-            })?;
-
-        // Shuffle participants using the random seed for non-deterministic ordering
-        let mut rng = rand::rngs::SmallRng::seed_from_u64(self.random_seed.value());
-        participants.shuffle(&mut rng);
-
-        let message_uuid = worker
-            .send_scene_message(self.sender.clone(), self.scene_uuid.clone(), self.content.clone())
-            .await
-            .map_err(|err| Error::FailedToSendMessage {
-                participant: ActorUuid::RealWorldUser,
-                details: err,
-            })?;
-
-        let mut recipient_uuids = Vec::new();
-        let mut recipient_participants = Vec::new();
-
-        for participant in participants {
-            let is_sender = match (&self.sender, &participant.actor_uuid) {
-                (MessageSender::AiPerson(sender_uuid), ActorUuid::AiPerson(participant_uuid)) => {
-                    sender_uuid.to_uuid() == participant_uuid.to_uuid()
-                }
-                _ => false,
-            };
-
-            if is_sender {
-                continue;
-            }
-
-            if let ActorUuid::AiPerson(person_uuid) = participant.actor_uuid.clone() {
-                recipient_uuids.push(person_uuid);
-            }
-
-            recipient_participants.push(participant);
-        }
-
-        worker
-            .add_scene_message_recipients(&message_uuid, recipient_uuids)
-            .await
-            .map_err(|err| Error::FailedToSendMessage {
-                participant: ActorUuid::RealWorldUser,
-                details: err,
-            })?;
-
-        for participant in recipient_participants {
-            let message_uuid = message_uuid.clone();
-            let process_message_job = ProcessMessageJob {
-                message_uuid: message_uuid.clone(),
-                recipient_person_uuid: match participant.actor_uuid {
-                    ActorUuid::AiPerson(person_uuid) => Some(person_uuid),
-                    ActorUuid::RealWorldUser => None,
-                },
-            };
-
-            worker
-                .unshift_job(JobKind::ProcessMessage(process_message_job))
-                .await
-                .map_err(|err| Error::FailedToUnshiftJob {
-                    message_uuid,
-                    details: err,
-                })?;
-        }
+        send_scene_message_and_enqueue_recipients(
+            worker,
+            self.sender,
+            self.scene_uuid,
+            self.content,
+            self.random_seed,
+        )
+        .await?;
 
         Ok(())
     }
+}
+
+pub async fn send_scene_message_and_enqueue_recipients<
+    W: SceneCapability + MessageCapability + JobCapability,
+>(
+    worker: &W,
+    sender: MessageSender,
+    scene_uuid: SceneUuid,
+    content: String,
+    random_seed: RandomSeed,
+) -> Result<MessageUuid, Error> {
+    let mut participants = worker
+        .get_scene_current_participants(&scene_uuid)
+        .await
+        .map_err(|err| Error::FailedToGetSceneParticipants {
+            scene_uuid: scene_uuid.clone(),
+            details: err,
+        })?;
+
+    // Shuffle participants using the random seed for non-deterministic ordering
+    let mut rng = rand::rngs::SmallRng::seed_from_u64(random_seed.value());
+    participants.shuffle(&mut rng);
+
+    let message_uuid = worker
+        .send_scene_message(sender.clone(), scene_uuid.clone(), content)
+        .await
+        .map_err(|err| Error::FailedToSendMessage {
+            participant: ActorUuid::RealWorldUser,
+            details: err,
+        })?;
+
+    let mut recipient_uuids = Vec::new();
+    let mut recipient_participants = Vec::new();
+
+    for participant in participants {
+        let is_sender = match (&sender, &participant.actor_uuid) {
+            (MessageSender::AiPerson(sender_uuid), ActorUuid::AiPerson(participant_uuid)) => {
+                sender_uuid.to_uuid() == participant_uuid.to_uuid()
+            }
+            _ => false,
+        };
+
+        if is_sender {
+            continue;
+        }
+
+        if let ActorUuid::AiPerson(person_uuid) = participant.actor_uuid.clone() {
+            recipient_uuids.push(person_uuid);
+        }
+
+        recipient_participants.push(participant);
+    }
+
+    worker
+        .add_scene_message_recipients(&message_uuid, recipient_uuids)
+        .await
+        .map_err(|err| Error::FailedToSendMessage {
+            participant: ActorUuid::RealWorldUser,
+            details: err,
+        })?;
+
+    for participant in recipient_participants {
+        let message_uuid = message_uuid.clone();
+        let process_message_job = ProcessMessageJob {
+            message_uuid: message_uuid.clone(),
+            recipient_person_uuid: match participant.actor_uuid {
+                ActorUuid::AiPerson(person_uuid) => Some(person_uuid),
+                ActorUuid::RealWorldUser => None,
+            },
+        };
+
+        worker
+            .unshift_job(JobKind::ProcessMessage(process_message_job))
+            .await
+            .map_err(|err| Error::FailedToUnshiftJob {
+                message_uuid,
+                details: err,
+            })?;
+    }
+
+    Ok(message_uuid)
 }
