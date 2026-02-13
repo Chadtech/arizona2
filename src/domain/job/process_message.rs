@@ -6,9 +6,7 @@ use crate::capability::person::PersonCapability;
 use crate::capability::person_identity::PersonIdentityCapability;
 use crate::capability::reaction::ReactionCapability;
 use crate::capability::state_of_mind::StateOfMindCapability;
-use crate::domain::job::person_waiting::PersonWaitingJob;
-use crate::domain::job::send_message_to_scene::send_scene_message_and_enqueue_recipients;
-use crate::domain::job::JobKind;
+use crate::domain::job::person_action_handler::{self, ActionHandleError};
 use crate::domain::memory::Memory;
 use crate::domain::message::{Message, MessageRecipient, MessageSender};
 use crate::domain::actor_uuid::ActorUuid;
@@ -17,7 +15,6 @@ use crate::domain::person_uuid::PersonUuid;
 use crate::domain::random_seed::RandomSeed;
 use crate::domain::scene_uuid::SceneUuid;
 use crate::domain::state_of_mind::StateOfMind;
-use crate::open_ai::completion::CompletionError;
 use crate::person_actions::PersonAction;
 use crate::{
     capability::{message::MessageCapability, scene::SceneCapability},
@@ -25,7 +22,6 @@ use crate::{
     nice_display::NiceDisplay,
 };
 use serde::{Deserialize, Serialize};
-use tracing::error;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProcessMessageJob {
@@ -98,6 +94,7 @@ pub enum Error {
         details: String,
     },
     FailedToCreateMemory(String),
+    ActionError(ActionHandleError),
 }
 
 impl NiceDisplay for Error {
@@ -244,6 +241,7 @@ impl NiceDisplay for Error {
             Error::FailedToCreateMemory(err) => {
                 format!("Failed to create memory:\n{}", err)
             }
+            Error::ActionError(err) => err.to_nice_error().to_string(),
         }
     }
 }
@@ -315,14 +313,15 @@ impl ProcessMessageJob {
                 )
                 .await?;
 
-                handle_person_action(
+                person_action_handler::handle_person_action(
                     worker,
                     &action,
                     person_uuid,
                     random_seed.clone(),
                     current_active_ms,
                 )
-                .await?;
+                .await
+                .map_err(Error::ActionError)?;
 
                 let action_summary = summarize_action(action);
                 let description = if action_summary.is_empty() {
@@ -362,14 +361,15 @@ impl ProcessMessageJob {
                 )
                 .await?;
 
-                handle_person_action(
+                person_action_handler::handle_person_action(
                     worker,
                     &action,
                     person_uuid,
                     random_seed.clone(),
                     current_active_ms,
                 )
-                .await?;
+                .await
+                .map_err(Error::ActionError)?;
 
                 let action_summary = summarize_action(action);
                 let description = if action_summary.is_empty() {
@@ -407,69 +407,13 @@ fn summarize_action(action: PersonAction) -> String {
         PersonAction::Wait { duration } => {
             format!("Waited for {} seconds.", duration)
         }
+        PersonAction::Idle => "Did nothing.".to_string(),
         PersonAction::SayInScene { comment } => {
             format!("Spoke in scene: {}", comment)
         }
     }
 }
 
-async fn handle_person_action<
-    W: SceneCapability + JobCapability + PersonCapability + MessageCapability,
->(
-    worker: &W,
-    action: &PersonAction,
-    person_uuid: &PersonUuid,
-    random_seed: RandomSeed,
-    current_active_ms: i64,
-) -> Result<(), Error> {
-    match action {
-        PersonAction::Wait { duration } => {
-            // Cap at i64::MAX if u64 exceeds it
-            let duration_i64: i64 = (*duration).min(i64::MAX as u64) as i64;
-            let person_waiting_job =
-                PersonWaitingJob::new(person_uuid.clone(), duration_i64, current_active_ms);
-            let wait_job = JobKind::PersonWaiting(person_waiting_job);
-            worker
-                .unshift_job(wait_job)
-                .await
-                .map_err(|err| Error::PersonCouldNotWait {
-                    person_uuid: person_uuid.clone(),
-                    error: err,
-                })?;
-        }
-        PersonAction::SayInScene { comment } => {
-            let sender = MessageSender::AiPerson(person_uuid.clone());
-
-            let scene_uuid = worker
-                .get_persons_current_scene_uuid(person_uuid)
-                .await
-                .map_err(|err| Error::CouldNotGetPersonsScene {
-                    person_uuid: person_uuid.clone(),
-                    details: err,
-                })?
-                .ok_or(Error::CouldNotGetPersonsScene {
-                    person_uuid: person_uuid.clone(),
-                    details: "Person is not in any scene".to_string(),
-                })?;
-
-            send_scene_message_and_enqueue_recipients(
-                worker,
-                sender,
-                scene_uuid.clone(),
-                comment.clone(),
-                random_seed,
-            )
-            .await
-            .map_err(|err| Error::FailedToSendSceneMessage {
-                scene_uuid: scene_uuid.clone(),
-                details: err.to_nice_error().to_string(),
-                subject: person_uuid.to_uuid().to_string(),
-            })?;
-        }
-    }
-
-    Ok(())
-}
 
 async fn build_direct_situation<W: PersonCapability>(
     worker: &W,
@@ -529,7 +473,7 @@ async fn build_scene_situation<W: SceneCapability + PersonCapability>(
             details: err,
         })?;
 
-    let participant_names = participants
+    let mut participant_names = participants
         .iter()
         .filter(|participant| match &participant.actor_uuid {
             ActorUuid::AiPerson(uuid) => uuid.to_uuid() != person_uuid.to_uuid(),
@@ -537,6 +481,13 @@ async fn build_scene_situation<W: SceneCapability + PersonCapability>(
         })
         .map(|participant| participant.person_name.to_string())
         .collect::<Vec<String>>();
+
+    if !participants.iter().any(|participant| match participant.actor_uuid {
+        ActorUuid::RealWorldUser => true,
+        _ => false,
+    }) {
+        participant_names.push("Chadtech".to_string());
+    }
 
     let participant_list = if participant_names.is_empty() {
         "none".to_string()

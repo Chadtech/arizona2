@@ -1,13 +1,13 @@
 use crate::capability::event::EventCapability;
 use crate::capability::job::JobCapability;
+use crate::capability::message::MessageCapability;
 use crate::capability::memory::{MemoryCapability, MemorySearchResult, MessageTypeArgs};
 use crate::capability::person::PersonCapability;
 use crate::capability::person_identity::PersonIdentityCapability;
 use crate::capability::reaction::ReactionCapability;
 use crate::capability::scene::SceneCapability;
 use crate::capability::state_of_mind::StateOfMindCapability;
-use crate::domain::job::send_message_to_scene::SendMessageToSceneJob;
-use crate::domain::job::JobKind;
+use crate::domain::job::person_action_handler::{self, ActionHandleError};
 use crate::domain::memory::Memory;
 use crate::domain::message::MessageSender;
 use crate::domain::person_name::PersonName;
@@ -16,8 +16,6 @@ use crate::domain::random_seed::RandomSeed;
 use crate::domain::scene_uuid::SceneUuid;
 use crate::domain::state_of_mind::StateOfMind;
 use crate::nice_display::NiceDisplay;
-use crate::open_ai::completion::CompletionError;
-use crate::person_actions::PersonAction;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
@@ -62,6 +60,7 @@ pub enum Error {
         details: String,
         subject: String,
     },
+    ActionError(ActionHandleError),
 }
 
 pub enum WaitOutcome {
@@ -132,6 +131,7 @@ impl NiceDisplay for Error {
                     details
                 )
             }
+            Error::ActionError(err) => err.to_nice_error().to_string(),
         }
     }
 }
@@ -154,6 +154,7 @@ impl PersonWaitingJob {
         W: JobCapability
             + SceneCapability
             + ReactionCapability
+            + MessageCapability
             + MemoryCapability
             + PersonCapability
             + EventCapability
@@ -262,50 +263,15 @@ impl PersonWaitingJob {
                 .await
                 .map_err(Error::GetPersonReactionError)?;
 
-            match action {
-                PersonAction::Wait { duration } => {
-                    let duration_i64: i64 = duration.min(i64::MAX as u64) as i64;
-                    let person_waiting_job =
-                        PersonWaitingJob::new(person_uuid.clone(), duration_i64, current_active_ms);
-                    let wait_job = JobKind::PersonWaiting(person_waiting_job);
-                    worker.unshift_job(wait_job).await.map_err(|err| {
-                        Error::PersonCouldNotWait {
-                            person_uuid: person_uuid.clone(),
-                            error: err,
-                        }
-                    })?;
-                }
-                PersonAction::SayInScene { comment } => {
-                    let sender = MessageSender::AiPerson(person_uuid.clone());
-
-                    let scene_uuid = worker
-                        .get_persons_current_scene_uuid(&person_uuid)
-                        .await
-                        .map_err(|err| Error::CouldNotGetPersonsScene {
-                            person_uuid: person_uuid.clone(),
-                            details: err,
-                        })?
-                        .ok_or(Error::CouldNotGetPersonsScene {
-                            person_uuid: person_uuid.clone(),
-                            details: "Person is not in any scene".to_string(),
-                        })?;
-
-                    let send_message_to_scene_job = SendMessageToSceneJob {
-                        sender,
-                        scene_uuid: scene_uuid.clone(),
-                        content: comment,
-                        random_seed: random_seed.clone(),
-                    };
-                    let job_kind = JobKind::SendMessageToScene(send_message_to_scene_job);
-                    worker.unshift_job(job_kind).await.map_err(|err| {
-                        Error::PersonCouldNotSayInScene {
-                            scene_uuid: scene_uuid,
-                            details: err,
-                            subject: person_uuid.to_uuid().to_string(),
-                        }
-                    })?;
-                }
-            }
+            person_action_handler::handle_person_action(
+                worker,
+                &action,
+                &person_uuid,
+                random_seed.clone(),
+                current_active_ms,
+            )
+            .await
+            .map_err(Error::ActionError)?;
 
             Ok(WaitOutcome::Ready)
         } else {

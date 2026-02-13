@@ -5,6 +5,7 @@ use crate::{nice_display::NiceDisplay, open_ai};
 
 pub enum PersonActionKind {
     Wait,
+    Idle,
     SayInScene,
 }
 
@@ -12,6 +13,7 @@ impl PersonActionKind {
     pub fn to_name(&self) -> String {
         match self {
             PersonActionKind::Wait => "wait".to_string(),
+            PersonActionKind::Idle => "idle".to_string(),
             PersonActionKind::SayInScene => "say in scene".to_string(),
         }
     }
@@ -19,6 +21,7 @@ impl PersonActionKind {
     pub fn all_action_names() -> Vec<String> {
         vec![
             PersonActionKind::Wait.to_name(),
+            PersonActionKind::Idle.to_name(),
             PersonActionKind::SayInScene.to_name(),
         ]
     }
@@ -45,7 +48,7 @@ impl PersonActionKind {
 
         Tool::FunctionCall(ToolFunction::new(
             "choose_action".to_string(),
-            "Choose a single action for the person. Only one action is allowed.".to_string(),
+            "Choose a single action for the person. Only one action is allowed. Use idle when the person decides to do nothing.".to_string(),
             parameters,
         ))
     }
@@ -54,6 +57,7 @@ impl PersonActionKind {
 #[derive(Debug, Clone)]
 pub enum PersonAction {
     Wait { duration: u64 },
+    Idle,
     SayInScene { comment: String },
 }
 
@@ -177,6 +181,7 @@ impl PersonAction {
                     })?;
                 Ok(PersonAction::Wait { duration })
             }
+            "idle" => Ok(PersonAction::Idle),
             _ => Err(PersonActionError::UnrecognizedAction {
                 action_name: action,
             }),

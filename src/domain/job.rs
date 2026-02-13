@@ -1,6 +1,7 @@
 pub mod person_waiting;
 pub mod process_message;
 pub mod send_message_to_scene;
+pub mod person_action_handler;
 
 use super::job_uuid::JobUuid;
 use crate::domain::job::person_waiting::PersonWaitingJob;

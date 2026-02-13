@@ -539,6 +539,14 @@ impl Model {
             subs.push(self.job_page.subscription().map(Msg::JobPageMsg));
         }
 
+        if self.tab == Tab::Messages {
+            subs.push(
+                self.messages_page
+                    .subscription()
+                    .map(Msg::MessagesPageMsg),
+            );
+        }
+
         Subscription::batch(subs)
     }
 

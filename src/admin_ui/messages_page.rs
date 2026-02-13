@@ -1,13 +1,12 @@
 use super::s;
-use crate::capability::job::JobCapability;
 use crate::capability::scene::{Scene, SceneCapability};
-use crate::domain::job::send_message_to_scene::SendMessageToSceneJob;
-use crate::domain::job::JobKind;
+use crate::domain::job::send_message_to_scene::send_scene_message_and_enqueue_recipients;
 use crate::domain::message::MessageSender;
 use crate::domain::random_seed::RandomSeed;
 use crate::domain::scene_uuid::SceneUuid;
+use crate::nice_display::NiceDisplay;
 use crate::worker::Worker;
-use iced::{widget as w, Element, Length, Task};
+use iced::{time, widget as w, Element, Length, Subscription, Task};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -28,6 +27,7 @@ pub struct Model {
 
     // View mode toggle
     view_mode: ViewMode,
+    auto_refresh: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -86,6 +86,8 @@ pub enum Msg {
     SubmitMessage,
     MessageSent(Result<(), String>),
     GotTimelineMsg(scene_timeline::Msg),
+    ClickedToggleAutoRefresh,
+    AutoRefreshTick,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -121,6 +123,7 @@ impl Model {
             message_input: String::new(),
             send_status: SendStatus::Ready,
             view_mode: storage.view_mode,
+            auto_refresh: false,
         }
     }
 
@@ -207,6 +210,14 @@ impl Model {
                 self.send_status = SendStatus::Ready;
                 Task::none()
             }
+            Msg::ClickedToggleAutoRefresh => {
+                self.auto_refresh = !self.auto_refresh;
+                if self.auto_refresh {
+                    self.refresh_loaded_scene(worker)
+                } else {
+                    Task::none()
+                }
+            }
             Msg::SubmitMessage => {
                 // Only allow sending if we have a loaded scene and message content
                 if let SceneLoadStatus::Loaded(scene) = &self.scene_load_status {
@@ -214,17 +225,25 @@ impl Model {
                         return Task::none();
                     }
 
-                    let job = SendMessageToSceneJob {
-                        sender: MessageSender::RealWorldUser,
-                        scene_uuid: scene.uuid.clone(),
-                        content: self.message_input.clone(),
-                        random_seed: RandomSeed::from_u64(rand::random()),
-                    };
-
+                    let sender = MessageSender::RealWorldUser;
+                    let scene_uuid = scene.uuid.clone();
+                    let content = self.message_input.clone();
+                    let random_seed = RandomSeed::from_u64(rand::random());
                     self.send_status = SendStatus::Sending;
 
                     Task::perform(
-                        async move { worker.unshift_job(JobKind::SendMessageToScene(job)).await },
+                        async move {
+                            send_scene_message_and_enqueue_recipients(
+                                worker.as_ref(),
+                                sender,
+                                scene_uuid,
+                                content,
+                                random_seed,
+                            )
+                            .await
+                            .map(|_| ())
+                            .map_err(|err| err.to_nice_error().to_string())
+                        },
                         Msg::MessageSent,
                     )
                 } else {
@@ -243,8 +262,6 @@ impl Model {
                             let scene_uuid = scene.uuid.clone();
                             return Task::perform(
                                 async move {
-                                    // Small delay to allow the job to process
-                                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
                                     scene_timeline::Model::load(&worker, scene_uuid).await
                                 },
                                 Msg::TimelineLoaded,
@@ -264,6 +281,13 @@ impl Model {
                     }
                 }
                 Task::none()
+            }
+            Msg::AutoRefreshTick => {
+                if self.auto_refresh {
+                    self.refresh_loaded_scene(worker)
+                } else {
+                    Task::none()
+                }
             }
         }
     }
@@ -339,6 +363,7 @@ impl Model {
             SceneLoadStatus::Loading => w::text("Loading scene...").into(),
             SceneLoadStatus::Loaded(scene) => {
                 let message_composer = self.view_message_composer();
+                let auto_refresh_button = self.view_auto_refresh_button();
 
                 let description_view: Element<'_, Msg> = match &scene.description {
                     Some(desc) => w::text(desc).into(),
@@ -352,6 +377,7 @@ impl Model {
                         scene.uuid.to_uuid()
                     )),
                     description_view,
+                    auto_refresh_button,
                     view_messages(&scene.messages),
                     message_composer
                 ]
@@ -396,12 +422,43 @@ impl Model {
             .into()
     }
 
+    fn view_auto_refresh_button(&self) -> Element<'_, Msg> {
+        let label = if self.auto_refresh {
+            "Auto refresh: On"
+        } else {
+            "Auto refresh: Off"
+        };
+
+        w::button(label).on_press(Msg::ClickedToggleAutoRefresh).into()
+    }
+
+    fn refresh_loaded_scene(&mut self, worker: Arc<Worker>) -> Task<Msg> {
+        if let SceneLoadStatus::Loaded(scene) = &mut self.scene_load_status {
+            scene.messages = MessagesStatus::Loading;
+            let scene_uuid = scene.uuid.clone();
+            return Task::perform(
+                async move { scene_timeline::Model::load(&worker, scene_uuid).await },
+                Msg::TimelineLoaded,
+            );
+        }
+
+        Task::none()
+    }
+
     pub fn to_storage(&self) -> Storage {
         Storage {
             selected_person_1: self.selected_person_1.clone(),
             selected_person_2: self.selected_person_2.clone(),
             scene_name_input: self.scene_name_input.clone(),
             view_mode: self.view_mode,
+        }
+    }
+
+    pub fn subscription(&self) -> Subscription<Msg> {
+        if self.auto_refresh && self.view_mode == ViewMode::Scene {
+            time::every(std::time::Duration::from_secs(2)).map(|_| Msg::AutoRefreshTick)
+        } else {
+            Subscription::none()
         }
     }
 }
