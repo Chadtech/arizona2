@@ -58,7 +58,7 @@ async fn get_reaction_helper(
         .join("\n");
 
     let user_prompt = format!(
-        "Memories:\n{}\n\nPerson identity: {}\n\nState of mind: {}\n\nSituation: {}",
+        "Memories:\n{}\n\nPerson identity: {}\n\nState of mind: {}\n\nSituation:\n{}",
         memories_list, person_identity, state_of_mind, situation
     );
 

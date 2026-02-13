@@ -11,6 +11,7 @@ use crate::domain::job::send_message_to_scene::send_scene_message_and_enqueue_re
 use crate::domain::job::JobKind;
 use crate::domain::memory::Memory;
 use crate::domain::message::{Message, MessageRecipient, MessageSender};
+use crate::domain::actor_uuid::ActorUuid;
 use crate::domain::person_name::PersonName;
 use crate::domain::person_uuid::PersonUuid;
 use crate::domain::random_seed::RandomSeed;
@@ -296,8 +297,13 @@ impl ProcessMessageJob {
                     return Ok(());
                 }
 
-                let situation =
-                    build_scene_situation(worker, scene_uuid, &pending_messages).await?;
+                let situation = build_scene_situation(
+                    worker,
+                    scene_uuid,
+                    &pending_messages,
+                    person_uuid,
+                )
+                .await?;
 
                 let action = process_message_for_person(
                     worker,
@@ -491,6 +497,7 @@ async fn build_scene_situation<W: SceneCapability + PersonCapability>(
     worker: &W,
     scene_uuid: &SceneUuid,
     messages: &[Message],
+    person_uuid: &PersonUuid,
 ) -> Result<String, Error> {
     let scene_name = worker
         .get_scene_name(scene_uuid)
@@ -524,6 +531,10 @@ async fn build_scene_situation<W: SceneCapability + PersonCapability>(
 
     let participant_names = participants
         .iter()
+        .filter(|participant| match &participant.actor_uuid {
+            ActorUuid::AiPerson(uuid) => uuid.to_uuid() != person_uuid.to_uuid(),
+            ActorUuid::RealWorldUser => true,
+        })
         .map(|participant| participant.person_name.to_string())
         .collect::<Vec<String>>();
 
