@@ -11,6 +11,7 @@ use crate::domain::job::{
     person_waiting, process_message, send_message_to_scene, JobKind, PoppedJob,
 };
 use crate::domain::job_uuid::JobUuid;
+use crate::domain::logger::{Level, Logger};
 use crate::domain::random_seed::RandomSeed;
 use crate::nice_display::NiceDisplay;
 use crate::worker;
@@ -161,7 +162,9 @@ impl NiceDisplay for RunJobError {
     }
 }
 pub async fn run() -> Result<(), Error> {
-    let worker = Worker::new().await.map_err(Error::WorkerInitError)?;
+    let logger = Logger::init(Level::Info).log_to_file();
+
+    let worker = Worker::new(logger).await.map_err(Error::WorkerInitError)?;
     let active_clock = ActiveClock::load(&worker)
         .await
         .map_err(Error::ActiveClockError)?;
@@ -210,7 +213,8 @@ pub async fn run_one_job(
     let job = match worker
         .pop_next_job(current_active_ms)
         .await
-        .map_err(Error::PopJobError)? {
+        .map_err(Error::PopJobError)?
+    {
         Some(j) => j,
         None => {
             return Ok(RunNextJobResult::NoJob);
@@ -254,7 +258,8 @@ async fn run_next_job<
     let job = match worker
         .pop_next_job(current_active_ms)
         .await
-        .map_err(Error::PopJobError)? {
+        .map_err(Error::PopJobError)?
+    {
         Some(j) => j,
         None => {
             return Ok(());
@@ -266,7 +271,8 @@ async fn run_next_job<
 
     match run_job(worker, random_seed, current_active_ms, job)
         .await
-        .map_err(|err| Error::RunJobError((job_uuid, err)))? {
+        .map_err(|err| Error::RunJobError((job_uuid, err)))?
+    {
         RunJobOutcome::Completed => Ok(()),
         RunJobOutcome::Deferred => Ok(()),
     }

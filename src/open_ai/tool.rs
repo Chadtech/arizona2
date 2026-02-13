@@ -24,6 +24,12 @@ pub enum ToolFunctionParameter {
         description: String,
         required: bool,
     },
+    StringEnumParam {
+        name: String,
+        description: String,
+        required: bool,
+        values: Vec<String>,
+    },
     ArrayParam {
         name: String,
         description: String,
@@ -41,6 +47,7 @@ impl ToolFunctionParameter {
     pub fn required(&self) -> bool {
         match *self {
             ToolFunctionParameter::StringParam { required, .. } => required,
+            ToolFunctionParameter::StringEnumParam { required, .. } => required,
             ToolFunctionParameter::ArrayParam { required, .. } => required,
             ToolFunctionParameter::IntegerParam { required, .. } => required,
         }
@@ -48,6 +55,7 @@ impl ToolFunctionParameter {
     pub fn name(&self) -> &str {
         match self {
             ToolFunctionParameter::StringParam { name, .. } => name,
+            ToolFunctionParameter::StringEnumParam { name, .. } => name,
             ToolFunctionParameter::ArrayParam { name, .. } => name,
             ToolFunctionParameter::IntegerParam { name, .. } => name,
         }
@@ -79,6 +87,18 @@ impl Tool {
                             properties[name] = serde_json::json!({
                                 "type": "string",
                                 "description": description,
+                            });
+                        }
+                        ToolFunctionParameter::StringEnumParam {
+                            name,
+                            description,
+                            values,
+                            required: _,
+                        } => {
+                            properties[name] = serde_json::json!({
+                                "type": "string",
+                                "description": description,
+                                "enum": values,
                             });
                         }
                         ToolFunctionParameter::ArrayParam {

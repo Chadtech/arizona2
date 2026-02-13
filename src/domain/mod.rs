@@ -2,6 +2,7 @@ pub mod actor_uuid;
 pub mod event;
 pub mod job;
 pub mod job_uuid;
+pub mod logger;
 pub mod memory;
 pub mod memory_uuid;
 pub mod message;

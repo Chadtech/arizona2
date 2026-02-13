@@ -10,6 +10,7 @@ mod state_of_mind_page;
 mod style;
 
 use self::style as s;
+use crate::domain::logger::{Level, Logger};
 use crate::nice_display::NiceDisplay;
 use crate::open_ai::completion::CompletionError;
 use crate::worker;
@@ -204,7 +205,9 @@ struct Flags {
 
 impl Flags {
     async fn get() -> Result<Self, Error> {
-        let worker = Worker::new().await.map_err(Error::WorkerInitError)?;
+        let logger = Logger::init(Level::Warning);
+
+        let worker = Worker::new(logger).await.map_err(Error::WorkerInitError)?;
 
         let storage = Storage::read_from_file_system()?;
 
@@ -526,11 +529,17 @@ impl Model {
     }
 
     fn subscription(&self) -> Subscription<Msg> {
+        let mut subs = Vec::new();
+
         if self.time_running {
-            time::every(time::Duration::from_secs(1)).map(|_| Msg::TimeTick)
-        } else {
-            Subscription::none()
+            subs.push(time::every(time::Duration::from_secs(1)).map(|_| Msg::TimeTick));
         }
+
+        if self.tab == Tab::Job {
+            subs.push(self.job_page.subscription().map(Msg::JobPageMsg));
+        }
+
+        Subscription::batch(subs)
     }
 
     fn theme(&self) -> Theme {

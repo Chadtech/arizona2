@@ -35,10 +35,7 @@ impl MemoryCapability for Worker {
         )
         .fetch_one(&self.sqlx)
         .await
-        .map_err(|err| {
-            eprintln!("Error details: {:?}", err);
-            format!("Error inserting new memory: {}", err)
-        })?;
+        .map_err(|err| format!("Error inserting new memory: {}", err))?;
 
         Ok(MemoryUuid::from_uuid(rec.uuid))
     }

@@ -1,4 +1,5 @@
 use crate::capability::reaction::ReactionCapability;
+use crate::domain::logger::Level;
 use crate::domain::memory::Memory;
 use crate::nice_display::NiceDisplay;
 use crate::open_ai;
@@ -61,11 +62,18 @@ async fn get_reaction_helper(
         memories_list, person_identity, state_of_mind, situation
     );
 
+    worker.logger.log(
+        Level::Info,
+        format!(
+            "Sending completion request with user prompt:\n{}",
+            user_prompt
+        )
+        .as_str(),
+    );
+
     completion.add_message(Role::User, user_prompt.as_str());
 
-    for person_action_kind in PersonActionKind::all() {
-        completion.add_tool_call(person_action_kind.to_open_ai_tool());
-    }
+    completion.add_tool_call(PersonActionKind::to_choice_tool());
 
     let response = completion
         .send_request(&worker.open_ai_key, reqwest::Client::new())

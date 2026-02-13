@@ -6,7 +6,7 @@ use crate::job_runner::{self, RunNextJobResult};
 use crate::nice_display::NiceDisplay;
 use crate::worker::Worker;
 use iced::widget::container;
-use iced::{clipboard, widget as w, Alignment, Background, Color, Element, Length, Task};
+use iced::{clipboard, time, widget as w, Alignment, Background, Color, Element, Length, Subscription, Task};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -15,6 +15,7 @@ pub struct Model {
     get_jobs_status: GetJobsStatus,
     process_next_status: ProcessNextStatus,
     selected_job_status: SelectedJobStatus,
+    auto_refresh: bool,
 }
 
 enum GetJobsStatus {
@@ -85,6 +86,8 @@ pub enum Msg {
     DeletedJob(Result<JobUuid, String>),
     ClickedCopyJobUuid(String),
     ClickedRefreshSelected,
+    ClickedToggleAutoRefresh,
+    AutoRefreshTick,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -103,6 +106,7 @@ impl Model {
             get_jobs_status: GetJobsStatus::Fetching,
             process_next_status: ProcessNextStatus::Ready,
             selected_job_status: SelectedJobStatus::None,
+            auto_refresh: false,
         }
     }
 
@@ -240,6 +244,18 @@ impl Model {
                 }
                 Task::none()
             }
+            Msg::ClickedToggleAutoRefresh => {
+                self.auto_refresh = !self.auto_refresh;
+                Task::none()
+            }
+            Msg::AutoRefreshTick => {
+                if self.auto_refresh {
+                    let worker = worker.clone();
+                    Task::perform(get_jobs(worker), |m| m)
+                } else {
+                    Task::none()
+                }
+            }
             Msg::ClickedConfirmDelete(job_uuid) => {
                 if let SelectedJobStatus::Loaded(selected_job) = &mut self.selected_job_status {
                     selected_job.delete_status = DeleteStatus::Deleting;
@@ -366,6 +382,12 @@ impl Model {
                 ..Default::default()
             });
 
+        let auto_refresh_label = if self.auto_refresh {
+            "Auto refresh: On"
+        } else {
+            "Auto refresh: Off"
+        };
+
         w::column![
             w::text("Jobs"),
             jobs_container,
@@ -374,6 +396,7 @@ impl Model {
                 process_next_button,
                 add_button,
                 w::button("Refresh jobs list").on_press(Msg::ClickedRefresh),
+                w::button(auto_refresh_label).on_press(Msg::ClickedToggleAutoRefresh),
             ]
             .spacing(s::S4),
             status_view,
@@ -382,6 +405,14 @@ impl Model {
         .spacing(s::S4)
         .width(Length::Fill)
         .into()
+    }
+
+    pub fn subscription(&self) -> Subscription<Msg> {
+        if self.auto_refresh {
+            time::every(std::time::Duration::from_secs(2)).map(|_| Msg::AutoRefreshTick)
+        } else {
+            Subscription::none()
+        }
     }
 
     pub fn to_storage(&self) -> Storage {

@@ -282,7 +282,7 @@ impl ProcessMessageJob {
             None
         };
 
-        match dbg!((person_uuid, &message.scene_uuid)) {
+        match (person_uuid, &message.scene_uuid) {
             (Some(person_uuid), Some(scene_uuid)) => {
                 let pending_messages = worker
                     .get_unhandled_scene_messages_for_person(person_uuid, scene_uuid)
@@ -293,11 +293,8 @@ impl ProcessMessageJob {
                     })?;
 
                 if pending_messages.is_empty() {
-                    println!("No pending messages!");
                     return Ok(());
                 }
-
-                println!("Messages not empty!!!!");
 
                 let situation =
                     build_scene_situation(worker, scene_uuid, &pending_messages).await?;
@@ -328,7 +325,6 @@ impl ProcessMessageJob {
                     format!("{}\n\nResponse:\n{}", situation, action_summary)
                 };
 
-                println!("A");
                 worker
                     .maybe_create_memories_from_description(person_uuid.clone(), description)
                     .await
@@ -339,7 +335,6 @@ impl ProcessMessageJob {
                     .map(|msg| msg.uuid)
                     .collect::<Vec<_>>();
 
-                println!("B");
                 worker
                     .mark_scene_messages_handled_for_person(person_uuid, handled_ids)
                     .await

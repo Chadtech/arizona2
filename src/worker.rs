@@ -8,6 +8,7 @@ mod reaction_capability;
 mod scene_capability;
 mod state_of_mind_capability;
 
+use crate::domain::logger::Logger;
 use crate::domain::random_seed::RandomSeed;
 use crate::{db, nice_display::NiceDisplay, open_ai_key::OpenAiKey};
 use sqlx::postgres::PgPoolOptions;
@@ -22,6 +23,7 @@ pub struct Worker {
     pub reqwest_client: reqwest::Client,
     pub sqlx: sqlx::Pool<Postgres>,
     pub random_seed: Arc<Mutex<RandomSeed>>,
+    pub logger: Logger,
 }
 
 #[derive(Debug)]
@@ -53,7 +55,7 @@ impl NiceDisplay for InitError {
 }
 
 impl Worker {
-    pub async fn new() -> Result<Self, InitError> {
+    pub async fn new(logger: Logger) -> Result<Self, InitError> {
         let open_ai_key = OpenAiKey::from_env().map_err(InitError::OpenAiKey)?;
 
         let db_info = db::Config::load()
@@ -86,6 +88,7 @@ impl Worker {
             reqwest_client: reqwest::Client::new(),
             sqlx: sqlx_pool,
             random_seed: Arc::new(Mutex::new(RandomSeed::new())),
+            logger,
         })
     }
 

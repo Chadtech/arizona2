@@ -194,6 +194,7 @@ impl Completion {
                 .iter()
                 .map(|tool| tool.to_json())
                 .collect::<serde_json::Value>();
+            body["parallel_tool_calls"] = serde_json::json!(false);
         }
 
         let res = client
