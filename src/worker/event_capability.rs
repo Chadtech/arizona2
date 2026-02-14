@@ -1,6 +1,9 @@
 use crate::capability::event::{EventCapability, GetArgs};
+use crate::capability::person::PersonCapability;
+use crate::capability::scene::SceneCapability;
 use crate::domain::event::{Event, EventType};
 use crate::domain::message::MessageSender;
+use crate::domain::person_uuid::PersonUuid;
 use crate::worker::Worker;
 
 impl EventCapability for Worker {
@@ -10,6 +13,14 @@ impl EventCapability for Worker {
         match (args.person_uuid, args.scene_uuid) {
             // Case 1: Both person and scene specified
             (Some(person_uuid), Some(scene_uuid)) => {
+                let scene_name = match self.get_scene_name(&scene_uuid).await {
+                    Ok(Some(name)) => name,
+                    Ok(None) => format!("Unknown scene {}", scene_uuid.to_uuid()),
+                    Err(err) => {
+                        return Err(format!("Error fetching scene name: {}", err));
+                    }
+                };
+
                 // Get direct messages to this person
                 let direct_messages = sqlx::query!(
                     r#"
@@ -77,10 +88,23 @@ impl EventCapability for Worker {
                     .map_err(|err| format!("Error fetching scene messages: {}", err))?;
 
                     for msg in scene_messages {
+                        let speaker_name = match msg.sender_person_uuid {
+                            Some(sender_uuid) => {
+                                let sender_person_uuid = PersonUuid::from_uuid(sender_uuid);
+                                let sender_name =
+                                    self.get_persons_name(sender_person_uuid).await.map_err(
+                                        |err| format!("Error fetching sender name: {}", err),
+                                    )?;
+                                sender_name.as_str().to_string()
+                            }
+                            None => "Chadtech".to_string(),
+                        };
+
                         events.push(Event::new(
                             msg.sent_at,
                             EventType::PersonSaidInScene {
-                                scene_uuid: scene_uuid.clone(),
+                                scene_name: scene_name.clone(),
+                                speaker_name,
                                 comment: msg.content,
                             },
                         ));
@@ -104,9 +128,7 @@ impl EventCapability for Worker {
 
                     for participant in participant_events {
                         let participant_person_uuid =
-                            crate::domain::person_uuid::PersonUuid::from_uuid(
-                                participant.person_uuid,
-                            );
+                            PersonUuid::from_uuid(participant.person_uuid);
 
                         // Add join event
                         events.push(Event::new(
@@ -114,6 +136,7 @@ impl EventCapability for Worker {
                             EventType::PersonJoinedScene {
                                 person_uuid: participant_person_uuid.clone(),
                                 scene_uuid: scene_uuid.clone(),
+                                scene_name: scene_name.clone(),
                             },
                         ));
 
@@ -124,6 +147,7 @@ impl EventCapability for Worker {
                                 EventType::PersonLeftScene {
                                     person_uuid: participant_person_uuid,
                                     scene_uuid: scene_uuid.clone(),
+                                    scene_name: scene_name.clone(),
                                 },
                             ));
                         }
@@ -164,6 +188,14 @@ impl EventCapability for Worker {
 
             // Case 3: Only scene specified (all scene events)
             (None, Some(scene_uuid)) => {
+                let scene_name = match self.get_scene_name(&scene_uuid).await {
+                    Ok(Some(name)) => name,
+                    Ok(None) => format!("Unknown scene {}", scene_uuid.to_uuid()),
+                    Err(err) => {
+                        return Err(format!("Error fetching scene name: {}", err));
+                    }
+                };
+
                 // Get all scene messages
                 let scene_messages = sqlx::query!(
                     r#"
@@ -179,10 +211,23 @@ impl EventCapability for Worker {
                 .map_err(|err| format!("Error fetching scene messages: {}", err))?;
 
                 for msg in scene_messages {
+                    let speaker_name = match msg.sender_person_uuid {
+                        Some(sender_uuid) => {
+                            let sender_person_uuid = PersonUuid::from_uuid(sender_uuid);
+                            let sender_name = self
+                                .get_persons_name(sender_person_uuid)
+                                .await
+                                .map_err(|err| format!("Error fetching sender name: {}", err))?;
+                            sender_name.as_str().to_string()
+                        }
+                        None => "Chadtech".to_string(),
+                    };
+
                     events.push(Event::new(
                         msg.sent_at,
                         EventType::PersonSaidInScene {
-                            scene_uuid: scene_uuid.clone(),
+                            scene_name: scene_name.clone(),
+                            speaker_name,
                             comment: msg.content,
                         },
                     ));
@@ -203,8 +248,7 @@ impl EventCapability for Worker {
                 .map_err(|err| format!("Error fetching participant events: {}", err))?;
 
                 for participant in participant_events {
-                    let participant_person_uuid =
-                        crate::domain::person_uuid::PersonUuid::from_uuid(participant.person_uuid);
+                    let participant_person_uuid = PersonUuid::from_uuid(participant.person_uuid);
 
                     // Add join event
                     events.push(Event::new(
@@ -212,6 +256,7 @@ impl EventCapability for Worker {
                         EventType::PersonJoinedScene {
                             person_uuid: participant_person_uuid.clone(),
                             scene_uuid: scene_uuid.clone(),
+                            scene_name: scene_name.clone(),
                         },
                     ));
 
@@ -222,6 +267,7 @@ impl EventCapability for Worker {
                             EventType::PersonLeftScene {
                                 person_uuid: participant_person_uuid,
                                 scene_uuid: scene_uuid.clone(),
+                                scene_name: scene_name.clone(),
                             },
                         ));
                     }

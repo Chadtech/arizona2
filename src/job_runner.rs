@@ -193,10 +193,16 @@ pub async fn run() -> Result<(), Error> {
             res = job_fut => {
                 if let Err(err) = res {
                     // Log the error but continue processing other jobs
-                    tracing::error!("Job runner error: {}", err.to_nice_error().to_string());
+                    let err_message = err.to_nice_error().to_string();
+                    tracing::error!("Job runner error: {}", err_message);
+                    worker
+                        .logger
+                        .log(Level::Error, &format!("Job runner error: {}", err_message));
                 }
             }
         }
+
+        tokio::time::sleep(std::time::Duration::from_secs(45)).await;
     }
     Ok(())
 }
@@ -225,9 +231,16 @@ pub async fn run_one_job(
     let job_kind = job.kind.to_name();
     tracing::info!("Processing job {} of type {:?}", job_uuid, job.kind);
 
-    let outcome = run_job(worker.clone(), random_seed, current_active_ms, job)
-        .await
-        .map_err(|err| Error::RunJobError((job_uuid.clone(), err)))?;
+    let outcome = match run_job(worker.clone(), random_seed, current_active_ms, job).await {
+        Ok(outcome) => outcome,
+        Err(err) => {
+            let err_message = err.to_nice_error().to_string();
+            worker
+                .logger
+                .log(Level::Error, &format!("Job runner error: {}", err_message));
+            return Err(Error::RunJobError((job_uuid.clone(), err)));
+        }
+    };
 
     active_clock
         .persist(&worker)

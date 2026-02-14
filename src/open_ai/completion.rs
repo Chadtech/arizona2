@@ -20,9 +20,9 @@ pub struct Response {
 
 #[derive(Debug, Clone)]
 pub enum MessageError {
-    MissingField(String),
-    NoChoices,
-    NotString { what: String },
+    MissingField { field: String, json: serde_json::Value },
+    NoChoices { json: serde_json::Value },
+    NotString { what: String, json: serde_json::Value },
 }
 
 impl Into<CompletionError> for MessageError {
@@ -34,9 +34,23 @@ impl Into<CompletionError> for MessageError {
 impl NiceDisplay for MessageError {
     fn message(&self) -> String {
         match self {
-            MessageError::MissingField(field) => format!("Missing field: {}", field),
-            MessageError::NoChoices => "No choices in response".to_string(),
-            MessageError::NotString { what } => format!("Field is not a string: {}", what),
+            MessageError::MissingField { field, json } => {
+                format!(
+                    "Missing field: {}\nResponse JSON:\n{}",
+                    field,
+                    format_json(json)
+                )
+            }
+            MessageError::NoChoices { json } => {
+                format!("No choices in response\nResponse JSON:\n{}", format_json(json))
+            }
+            MessageError::NotString { what, json } => {
+                format!(
+                    "Field is not a string: {}\nResponse JSON:\n{}",
+                    what,
+                    format_json(json)
+                )
+            }
         }
     }
 }
@@ -49,17 +63,29 @@ impl Response {
     pub fn as_message(&self) -> Result<String, MessageError> {
         self.json
             .get("choices")
-            .ok_or_else(|| MessageError::MissingField("choices".to_string()))?
+            .ok_or_else(|| MessageError::MissingField {
+                field: "choices".to_string(),
+                json: self.json.clone(),
+            })?
             .get(0)
-            .ok_or_else(|| MessageError::NoChoices)?
+            .ok_or_else(|| MessageError::NoChoices {
+                json: self.json.clone(),
+            })?
             .get("message")
-            .ok_or_else(|| MessageError::MissingField("message".to_string()))?
+            .ok_or_else(|| MessageError::MissingField {
+                field: "message".to_string(),
+                json: self.json.clone(),
+            })?
             .get("content")
-            .ok_or_else(|| MessageError::MissingField("content".to_string()))?
+            .ok_or_else(|| MessageError::MissingField {
+                field: "content".to_string(),
+                json: self.json.clone(),
+            })?
             .as_str()
             .map(|s| s.to_string())
             .ok_or_else(|| MessageError::NotString {
                 what: "content".to_string(),
+                json: self.json.clone(),
             })
     }
 
@@ -149,6 +175,13 @@ impl NiceDisplay for CompletionError {
                 format!("I had trouble interpreting the action: {}", err.message())
             }
         }
+    }
+}
+
+fn format_json(value: &serde_json::Value) -> String {
+    match serde_json::to_string_pretty(value) {
+        Ok(text) => text,
+        Err(_) => value.to_string(),
     }
 }
 

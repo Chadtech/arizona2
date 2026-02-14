@@ -6,10 +6,10 @@ use crate::capability::person::PersonCapability;
 use crate::capability::person_identity::PersonIdentityCapability;
 use crate::capability::reaction::ReactionCapability;
 use crate::capability::state_of_mind::StateOfMindCapability;
+use crate::domain::actor_uuid::ActorUuid;
 use crate::domain::job::person_action_handler::{self, ActionHandleError};
 use crate::domain::memory::Memory;
 use crate::domain::message::{Message, MessageRecipient, MessageSender};
-use crate::domain::actor_uuid::ActorUuid;
 use crate::domain::person_name::PersonName;
 use crate::domain::person_uuid::PersonUuid;
 use crate::domain::random_seed::RandomSeed;
@@ -295,13 +295,9 @@ impl ProcessMessageJob {
                     return Ok(());
                 }
 
-                let situation = build_scene_situation(
-                    worker,
-                    scene_uuid,
-                    &pending_messages,
-                    person_uuid,
-                )
-                .await?;
+                let situation =
+                    build_scene_situation(worker, scene_uuid, &pending_messages, person_uuid)
+                        .await?;
 
                 let action = process_message_for_person(
                     worker,
@@ -414,7 +410,6 @@ fn summarize_action(action: PersonAction) -> String {
     }
 }
 
-
 async fn build_direct_situation<W: PersonCapability>(
     worker: &W,
     message: &Message,
@@ -431,9 +426,9 @@ async fn build_direct_situation<W: PersonCapability>(
     };
 
     Ok(format!(
-        "You received a direct message from {}:\n\n{}",
+        "You received a direct message from {}:\n\n\"{}\"",
         sender_name.as_str(),
-        message.content
+        normalize_message_content(&message.content)
     ))
 }
 
@@ -482,10 +477,13 @@ async fn build_scene_situation<W: SceneCapability + PersonCapability>(
         .map(|participant| participant.person_name.to_string())
         .collect::<Vec<String>>();
 
-    if !participants.iter().any(|participant| match participant.actor_uuid {
-        ActorUuid::RealWorldUser => true,
-        _ => false,
-    }) {
+    if !participants
+        .iter()
+        .any(|participant| match participant.actor_uuid {
+            ActorUuid::RealWorldUser => true,
+            _ => false,
+        })
+    {
         participant_names.push("Chadtech".to_string());
     }
 
@@ -509,7 +507,11 @@ async fn build_scene_situation<W: SceneCapability + PersonCapability>(
             MessageSender::RealWorldUser => "Chadtech".to_string(),
         };
 
-        lines.push(format!("{}: {}", sender_label, message.content));
+        lines.push(format!(
+            "{}: \"{}\"",
+            sender_label,
+            normalize_message_content(&message.content)
+        ));
     }
 
     let messages_block = if lines.is_empty() {
@@ -525,6 +527,19 @@ async fn build_scene_situation<W: SceneCapability + PersonCapability>(
         participant_list,
         messages_block
     ))
+}
+
+fn normalize_message_content(content: &str) -> &str {
+    let bytes = content.as_bytes();
+    if bytes.len() >= 2 {
+        let first = bytes[0];
+        let last = bytes[bytes.len() - 1];
+        if first == b'"' && last == b'"' {
+            return &content[1..bytes.len() - 1];
+        }
+    }
+
+    content
 }
 
 async fn process_message_for_person<
@@ -547,8 +562,17 @@ async fn process_message_for_person<
         .await
         .map_err(Error::FailedToGetPersonsName)?;
 
-    let get_args: capability::event::GetArgs =
-        capability::event::GetArgs::new().with_person_uuid(person_uuid.clone());
+    let get_args: capability::event::GetArgs = match &message_type_args {
+        MessageTypeArgs::SceneByUuid { scene_uuid } => capability::event::GetArgs::new()
+            .with_person_uuid(person_uuid.clone())
+            .with_scene_uuid(scene_uuid.clone()),
+        MessageTypeArgs::Scene { .. } => {
+            capability::event::GetArgs::new().with_person_uuid(person_uuid.clone())
+        }
+        MessageTypeArgs::Direct { .. } => {
+            capability::event::GetArgs::new().with_person_uuid(person_uuid.clone())
+        }
+    };
 
     let events = worker
         .get_events(get_args)
@@ -557,6 +581,21 @@ async fn process_message_for_person<
         .iter()
         .map(|event| event.to_text())
         .collect::<Vec<String>>();
+
+    let recent_events = if events.is_empty() {
+        "None.".to_string()
+    } else {
+        events
+            .iter()
+            .rev()
+            .take(16)
+            .cloned()
+            .collect::<Vec<String>>()
+            .into_iter()
+            .rev()
+            .collect::<Vec<String>>()
+            .join("\n")
+    };
 
     let maybe_state_of_mind: Option<StateOfMind> = worker
         .get_latest_state_of_mind(&person_uuid)
@@ -582,7 +621,7 @@ async fn process_message_for_person<
         .map_err(Error::CouldNotCreateMemoriesPrompt)?;
 
     let memories: Vec<Memory> = worker
-        .search_memories(memories_prompt.prompt, 8)
+        .search_memories(person_uuid.clone(), memories_prompt.prompt, 8)
         .await
         .map_err(Error::FailedToSearchMemories)?
         .into_iter()
@@ -601,12 +640,14 @@ async fn process_message_for_person<
         })?,
     };
 
+    let reaction_situation = format!("{}\n\nRecent events:\n{}", situation, recent_events);
+
     worker
         .get_reaction(
             memories,
             person_identity,
             state_of_mind.content,
-            situation.to_string(),
+            reaction_situation,
         )
         .await
         .map_err(Error::GetPersonReactionError)

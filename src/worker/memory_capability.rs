@@ -7,6 +7,7 @@ use crate::capability::scene::SceneCapability;
 use crate::domain::memory_uuid::MemoryUuid;
 use crate::domain::message::MessageSender;
 use crate::domain::person_name::PersonName;
+use crate::domain::person_uuid::PersonUuid;
 use crate::nice_display::NiceDisplay;
 use crate::open_ai;
 use crate::open_ai::completion::Completion;
@@ -14,6 +15,7 @@ use crate::open_ai::embedding::EmbeddingRequest;
 use crate::open_ai::role::Role;
 use crate::open_ai::tool::{ToolFunction, ToolFunctionParameter};
 use crate::open_ai::tool_call::ToolCall;
+use sqlx::Row;
 
 impl MemoryCapability for Worker {
     async fn create_memory(&self, new_memory: NewMemory) -> Result<MemoryUuid, String> {
@@ -53,7 +55,7 @@ impl MemoryCapability for Worker {
         let mut completion = Completion::new(open_ai::model::Model::Gpt4p1);
         completion.add_message(
             Role::System,
-            "You decide whether a person should store a memory of a recent event. If the event is not meaningful or lasting, do not call any tool.",
+            "You decide whether a person should store a memory of a recent event. If the event is not meaningful or lasting, do not call any tool. When you do create a memory, write it in standardized, first-person language (e.g., \"I ...\").",
         );
 
         let user_prompt = format!(
@@ -68,7 +70,7 @@ impl MemoryCapability for Worker {
             "Store a memory if the event is worth remembering.".to_string(),
             vec![ToolFunctionParameter::StringParam {
                 name: "content".to_string(),
-                description: "The memory to store.".to_string(),
+                description: "The memory to store, written in standardized first-person language.".to_string(),
                 required: true,
             }],
         );
@@ -289,6 +291,7 @@ impl MemoryCapability for Worker {
 
     async fn search_memories(
         &self,
+        person_uuid: PersonUuid,
         query: String,
         limit: i64,
     ) -> Result<Vec<MemorySearchResult>, String> {
@@ -299,31 +302,46 @@ impl MemoryCapability for Worker {
             .map_err(|err| err.message())?;
 
         // Search for similar memories using vector similarity
-        let records = sqlx::query!(
+        let records = sqlx::query(
             r#"
                 SELECT
                     uuid,
                     content,
                     (embedding <=> $1::vector)::FLOAT AS distance
                 FROM memory
+                WHERE person_uuid = $2::UUID
                 ORDER BY embedding <=> $1::vector
-                LIMIT $2
+                LIMIT $3
             "#,
-            &query_embedding[..] as &[f32],
-            limit
         )
+        .bind(&query_embedding[..] as &[f32])
+        .bind(person_uuid.to_uuid())
+        .bind(limit)
         .fetch_all(&self.sqlx)
         .await
         .map_err(|err| format!("Error searching memories: {}", err))?;
 
-        Ok(records
-            .into_iter()
-            .map(|rec| MemorySearchResult {
-                memory_uuid: MemoryUuid::from_uuid(rec.uuid),
-                content: rec.content,
-                distance: rec.distance.unwrap_or(f64::MAX),
-            })
-            .collect())
+        let mut results = Vec::with_capacity(records.len());
+        for rec in records {
+            let uuid = rec
+                .try_get::<uuid::Uuid, _>("uuid")
+                .map_err(|err| format!("Error reading memory uuid: {}", err))?;
+            let content = rec
+                .try_get::<String, _>("content")
+                .map_err(|err| format!("Error reading memory content: {}", err))?;
+            let distance = rec
+                .try_get::<Option<f64>, _>("distance")
+                .map_err(|err| format!("Error reading memory distance: {}", err))?
+                .unwrap_or(f64::MAX);
+
+            results.push(MemorySearchResult {
+                memory_uuid: MemoryUuid::from_uuid(uuid),
+                content,
+                distance,
+            });
+        }
+
+        Ok(results)
     }
 }
 

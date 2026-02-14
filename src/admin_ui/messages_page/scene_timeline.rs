@@ -9,7 +9,6 @@ use crate::worker::Worker;
 use chrono::{DateTime, Utc};
 use iced::clipboard;
 use iced::widget::scrollable;
-use iced::Color;
 use iced::{widget as w, Element, Length, Task};
 use std::collections::{HashMap, HashSet};
 
@@ -158,21 +157,29 @@ impl Model {
                 content,
                 timestamp,
             } => {
+                let display_content = normalize_message_content(content);
                 let time_str = timestamp.format("%Y-%m-%d %H:%M:%S").to_string();
-                let header_color = s::GOLD_SOFT;
+                let is_you = sender_label == "You";
+                let name_color = if is_you { s::GREEN_SOFT } else { s::GOLD_SOFT };
                 let header_text = format!("[{}] {}", time_str, sender_label);
-                let copy_text = format!("{}\n{}", header_text, content);
+                let copy_text = format!("{}\n{}", header_text, display_content);
 
                 w::column![
                     w::row![
-                        w::text(header_text).size(s::S3).color(header_color),
+                        w::text(sender_label).size(s::S4).color(name_color),
+                    ]
+                    .spacing(s::S1),
+                    w::row![
+                        w::text(format!("[{}]", time_str))
+                            .size(s::S3)
+                            .color(s::GRAY_MID),
                         w::button(w::text("Copy").size(s::S3))
                             .style(w::button::text)
                             .padding(0)
                             .on_press(Msg::Copy(copy_text)),
                     ]
                     .spacing(s::S1),
-                    w::text(content),
+                    w::text(display_content),
                 ]
                 .spacing(s::S1)
                 .padding(s::S1)
@@ -216,6 +223,19 @@ impl Model {
             }
         }
     }
+}
+
+fn normalize_message_content(content: &str) -> &str {
+    let bytes = content.as_bytes();
+    if bytes.len() >= 2 {
+        let first = bytes[0];
+        let last = bytes[bytes.len() - 1];
+        if first == b'"' && last == b'"' {
+            return &content[1..bytes.len() - 1];
+        }
+    }
+
+    content
 }
 
 async fn person_label(

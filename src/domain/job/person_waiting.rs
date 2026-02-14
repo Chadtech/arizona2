@@ -239,7 +239,7 @@ impl PersonWaitingJob {
                 .map_err(Error::CouldNotCreateMemoriesPrompt)?;
 
             let memories: Vec<Memory> = worker
-                .search_memories(memories_prompt.prompt, 8)
+                .search_memories(person_uuid.clone(), memories_prompt.prompt, 8)
                 .await
                 .map_err(Error::FailedToSearchMemories)?
                 .into_iter()

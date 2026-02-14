@@ -371,7 +371,7 @@ async fn generate_prompt_and_search_memories(
     // Generate the prompt
     let prompt_result = worker
         .create_memory_query_prompt(
-            person_recalling,
+            person_recalling.clone(),
             message_type_args,
             recent_events,
             &state_of_mind,
@@ -380,8 +380,9 @@ async fn generate_prompt_and_search_memories(
         .await?;
 
     // Search for memories using the generated prompt
+    let person_uuid = worker.get_person_uuid_by_name(person_recalling).await?;
     let memories = worker
-        .search_memories(prompt_result.prompt.clone(), 10)
+        .search_memories(person_uuid, prompt_result.prompt.clone(), 10)
         .await?;
 
     Ok(MemoryQueryResult {

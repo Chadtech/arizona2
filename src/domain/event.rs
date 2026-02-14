@@ -19,14 +19,13 @@ impl Event {
         // TODO, add names to all these uuids so that the events can be human readable
         match &self.event_type {
             EventType::PersonSaidInScene {
-                scene_uuid,
+                scene_name,
+                speaker_name,
                 comment,
             } => {
                 format!(
-                    "At {}, in scene {}, someone said: {}",
-                    self.timestamp,
-                    scene_uuid.to_uuid(),
-                    comment
+                    "At {}, in scene {}, {} said: {}",
+                    self.timestamp, scene_name, speaker_name, comment
                 )
             }
             EventType::PersonDirectMessaged { sender, comment } => {
@@ -39,24 +38,26 @@ impl Event {
             }
             EventType::PersonJoinedScene {
                 person_uuid,
-                scene_uuid,
+                scene_uuid: _,
+                scene_name,
             } => {
                 format!(
                     "At {}, person {} joined scene {}",
                     self.timestamp,
                     person_uuid.to_uuid(),
-                    scene_uuid.to_uuid()
+                    scene_name
                 )
             }
             EventType::PersonLeftScene {
                 person_uuid,
-                scene_uuid,
+                scene_uuid: _,
+                scene_name,
             } => {
                 format!(
                     "At {}, person {} left scene {}",
                     self.timestamp,
                     person_uuid.to_uuid(),
-                    scene_uuid.to_uuid()
+                    scene_name
                 )
             }
         }
@@ -65,7 +66,8 @@ impl Event {
 
 pub enum EventType {
     PersonSaidInScene {
-        scene_uuid: SceneUuid,
+        scene_name: String,
+        speaker_name: String,
         comment: String,
     },
     PersonDirectMessaged {
@@ -75,9 +77,11 @@ pub enum EventType {
     PersonJoinedScene {
         person_uuid: PersonUuid,
         scene_uuid: SceneUuid,
+        scene_name: String,
     },
     PersonLeftScene {
         person_uuid: PersonUuid,
         scene_uuid: SceneUuid,
+        scene_name: String,
     },
 }

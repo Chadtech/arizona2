@@ -53,6 +53,7 @@ pub trait MemoryCapability: SceneCapability {
     ) -> Result<MemoryQueryPrompt, String>;
     async fn search_memories(
         &self,
+        person_uuid: PersonUuid,
         query: String,
         limit: i64,
     ) -> Result<Vec<MemorySearchResult>, String>;
