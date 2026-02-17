@@ -2,6 +2,7 @@ use crate::domain::message::{Message, MessageRecipient, MessageSender};
 use crate::domain::message_uuid::MessageUuid;
 use crate::domain::person_uuid::PersonUuid;
 use crate::domain::scene_uuid::SceneUuid;
+use chrono::{DateTime, Utc};
 
 pub struct NewMessage {
     pub sender: MessageSender,
@@ -24,6 +25,12 @@ pub trait MessageCapability {
         recipients: Vec<PersonUuid>,
     ) -> Result<(), String>;
     async fn get_messages_in_scene(&self, scene_uuid: &SceneUuid) -> Result<Vec<Message>, String>;
+    async fn get_messages_in_scene_page(
+        &self,
+        scene_uuid: &SceneUuid,
+        limit: i64,
+        before_sent_at: Option<DateTime<Utc>>,
+    ) -> Result<Vec<Message>, String>;
     async fn get_message_by_uuid(
         &self,
         message_uuid: &MessageUuid,

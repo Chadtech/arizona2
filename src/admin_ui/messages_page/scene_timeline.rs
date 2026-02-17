@@ -12,10 +12,19 @@ use iced::widget::scrollable;
 use iced::{widget as w, Element, Length, Task};
 use std::collections::{HashMap, HashSet};
 
+pub const MESSAGE_PAGE_SIZE: usize = 16;
+const LOAD_MORE_THRESHOLD: f32 = 0.05;
+
 #[derive(Debug, Clone)]
 pub struct Model {
     items: Vec<TimelineItem>,
     scrollable_id: scrollable::Id,
+    oldest_message_at: Option<DateTime<Utc>>,
+    loading_older: bool,
+    has_more_messages: bool,
+    seen_messages: HashSet<String>,
+    can_load_older: bool,
+    pending_content_height: Option<f32>,
 }
 
 #[derive(Debug, Clone)]
@@ -52,46 +61,40 @@ impl TimelineItem {
 #[derive(Debug, Clone)]
 pub enum Msg {
     Copy(String),
+    Scrolled(scrollable::Viewport),
+}
+
+#[derive(Debug, Clone)]
+pub struct LoadOlderResult {
+    pub items: Vec<TimelineItem>,
+    pub keys: Vec<String>,
+    pub oldest_message_at: Option<DateTime<Utc>>,
+    pub has_more: bool,
+}
+
+pub enum ScrollDecision {
+    None,
+    LoadOlder,
+    AdjustScroll(f32),
 }
 
 impl Model {
     pub async fn load(worker: &Worker, scene_uuid: SceneUuid) -> Result<Model, String> {
         let mut timeline_items = vec![];
-        let mut name_cache: HashMap<String, String> = HashMap::new();
-        let mut seen_messages: HashSet<String> = HashSet::new();
-        let messages = worker.get_messages_in_scene(&scene_uuid).await?;
+        let load_result = load_message_page(
+            worker,
+            scene_uuid.clone(),
+            MESSAGE_PAGE_SIZE,
+            None,
+            HashSet::new(),
+        )
+        .await?;
 
-        for message in messages {
-            let sender_key = match &message.sender {
-                MessageSender::AiPerson(uuid) => uuid.to_uuid().to_string(),
-                MessageSender::RealWorldUser => "real_world_user".to_string(),
-            };
-            let message_key = format!(
-                "{}|{}|{}",
-                sender_key,
-                message.content,
-                message.sent_at.timestamp()
-            );
-
-            if !seen_messages.insert(message_key) {
-                continue;
-            }
-
-            let sender_label = match &message.sender {
-                MessageSender::AiPerson(uuid) => {
-                    person_label(worker, &mut name_cache, uuid).await?
-                }
-                MessageSender::RealWorldUser => "You".to_string(),
-            };
-            timeline_items.push(TimelineItem::Message {
-                sender_label,
-                content: message.content,
-                timestamp: message.sent_at,
-            });
-        }
+        timeline_items.extend(load_result.items.iter().cloned());
 
         let participation = worker.get_scene_participation_history(&scene_uuid).await?;
 
+        let mut name_cache: HashMap<String, String> = HashMap::new();
         for event in participation {
             if let Some(left_at) = event.left_at {
                 let person_label =
@@ -117,17 +120,99 @@ impl Model {
         Ok(Model {
             items: timeline_items,
             scrollable_id: scrollable::Id::unique(),
+            oldest_message_at: load_result.oldest_message_at,
+            loading_older: false,
+            has_more_messages: load_result.has_more,
+            seen_messages: load_result.keys.into_iter().collect(),
+            can_load_older: true,
+            pending_content_height: None,
         })
     }
 
     pub fn update(&mut self, msg: Msg) -> Task<Msg> {
         match msg {
             Msg::Copy(contents) => clipboard::write(contents),
+            Msg::Scrolled(_) => Task::none(),
         }
     }
 
     pub fn scroll_to_bottom(&self) -> Task<Msg> {
         scrollable::snap_to(self.scrollable_id.clone(), scrollable::RelativeOffset::END)
+    }
+
+    pub fn oldest_message_at(&self) -> Option<DateTime<Utc>> {
+        self.oldest_message_at
+    }
+
+    pub fn handle_scroll(&mut self, viewport: scrollable::Viewport) -> ScrollDecision {
+        if let Some(previous_height) = self.pending_content_height {
+            self.pending_content_height = None;
+            let delta = viewport.content_bounds().height - previous_height;
+            if delta > 0.0 {
+                return ScrollDecision::AdjustScroll(delta);
+            }
+        }
+
+        let relative_offset = viewport.relative_offset();
+        if relative_offset.y > LOAD_MORE_THRESHOLD {
+            self.can_load_older = true;
+            return ScrollDecision::None;
+        }
+
+        if self.loading_older || !self.has_more_messages || !self.can_load_older {
+            return ScrollDecision::None;
+        }
+
+        self.can_load_older = false;
+        self.pending_content_height = Some(viewport.content_bounds().height);
+        ScrollDecision::LoadOlder
+    }
+
+    pub fn mark_loading_older(&mut self) {
+        self.loading_older = true;
+    }
+
+    pub fn apply_older_messages(&mut self, result: LoadOlderResult) {
+        self.loading_older = false;
+        self.has_more_messages = result.has_more;
+        if result.items.is_empty() {
+            self.has_more_messages = false;
+        }
+
+        for key in result.keys {
+            self.seen_messages.insert(key);
+        }
+
+        self.items.extend(result.items);
+        self.items.sort_by_key(|item| item.posix_timestamp());
+
+        if let Some(oldest) = result.oldest_message_at {
+            match self.oldest_message_at {
+                Some(current) => {
+                    if oldest < current {
+                        self.oldest_message_at = Some(oldest);
+                    }
+                }
+                None => {
+                    self.oldest_message_at = Some(oldest);
+                }
+            }
+        }
+    }
+
+    pub fn finish_loading_older_error(&mut self) {
+        self.loading_older = false;
+    }
+
+    pub fn seen_message_keys(&self) -> HashSet<String> {
+        self.seen_messages.clone()
+    }
+
+    pub fn scroll_by(&self, delta: f32) -> Task<Msg> {
+        scrollable::scroll_by(
+            self.scrollable_id.clone(),
+            scrollable::AbsoluteOffset { x: 0.0, y: delta },
+        )
     }
 
     pub fn view(&self) -> Element<'_, Msg> {
@@ -144,6 +229,7 @@ impl Model {
 
             w::scrollable(timeline)
                 .id(self.scrollable_id.clone())
+                .on_scroll(Msg::Scrolled)
                 .width(Length::Fill)
                 .height(Length::Fixed(s::LIST_HEIGHT))
                 .into()
@@ -225,6 +311,22 @@ impl Model {
     }
 }
 
+pub async fn load_older_messages(
+    worker: &Worker,
+    scene_uuid: SceneUuid,
+    before: DateTime<Utc>,
+    known_keys: HashSet<String>,
+) -> Result<LoadOlderResult, String> {
+    load_message_page(
+        worker,
+        scene_uuid,
+        MESSAGE_PAGE_SIZE,
+        Some(before),
+        known_keys,
+    )
+    .await
+}
+
 fn normalize_message_content(content: &str) -> &str {
     let bytes = content.as_bytes();
     if bytes.len() >= 2 {
@@ -236,6 +338,74 @@ fn normalize_message_content(content: &str) -> &str {
     }
 
     content
+}
+
+async fn load_message_page(
+    worker: &Worker,
+    scene_uuid: SceneUuid,
+    limit: usize,
+    before: Option<DateTime<Utc>>,
+    known_keys: HashSet<String>,
+) -> Result<LoadOlderResult, String> {
+    let mut name_cache: HashMap<String, String> = HashMap::new();
+    let mut items = Vec::new();
+    let mut keys = Vec::new();
+    let mut oldest_message_at: Option<DateTime<Utc>> = None;
+
+    let messages = worker
+        .get_messages_in_scene_page(&scene_uuid, limit as i64, before)
+        .await?;
+
+    for message in messages.iter() {
+        let message_key = message_key(message);
+        if known_keys.contains(&message_key) {
+            continue;
+        }
+
+        let sender_label = match &message.sender {
+            MessageSender::AiPerson(uuid) => person_label(worker, &mut name_cache, uuid).await?,
+            MessageSender::RealWorldUser => "You".to_string(),
+        };
+
+        items.push(TimelineItem::Message {
+            sender_label,
+            content: message.content.clone(),
+            timestamp: message.sent_at,
+        });
+        keys.push(message_key);
+
+        oldest_message_at = match oldest_message_at {
+            Some(oldest) => {
+                if message.sent_at < oldest {
+                    Some(message.sent_at)
+                } else {
+                    Some(oldest)
+                }
+            }
+            None => Some(message.sent_at),
+        };
+    }
+
+    Ok(LoadOlderResult {
+        items,
+        keys,
+        oldest_message_at,
+        has_more: messages.len() == limit,
+    })
+}
+
+fn message_key(message: &crate::domain::message::Message) -> String {
+    let sender_key = match &message.sender {
+        MessageSender::AiPerson(uuid) => uuid.to_uuid().to_string(),
+        MessageSender::RealWorldUser => "real_world_user".to_string(),
+    };
+
+    format!(
+        "{}|{}|{}",
+        sender_key,
+        message.content,
+        message.sent_at.timestamp()
+    )
 }
 
 async fn person_label(

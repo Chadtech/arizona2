@@ -452,6 +452,15 @@ mod tests {
             Ok(vec![])
         }
 
+        async fn get_messages_in_scene_page(
+            &self,
+            _scene_uuid: &SceneUuid,
+            _limit: i64,
+            _before_sent_at: Option<chrono::DateTime<chrono::Utc>>,
+        ) -> Result<Vec<Message>, String> {
+            Ok(vec![])
+        }
+
         async fn get_message_by_uuid(
             &self,
             _message_uuid: &MessageUuid,

@@ -1,9 +1,11 @@
 use super::Worker;
+use crate::capability::log_event::LogEventCapability;
 use crate::capability::memory::{
     MemoryCapability, MemoryQueryPrompt, MemorySearchResult, MessageTypeArgs, NewMemory,
 };
 use crate::capability::person::PersonCapability;
 use crate::capability::scene::SceneCapability;
+use crate::domain::logger::Level;
 use crate::domain::memory_uuid::MemoryUuid;
 use crate::domain::message::MessageSender;
 use crate::domain::person_name::PersonName;
@@ -70,7 +72,8 @@ impl MemoryCapability for Worker {
             "Store a memory if the event is worth remembering.".to_string(),
             vec![ToolFunctionParameter::StringParam {
                 name: "content".to_string(),
-                description: "The memory to store, written in standardized first-person language.".to_string(),
+                description: "The memory to store, written in standardized first-person language."
+                    .to_string(),
                 required: true,
             }],
         );
@@ -83,7 +86,10 @@ impl MemoryCapability for Worker {
         let tool_calls = response.maybe_tool_calls().map_err(|err| err.message())?;
 
         let new_memories: Vec<String> = match tool_calls {
-            None => vec![],
+            None => {
+                log_memory_decision(self, None).await;
+                vec![]
+            }
             Some(tool_calls) => extract_memory_content(tool_calls)?,
         };
 
@@ -96,6 +102,8 @@ impl MemoryCapability for Worker {
             };
 
             let memory_uuid = self.create_memory(new_memory).await?;
+
+            log_memory_decision(self, Some(&memory_uuid)).await;
 
             ret.push(memory_uuid);
         }
@@ -345,6 +353,25 @@ impl MemoryCapability for Worker {
     }
 }
 
+async fn log_memory_decision(worker: &Worker, memory_uuid: Option<&MemoryUuid>) {
+    let data = match memory_uuid {
+        Some(uuid) => serde_json::json!({
+            "created": true,
+            "memory_uuid": uuid.to_uuid().to_string(),
+        }),
+        None => serde_json::json!({ "created": false }),
+    };
+
+    if let Err(err) = worker
+        .log_event("memory_decision".to_string(), Some(data))
+        .await
+    {
+        worker.logger.log(
+            Level::Warning,
+            &format!("Failed to log memory decision: {}", err),
+        );
+    }
+}
 fn extract_memory_content(tool_calls: Vec<ToolCall>) -> Result<Vec<String>, String> {
     let mut ret = vec![];
 

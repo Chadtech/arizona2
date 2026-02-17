@@ -25,6 +25,8 @@ This is a Rust workspace with source in `src/`. Core areas include:
 - Prefer explicit error types that implement `NiceDisplay` (`src/nice_display.rs`).
 - Avoid `unwrap`/`expect` and placeholder `unwrap_or_else` defaults; return errors instead.
 - Avoid `matches!`; use explicit `match` statements instead.
+- Prefer deriving values from existing data instead of storing redundant state; avoid duplicated sources of truth unless there is a clear, documented reason.
+- Use UUID v7 for new IDs (e.g., `Uuid::now_v7()`), unless a legacy table dictates otherwise.
 - Keep modules focused; place domain logic in `src/domain/` and IO in capabilities.
 - For admin UI colors, define and reuse constants in `src/admin_ui/style.rs`; avoid inline color literals.
 - Color naming uses `COLOR_DEPTH` (e.g., `GRAY_VERY_SOFT`, `GOLD_SOFT`, `GRAY_DEEP`).

@@ -82,6 +82,7 @@ pub enum Msg {
     LoadScene,
     SceneLoaded(Result<Option<Scene>, String>),
     TimelineLoaded(Result<scene_timeline::Model, String>),
+    OlderMessagesLoaded(Result<scene_timeline::LoadOlderResult, String>),
     MessageInputChanged(String),
     SubmitMessage,
     MessageSent(Result<(), String>),
@@ -205,6 +206,21 @@ impl Model {
                 }
                 Task::none()
             }
+            Msg::OlderMessagesLoaded(result) => {
+                if let SceneLoadStatus::Loaded(loaded_scene) = &mut self.scene_load_status {
+                    if let MessagesStatus::Loaded(timeline_model) = &mut loaded_scene.messages {
+                        match result {
+                            Ok(load_result) => {
+                                timeline_model.apply_older_messages(load_result);
+                            }
+                            Err(_) => {
+                                timeline_model.finish_loading_older_error();
+                            }
+                        }
+                    }
+                }
+                Task::none()
+            }
             Msg::MessageInputChanged(content) => {
                 self.message_input = content;
                 self.send_status = SendStatus::Ready;
@@ -277,7 +293,39 @@ impl Model {
             Msg::GotTimelineMsg(sub_msg) => {
                 if let SceneLoadStatus::Loaded(loaded_scene) = &mut self.scene_load_status {
                     if let MessagesStatus::Loaded(timeline_model) = &mut loaded_scene.messages {
-                        return timeline_model.update(sub_msg).map(Msg::GotTimelineMsg);
+                        match sub_msg {
+                            scene_timeline::Msg::Copy(_) => {
+                                return timeline_model.update(sub_msg).map(Msg::GotTimelineMsg);
+                            }
+                            scene_timeline::Msg::Scrolled(viewport) => {
+                                match timeline_model.handle_scroll(viewport) {
+                                    scene_timeline::ScrollDecision::None => {}
+                                    scene_timeline::ScrollDecision::AdjustScroll(delta) => {
+                                        return timeline_model.scroll_by(delta).map(Msg::GotTimelineMsg);
+                                    }
+                                    scene_timeline::ScrollDecision::LoadOlder => {
+                                        let before = timeline_model.oldest_message_at();
+                                        if let Some(before) = before {
+                                            timeline_model.mark_loading_older();
+                                            let scene_uuid = loaded_scene.uuid.clone();
+                                            let known_keys = timeline_model.seen_message_keys();
+                                            return Task::perform(
+                                                async move {
+                                                    scene_timeline::load_older_messages(
+                                                        &worker,
+                                                        scene_uuid,
+                                                        before,
+                                                        known_keys,
+                                                    )
+                                                    .await
+                                                },
+                                                Msg::OlderMessagesLoaded,
+                                            );
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
                 Task::none()

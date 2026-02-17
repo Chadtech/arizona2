@@ -1,5 +1,6 @@
 pub mod event;
 pub mod job;
+pub mod log_event;
 pub mod memory;
 pub mod message;
 pub mod person;
