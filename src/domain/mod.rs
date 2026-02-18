@@ -1,5 +1,7 @@
 pub mod actor_uuid;
 pub mod event;
+pub mod goal;
+pub mod goal_uuid;
 pub mod job;
 pub mod job_uuid;
 pub mod logger;

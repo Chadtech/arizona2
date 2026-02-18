@@ -57,7 +57,7 @@ impl MemoryCapability for Worker {
         let mut completion = Completion::new(open_ai::model::Model::Gpt4p1);
         completion.add_message(
             Role::System,
-            "You decide whether a person should store a memory of a recent event. If the event is not meaningful or lasting, do not call any tool. When you do create a memory, write it in standardized, first-person language (e.g., \"I ...\").",
+            "You decide whether a person should store a memory of a recent event. Be conservative: only store memories that are useful, relevant to goals, emotionally significant, or important to relationships. If the event is not meaningful or lasting, do not call any tool. When you do create a memory, write it in standardized, first-person language (e.g., \"I ...\").",
         );
 
         let user_prompt = format!(
@@ -95,6 +95,12 @@ impl MemoryCapability for Worker {
 
         let mut ret = vec![];
         for memory_content in new_memories.into_iter() {
+            let is_distinct = is_memory_distinct(self, &person_uuid, &memory_content).await?;
+            if !is_distinct {
+                log_memory_decision(self, None).await;
+                continue;
+            }
+
             let new_memory = NewMemory {
                 memory_uuid: MemoryUuid::new(),
                 content: memory_content,
@@ -353,6 +359,8 @@ impl MemoryCapability for Worker {
     }
 }
 
+const MIN_MEMORY_DISTANCE: f64 = 0.15;
+
 async fn log_memory_decision(worker: &Worker, memory_uuid: Option<&MemoryUuid>) {
     let data = match memory_uuid {
         Some(uuid) => serde_json::json!({
@@ -371,6 +379,22 @@ async fn log_memory_decision(worker: &Worker, memory_uuid: Option<&MemoryUuid>) 
             &format!("Failed to log memory decision: {}", err),
         );
     }
+}
+
+async fn is_memory_distinct(
+    worker: &Worker,
+    person_uuid: &PersonUuid,
+    content: &str,
+) -> Result<bool, String> {
+    let matches = worker
+        .search_memories(person_uuid.clone(), content.to_string(), 1)
+        .await?;
+
+    if matches.is_empty() {
+        return Ok(true);
+    }
+
+    Ok(matches[0].distance > MIN_MEMORY_DISTANCE)
 }
 fn extract_memory_content(tool_calls: Vec<ToolCall>) -> Result<Vec<String>, String> {
     let mut ret = vec![];
