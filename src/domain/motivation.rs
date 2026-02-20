@@ -1,10 +1,10 @@
-use crate::domain::goal_uuid::GoalUuid;
+use crate::domain::motivation_uuid::MotivationUuid;
 use crate::domain::person_uuid::PersonUuid;
 use chrono::{DateTime, Utc};
 
 #[derive(Clone, Debug)]
-pub struct Goal {
-    pub uuid: GoalUuid,
+pub struct Motivation {
+    pub uuid: MotivationUuid,
     pub person_uuid: PersonUuid,
     pub content: String,
     pub priority: i32,

@@ -1,9 +1,9 @@
 use uuid::Uuid;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct GoalUuid(Uuid);
+pub struct MotivationUuid(Uuid);
 
-impl GoalUuid {
+impl MotivationUuid {
     pub fn new() -> Self {
         Self(Uuid::now_v7())
     }

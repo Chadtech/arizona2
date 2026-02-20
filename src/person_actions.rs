@@ -9,6 +9,28 @@ pub enum PersonActionKind {
     SayInScene,
 }
 
+#[derive(Debug, Clone)]
+pub enum ReflectionDecision {
+    Reflection,
+    NoReflection,
+}
+
+impl ReflectionDecision {
+    pub fn to_name(&self) -> String {
+        match self {
+            ReflectionDecision::Reflection => "reflection".to_string(),
+            ReflectionDecision::NoReflection => "no_reflection".to_string(),
+        }
+    }
+
+    pub fn all_names() -> Vec<String> {
+        vec![
+            ReflectionDecision::NoReflection.to_name(),
+            ReflectionDecision::Reflection.to_name(),
+        ]
+    }
+}
+
 impl PersonActionKind {
     pub fn to_name(&self) -> String {
         match self {
@@ -28,6 +50,12 @@ impl PersonActionKind {
 
     pub fn to_choice_tool() -> Tool {
         let parameters = vec![
+            ToolFunctionParameter::StringEnumParam {
+                name: "reflection".to_string(),
+                description: "Whether the person should reflect after acting.".to_string(),
+                required: true,
+                values: ReflectionDecision::all_names(),
+            },
             ToolFunctionParameter::StringEnumParam {
                 name: "action".to_string(),
                 description: "The single action to take.".to_string(),
@@ -61,6 +89,12 @@ pub enum PersonAction {
     SayInScene { comment: String },
 }
 
+#[derive(Debug, Clone)]
+pub struct PersonReaction {
+    pub action: PersonAction,
+    pub reflection: ReflectionDecision,
+}
+
 impl Into<CompletionError> for PersonActionError {
     fn into(self) -> CompletionError {
         CompletionError::PersonActionError(self)
@@ -84,6 +118,9 @@ pub enum PersonActionError {
         action_name: String,
         parameter_name: String,
         wanted_type: String,
+    },
+    UnrecognizedReflection {
+        reflection_name: String,
     },
 }
 
@@ -115,11 +152,14 @@ impl NiceDisplay for PersonActionError {
                 "Unexpected type for parameter '{}' in action '{}'. Expected type: {}",
                 parameter_name, action_name, wanted_type
             ),
+            PersonActionError::UnrecognizedReflection { reflection_name } => {
+                format!("Unrecognized reflection value: {}", reflection_name)
+            }
         }
     }
 }
 
-impl PersonAction {
+impl PersonReaction {
     pub fn from_open_ai_tool_call(tool_call: ToolCall) -> Result<Self, PersonActionError> {
         let tool_call_name = tool_call.name;
         if tool_call_name.as_str() != "choose_action" {
@@ -128,12 +168,16 @@ impl PersonAction {
             });
         }
 
+        let mut maybe_reflection: Option<String> = None;
         let mut maybe_action: Option<String> = None;
         let mut maybe_comment: Option<String> = None;
         let mut maybe_duration: Option<u64> = None;
 
         for (key, value) in tool_call.arguments {
             match key.as_str() {
+                "reflection" => {
+                    maybe_reflection = value.as_str().map(|s| s.to_string());
+                }
                 "action" => {
                     maybe_action = value.as_str().map(|s| s.to_string());
                 }
@@ -160,18 +204,32 @@ impl PersonAction {
             }
         }
 
+        let reflection = match maybe_reflection {
+            Some(value) => match value.as_str() {
+                "reflection" => ReflectionDecision::Reflection,
+                "no_reflection" => ReflectionDecision::NoReflection,
+                _ => Err(PersonActionError::UnrecognizedReflection {
+                    reflection_name: value,
+                })?,
+            },
+            None => Err(PersonActionError::ParameterMissing {
+                action_name: tool_call_name.clone(),
+                parameter_name: "reflection".to_string(),
+            })?,
+        };
+
         let action = maybe_action.ok_or_else(|| PersonActionError::ParameterMissing {
             action_name: tool_call_name.clone(),
             parameter_name: "action".to_string(),
         })?;
 
-        match action.as_str() {
+        let action = match action.as_str() {
             "say in scene" => {
                 let comment = maybe_comment.ok_or_else(|| PersonActionError::ParameterMissing {
                     action_name: tool_call_name.clone(),
                     parameter_name: "comment".to_string(),
                 })?;
-                Ok(PersonAction::SayInScene { comment })
+                PersonAction::SayInScene { comment }
             }
             "wait" => {
                 let duration =
@@ -179,12 +237,14 @@ impl PersonAction {
                         action_name: tool_call_name.clone(),
                         parameter_name: "duration".to_string(),
                     })?;
-                Ok(PersonAction::Wait { duration })
+                PersonAction::Wait { duration }
             }
-            "idle" => Ok(PersonAction::Idle),
+            "idle" => PersonAction::Idle,
             _ => Err(PersonActionError::UnrecognizedAction {
                 action_name: action,
-            }),
-        }
+            })?,
+        };
+
+        Ok(PersonReaction { action, reflection })
     }
 }

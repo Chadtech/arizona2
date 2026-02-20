@@ -2,7 +2,7 @@ use crate::open_ai;
 use crate::open_ai::completion::{Completion, CompletionError};
 use crate::open_ai::role::Role;
 use crate::open_ai_key::OpenAiKey;
-use crate::person_actions::{PersonAction, PersonActionError, PersonActionKind};
+use crate::person_actions::{PersonActionError, PersonActionKind, PersonReaction};
 
 pub async fn submit_prompt(
     open_ai_key: OpenAiKey,
@@ -23,7 +23,7 @@ pub async fn submit_reaction(
     person_identity: String,
     situation: String,
     state_of_mind: String,
-) -> Result<Vec<PersonAction>, CompletionError> {
+) -> Result<Vec<PersonReaction>, CompletionError> {
     let mut completion = Completion::new(open_ai::model::Model::DEFAULT);
 
     completion.add_message(Role::System, "You are a person simulation framework. You have deep insights into the human mind and are very good at predicting people's reactions. When given a description of a person, their state of mind, and some of their recent memories, respond as the person would in the given situation.");
@@ -58,8 +58,8 @@ pub async fn submit_reaction(
 
     let person_actions = tool_calls
         .into_iter()
-        .map(|tool_call| PersonAction::from_open_ai_tool_call(tool_call))
-        .collect::<Result<Vec<PersonAction>, PersonActionError>>()
+        .map(|tool_call| PersonReaction::from_open_ai_tool_call(tool_call))
+        .collect::<Result<Vec<PersonReaction>, PersonActionError>>()
         .map_err(Into::into)?;
 
     Ok(person_actions)

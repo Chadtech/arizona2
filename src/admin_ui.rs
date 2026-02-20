@@ -1,5 +1,5 @@
 mod call;
-mod goal_page;
+mod motivation_page;
 mod job_page;
 mod memory_page;
 mod messages_page;
@@ -33,7 +33,7 @@ struct Model {
     new_identity_page: new_identity_page::Model,
     new_person_page: new_person_page::Model,
     memory_page: memory_page::Model,
-    goal_page: goal_page::Model,
+    motivation_page: motivation_page::Model,
     messages_page: messages_page::Model,
     state_of_mind_page: state_of_mind_page::Model,
     scene_page: scene_page::Model,
@@ -53,7 +53,7 @@ impl Model {
             new_identity: self.new_identity_page.to_storage(),
             new_person: self.new_person_page.to_storage(),
             memory: self.memory_page.to_storage(),
-            goal: self.goal_page.to_storage(),
+            motivation: self.motivation_page.to_storage(),
             messages: self.messages_page.to_storage(),
             state_of_mind: self.state_of_mind_page.to_storage(),
             scene: self.scene_page.to_storage(),
@@ -81,8 +81,8 @@ struct Storage {
     new_person: new_person_page::Storage,
     #[serde(default)]
     memory: memory_page::Storage,
-    #[serde(default)]
-    goal: goal_page::Storage,
+    #[serde(default, alias = "goal")]
+    motivation: motivation_page::Storage,
     #[serde(default)]
     messages: messages_page::Storage,
     #[serde(default)]
@@ -136,7 +136,7 @@ impl Storage {
             new_identity: new_identity_page::Storage::default(),
             new_person: new_person_page::Storage::default(),
             memory: memory_page::Storage::default(),
-            goal: goal_page::Storage::default(),
+            motivation: motivation_page::Storage::default(),
             messages: messages_page::Storage::default(),
             state_of_mind: state_of_mind_page::Storage::default(),
             scene: scene_page::Storage::default(),
@@ -153,7 +153,8 @@ enum Tab {
     Identity,
     Person,
     Memory,
-    Goal,
+    #[serde(alias = "Goal")]
+    Motivation,
     Messages,
     StateOfMind,
     Scene,
@@ -168,7 +169,7 @@ impl Tab {
             Tab::Identity => "Identity".to_string(),
             Tab::Person => "Person".to_string(),
             Tab::Memory => "Memory".to_string(),
-            Tab::Goal => "Goal".to_string(),
+            Tab::Motivation => "Motivation".to_string(),
             Tab::Messages => "Messages".to_string(),
             Tab::StateOfMind => "State of Mind".to_string(),
             Tab::Scene => "Scene".to_string(),
@@ -183,7 +184,7 @@ impl Tab {
             Tab::Identity,
             Tab::Person,
             Tab::Memory,
-            Tab::Goal,
+            Tab::Motivation,
             Tab::Messages,
             Tab::StateOfMind,
             Tab::Scene,
@@ -233,7 +234,7 @@ enum Msg {
     NewIdentityPageMsg(new_identity_page::Msg),
     NewPersonPageMsg(new_person_page::Msg),
     MemoryPageMsg(memory_page::Msg),
-    GoalPageMsg(goal_page::Msg),
+    MotivationPageMsg(motivation_page::Msg),
     MessagesPageMsg(messages_page::Msg),
     StateOfMindPageMsg(state_of_mind_page::Msg),
     SceneMsg(scene_page::Msg),
@@ -286,7 +287,7 @@ impl Model {
             new_identity_page: new_identity_page::Model::new(&flags.storage.new_identity),
             new_person_page: new_person_page::Model::new(&flags.storage.new_person),
             memory_page: memory_page::Model::new(&flags.storage.memory),
-            goal_page: goal_page::Model::new(&flags.storage.goal),
+            motivation_page: motivation_page::Model::new(&flags.storage.motivation),
             messages_page: messages_page::Model::new(&flags.storage.messages),
             scene_page: scene_page::Model::new(&flags.storage.scene),
             job_page: job_page::Model::new(&flags.storage.job),
@@ -381,14 +382,14 @@ impl Model {
 
                 task.map(Msg::MemoryPageMsg)
             }
-            Msg::GoalPageMsg(sub_msg) => {
-                let task = self.goal_page.update(self.worker.clone(), sub_msg);
+            Msg::MotivationPageMsg(sub_msg) => {
+                let task = self.motivation_page.update(self.worker.clone(), sub_msg);
 
                 if let Err(err) = self.to_storage().save_to_file_system() {
                     self.error = Some(err);
                 }
 
-                task.map(Msg::GoalPageMsg)
+                task.map(Msg::MotivationPageMsg)
             }
             Msg::MessagesPageMsg(sub_msg) => {
                 let task = self.messages_page.update(self.worker.clone(), sub_msg);
@@ -535,7 +536,10 @@ impl Model {
             Tab::Identity => self.new_identity_page.view().map(Msg::NewIdentityPageMsg),
             Tab::Person => self.new_person_page.view().map(Msg::NewPersonPageMsg),
             Tab::Memory => self.memory_page.view().map(Msg::MemoryPageMsg),
-            Tab::Goal => self.goal_page.view().map(Msg::GoalPageMsg),
+            Tab::Motivation => self
+                .motivation_page
+                .view()
+                .map(Msg::MotivationPageMsg),
             Tab::Messages => self.messages_page.view().map(Msg::MessagesPageMsg),
             Tab::StateOfMind => self.state_of_mind_page.view().map(Msg::StateOfMindPageMsg),
             Tab::Scene => self.scene_page.view().map(Msg::SceneMsg),

@@ -15,7 +15,7 @@ use crate::domain::person_uuid::PersonUuid;
 use crate::domain::random_seed::RandomSeed;
 use crate::domain::scene_uuid::SceneUuid;
 use crate::domain::state_of_mind::StateOfMind;
-use crate::person_actions::PersonAction;
+use crate::person_actions::{PersonAction, PersonReaction};
 use crate::{
     capability::{message::MessageCapability, scene::SceneCapability},
     domain::message_uuid::MessageUuid,
@@ -260,7 +260,7 @@ impl ProcessMessageJob {
                     build_scene_situation(worker, scene_uuid, &pending_messages, person_uuid)
                         .await?;
 
-                let action = process_message_for_person(
+                let reaction = process_message_for_person(
                     worker,
                     MessageTypeArgs::SceneByUuid {
                         scene_uuid: scene_uuid.clone(),
@@ -269,6 +269,8 @@ impl ProcessMessageJob {
                     person_uuid,
                 )
                 .await?;
+
+                let action = reaction.action;
 
                 person_action_handler::handle_person_action(
                     worker,
@@ -308,7 +310,7 @@ impl ProcessMessageJob {
             (Some(person_uuid), None) => {
                 let situation = build_direct_situation(worker, &message).await?;
 
-                let action = process_message_for_person(
+                let reaction = process_message_for_person(
                     worker,
                     MessageTypeArgs::Direct {
                         from: message.sender.clone(),
@@ -317,6 +319,8 @@ impl ProcessMessageJob {
                     person_uuid,
                 )
                 .await?;
+
+                let action = reaction.action;
 
                 person_action_handler::handle_person_action(
                     worker,
@@ -530,7 +534,7 @@ async fn process_message_for_person<
     message_type_args: MessageTypeArgs,
     situation: &String,
     person_uuid: &PersonUuid,
-) -> Result<PersonAction, Error> {
+) -> Result<PersonReaction, Error> {
     let persons_name: PersonName = worker
         .get_persons_name(person_uuid.clone())
         .await
@@ -616,7 +620,7 @@ async fn process_message_for_person<
 
     let reaction_situation = format!("{}\n\nRecent events:\n{}", situation, recent_events);
 
-    worker
+    let reaction = worker
         .get_reaction(
             memories,
             person_uuid.clone(),
@@ -625,5 +629,7 @@ async fn process_message_for_person<
             reaction_situation,
         )
         .await
-        .map_err(Error::GetPersonReactionError)
+        .map_err(Error::GetPersonReactionError)?;
+
+    Ok(reaction)
 }

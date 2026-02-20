@@ -2,7 +2,7 @@ use super::call;
 use super::style as s;
 use crate::nice_display::NiceDisplay;
 use crate::open_ai::completion::CompletionError;
-use crate::person_actions::PersonAction;
+use crate::person_actions::PersonReaction;
 use crate::worker::Worker;
 use iced::{widget as w, Element, Task};
 use serde::{Deserialize, Serialize};
@@ -18,7 +18,7 @@ pub struct Model {
 
 enum ReactionStatus {
     Ready,
-    Response(Vec<PersonAction>),
+    Response(Vec<PersonReaction>),
     Error(CompletionError),
 }
 
@@ -45,7 +45,7 @@ pub enum Msg {
     ClickedSubmitReaction,
     SituationFieldChanged(String),
     StateOfMindFieldChanged(String),
-    ReactionSubmissionResult(Result<Vec<PersonAction>, CompletionError>),
+    ReactionSubmissionResult(Result<Vec<PersonReaction>, CompletionError>),
 }
 
 impl Model {
@@ -149,7 +149,9 @@ impl Model {
             ReactionStatus::Response(response) => w::Column::with_children(
                 response
                     .iter()
-                    .map(|action| w::text(format!("Action: {:#?}", action)).into())
+                    .map(|reaction| {
+                        w::text(format!("Reaction: {:#?}", reaction)).into()
+                    })
                     .collect::<Vec<_>>(),
             )
             .into(),

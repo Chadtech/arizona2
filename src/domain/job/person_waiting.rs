@@ -233,7 +233,7 @@ impl PersonWaitingJob {
                 })?,
             };
 
-            let action = worker
+            let reaction = worker
                 .get_reaction(
                     memories,
                     person_uuid.clone(),
@@ -243,6 +243,8 @@ impl PersonWaitingJob {
                 )
                 .await
                 .map_err(Error::GetPersonReactionError)?;
+
+            let action = reaction.action;
 
             person_action_handler::handle_person_action(
                 worker,

@@ -1,4 +1,4 @@
-use crate::capability::goal::GoalCapability;
+use crate::capability::motivation::MotivationCapability;
 use crate::capability::reaction::ReactionCapability;
 use crate::domain::logger::Level;
 use crate::domain::memory::Memory;
@@ -8,14 +8,16 @@ use crate::open_ai;
 use crate::open_ai::completion::{Completion, CompletionError};
 use crate::open_ai::role::Role;
 use crate::open_ai::tool_call::ToolCall;
-use crate::person_actions::{PersonAction, PersonActionError, PersonActionKind};
+use crate::person_actions::{
+    PersonAction, PersonActionError, PersonActionKind, PersonReaction, ReflectionDecision,
+};
 use crate::worker::Worker;
 
 pub enum Error {
     CompletionError(CompletionError),
-    FailedToGetGoals(String),
+    FailedToGetMotivations(String),
     NoPersonActionFound,
-    MoreThanOnePersonActionFound(Vec<PersonAction>),
+    MoreThanOnePersonActionFound(Vec<PersonReaction>),
 }
 
 impl ReactionCapability for Worker {
@@ -26,7 +28,7 @@ impl ReactionCapability for Worker {
         person_identity: String,
         state_of_mind: String,
         situation: String,
-    ) -> Result<PersonAction, String> {
+    ) -> Result<PersonReaction, String> {
         get_reaction_helper(
             self,
             memories,
@@ -38,7 +40,7 @@ impl ReactionCapability for Worker {
         .await
         .map_err(|err| match err {
             Error::CompletionError(completion_err) => completion_err.message(),
-            Error::FailedToGetGoals(message) => message,
+            Error::FailedToGetMotivations(message) => message,
             Error::NoPersonActionFound => "No person action found".to_string(),
             Error::MoreThanOnePersonActionFound(actions) => {
                 let actions_str = actions
@@ -59,7 +61,7 @@ async fn get_reaction_helper(
     person_identity: String,
     state_of_mind: String,
     situation: String,
-) -> Result<PersonAction, Error> {
+) -> Result<PersonReaction, Error> {
     let mut completion = Completion::new(open_ai::model::Model::DEFAULT);
 
     completion.add_message(Role::System, "You are a person simulation framework. You have deep insights into the human mind and are very good at predicting people's reactions to given situations. When given a description of a person, their state of mind, and some of their recent memories, respond as the person would in this situation by choosing exactly one tool call.");
@@ -70,24 +72,29 @@ async fn get_reaction_helper(
         .collect::<Vec<String>>()
         .join("\n");
 
-    let goals = worker
-        .get_goals_for_person(person_uuid)
+    let motivations = worker
+        .get_motivations_for_person(person_uuid.clone())
         .await
-        .map_err(Error::FailedToGetGoals)?;
+        .map_err(Error::FailedToGetMotivations)?;
 
-    let goals_list = if goals.is_empty() {
+    let motivations_list = if motivations.is_empty() {
         "None.".to_string()
     } else {
-        goals
+        motivations
             .iter()
-            .map(|goal| format!("- (priority {}) {}", goal.priority, goal.content))
+            .map(|motivation| {
+                format!(
+                    "- (priority {}) {}",
+                    motivation.priority, motivation.content
+                )
+            })
             .collect::<Vec<String>>()
             .join("\n")
     };
 
     let user_prompt = format!(
-        "Predict how this person would realistically and accurately behave in the situation, then choose exactly one action tool call that best matches that behavior.\n\nMemories:\n{}\n\nGoals:\n{}\n\nPerson identity: {}\n\nState of mind: {}\n\nSituation:\n{}",
-        memories_list, goals_list, person_identity, state_of_mind, situation
+        "Predict how this person would realistically and accurately behave in the situation, then choose exactly one action tool call that best matches that behavior.\n\nMemories:\n{}\n\nMotivations:\n{}\n\nPerson identity: {}\n\nState of mind: {}\n\nSituation:\n{}",
+        memories_list, motivations_list, person_identity, state_of_mind, situation
     );
 
     worker.logger.log(
@@ -113,10 +120,10 @@ async fn get_reaction_helper(
 
     let tool_calls = tool_calls_res.map_err(Error::CompletionError)?;
 
-    let person_actions_res: Result<Vec<PersonAction>, CompletionError> = tool_calls
+    let person_actions_res: Result<Vec<PersonReaction>, CompletionError> = tool_calls
         .into_iter()
-        .map(|tool_call| PersonAction::from_open_ai_tool_call(tool_call))
-        .collect::<Result<Vec<PersonAction>, PersonActionError>>()
+        .map(|tool_call| PersonReaction::from_open_ai_tool_call(tool_call))
+        .collect::<Result<Vec<PersonReaction>, PersonActionError>>()
         .map_err(Into::into);
 
     let person_actions = person_actions_res.map_err(Error::CompletionError)?;
@@ -130,9 +137,10 @@ async fn get_reaction_helper(
                 worker.logger.log(
                     Level::Info,
                     format!(
-                        "Reaction for person {}: {}",
+                        "Reaction for person {}: {} (reflection: {})",
                         person_uuid.to_uuid(),
-                        describe_action(first)
+                        describe_action(&first.action),
+                        describe_reflection(&first.reflection)
                     )
                     .as_str(),
                 );
@@ -149,5 +157,12 @@ fn describe_action(action: &PersonAction) -> String {
         PersonAction::SayInScene { comment } => {
             format!("say in scene: {}", comment)
         }
+    }
+}
+
+fn describe_reflection(reflection: &ReflectionDecision) -> String {
+    match reflection {
+        ReflectionDecision::Reflection => "reflection".to_string(),
+        ReflectionDecision::NoReflection => "no_reflection".to_string(),
     }
 }

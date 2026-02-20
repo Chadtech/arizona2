@@ -57,7 +57,7 @@ impl MemoryCapability for Worker {
         let mut completion = Completion::new(open_ai::model::Model::DEFAULT);
         completion.add_message(
             Role::System,
-            "You decide whether a person should store a memory of a recent event. Be conservative: only store memories that are useful, relevant to goals, emotionally significant, or important to relationships. If the event is not meaningful or lasting, do not call any tool. When you do create a memory, write it in standardized, first-person language (e.g., \"I ...\").",
+            "You decide whether a person should store a memory of a recent event. Be conservative: only store memories that are useful, relevant to motivations, emotionally significant, or important to relationships. If the event is not meaningful or lasting, do not call any tool. When you do create a memory, write it in standardized, first-person language (e.g., \"I ...\").",
         );
 
         let user_prompt = format!(
