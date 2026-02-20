@@ -6,7 +6,9 @@ use crate::job_runner::{self, RunNextJobResult};
 use crate::nice_display::NiceDisplay;
 use crate::worker::Worker;
 use iced::widget::container;
-use iced::{clipboard, time, widget as w, Alignment, Background, Color, Element, Length, Subscription, Task};
+use iced::{
+    clipboard, time, widget as w, Alignment, Background, Element, Length, Subscription, Task,
+};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -49,7 +51,7 @@ enum ResetJobStatus {
 
 enum SelectedJobStatus {
     None,
-    Loading(JobUuid),
+    Loading,
     Loaded(SelectedJobModel),
     Error(String),
 }
@@ -210,7 +212,7 @@ impl Model {
                 Task::none()
             }
             Msg::ClickedSelectJob(job_uuid) => {
-                self.selected_job_status = SelectedJobStatus::Loading(job_uuid.clone());
+                self.selected_job_status = SelectedJobStatus::Loading;
                 let worker = worker.clone();
                 Task::perform(get_job(worker, job_uuid), Msg::LoadedJob)
             }
@@ -236,8 +238,7 @@ impl Model {
                 if let SelectedJobStatus::Loaded(selected_job) = &self.selected_job_status {
                     let selected_job_uuid = selected_job.job.uuid().clone();
 
-                    self.selected_job_status =
-                        SelectedJobStatus::Loading(selected_job_uuid.clone());
+                    self.selected_job_status = SelectedJobStatus::Loading;
 
                     let worker = worker.clone();
                     return Task::perform(get_job(worker, selected_job_uuid), Msg::LoadedJob);
@@ -423,7 +424,7 @@ impl Model {
 fn selected_job_view(selected: &SelectedJobStatus) -> Element<'_, Msg> {
     let content: Element<Msg> = match selected {
         SelectedJobStatus::None => w::text("Select a job to see details").into(),
-        SelectedJobStatus::Loading(_) => w::text("Loading job details...").into(),
+        SelectedJobStatus::Loading => w::text("Loading job details...").into(),
         SelectedJobStatus::Error(err) => w::text(format!("Job load error: {}", err)).into(),
         SelectedJobStatus::Loaded(selected_job) => {
             let status_color = match selected_job.job.status() {

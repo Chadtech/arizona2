@@ -135,7 +135,6 @@ impl EventCapability for Worker {
                             participant.joined_at,
                             EventType::PersonJoinedScene {
                                 person_uuid: participant_person_uuid.clone(),
-                                scene_uuid: scene_uuid.clone(),
                                 scene_name: scene_name.clone(),
                             },
                         ));
@@ -146,7 +145,6 @@ impl EventCapability for Worker {
                                 left_at,
                                 EventType::PersonLeftScene {
                                     person_uuid: participant_person_uuid,
-                                    scene_uuid: scene_uuid.clone(),
                                     scene_name: scene_name.clone(),
                                 },
                             ));
@@ -255,7 +253,6 @@ impl EventCapability for Worker {
                         participant.joined_at,
                         EventType::PersonJoinedScene {
                             person_uuid: participant_person_uuid.clone(),
-                            scene_uuid: scene_uuid.clone(),
                             scene_name: scene_name.clone(),
                         },
                     ));
@@ -266,7 +263,6 @@ impl EventCapability for Worker {
                             left_at,
                             EventType::PersonLeftScene {
                                 person_uuid: participant_person_uuid,
-                                scene_uuid: scene_uuid.clone(),
                                 scene_name: scene_name.clone(),
                             },
                         ));

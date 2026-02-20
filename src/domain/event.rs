@@ -1,4 +1,4 @@
-use super::{message::MessageSender, scene_uuid::SceneUuid};
+use super::message::MessageSender;
 use crate::domain::person_uuid::PersonUuid;
 use chrono::{DateTime, Utc};
 
@@ -16,7 +16,6 @@ impl Event {
     }
 
     pub fn to_text(&self) -> String {
-        // TODO, add names to all these uuids so that the events can be human readable
         match &self.event_type {
             EventType::PersonSaidInScene {
                 scene_name,
@@ -38,7 +37,6 @@ impl Event {
             }
             EventType::PersonJoinedScene {
                 person_uuid,
-                scene_uuid: _,
                 scene_name,
             } => {
                 format!(
@@ -50,7 +48,6 @@ impl Event {
             }
             EventType::PersonLeftScene {
                 person_uuid,
-                scene_uuid: _,
                 scene_name,
             } => {
                 format!(
@@ -76,12 +73,10 @@ pub enum EventType {
     },
     PersonJoinedScene {
         person_uuid: PersonUuid,
-        scene_uuid: SceneUuid,
         scene_name: String,
     },
     PersonLeftScene {
         person_uuid: PersonUuid,
-        scene_uuid: SceneUuid,
         scene_name: String,
     },
 }

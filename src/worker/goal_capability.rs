@@ -75,4 +75,20 @@ impl GoalCapability for Worker {
 
         Ok(goals)
     }
+
+    async fn delete_goal(&self, goal_uuid: GoalUuid) -> Result<(), String> {
+        sqlx::query(
+            r#"
+                UPDATE goal
+                SET deleted_at = NOW()
+                WHERE uuid = $1::UUID
+            "#,
+        )
+        .bind(goal_uuid.to_uuid())
+        .execute(&self.sqlx)
+        .await
+        .map_err(|err| format!("Error deleting goal: {}", err))?;
+
+        Ok(())
+    }
 }

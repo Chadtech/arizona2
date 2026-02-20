@@ -1,7 +1,7 @@
+use crate::nice_display::NiceDisplay;
 use crate::open_ai::completion::CompletionError;
 use crate::open_ai::tool::{Tool, ToolFunction, ToolFunctionParameter};
 use crate::open_ai::tool_call::ToolCall;
-use crate::{nice_display::NiceDisplay, open_ai};
 
 pub enum PersonActionKind {
     Wait,

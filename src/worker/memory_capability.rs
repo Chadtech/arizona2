@@ -46,7 +46,7 @@ impl MemoryCapability for Worker {
 
     async fn maybe_create_memories_from_description(
         &self,
-        person_uuid: crate::domain::person_uuid::PersonUuid,
+        person_uuid: PersonUuid,
         description: String,
     ) -> Result<Vec<MemoryUuid>, String> {
         let person_name = self
@@ -54,7 +54,7 @@ impl MemoryCapability for Worker {
             .await
             .map_err(|err| format!("Failed to get person name: {}", err))?;
 
-        let mut completion = Completion::new(open_ai::model::Model::Gpt4p1);
+        let mut completion = Completion::new(open_ai::model::Model::DEFAULT);
         completion.add_message(
             Role::System,
             "You decide whether a person should store a memory of a recent event. Be conservative: only store memories that are useful, relevant to goals, emotionally significant, or important to relationships. If the event is not meaningful or lasting, do not call any tool. When you do create a memory, write it in standardized, first-person language (e.g., \"I ...\").",
@@ -276,7 +276,7 @@ impl MemoryCapability for Worker {
             prompt.push_str(format!("- {}\n", event).as_str());
         }
 
-        let mut completion = Completion::new(open_ai::model::Model::Gpt4p1);
+        let mut completion = Completion::new(open_ai::model::Model::DEFAULT);
 
         completion.add_message(Role::System, "You are a memory retrieval assistant. Given context, generate a prompt that can be used in a vector database of memories to retrieve relevant memories for that person in that situation.");
         completion.add_message(Role::User, prompt.as_str());
@@ -319,7 +319,6 @@ impl MemoryCapability for Worker {
         let records = sqlx::query(
             r#"
                 SELECT
-                    uuid,
                     content,
                     (embedding <=> $1::vector)::FLOAT AS distance
                 FROM memory
@@ -337,9 +336,6 @@ impl MemoryCapability for Worker {
 
         let mut results = Vec::with_capacity(records.len());
         for rec in records {
-            let uuid = rec
-                .try_get::<uuid::Uuid, _>("uuid")
-                .map_err(|err| format!("Error reading memory uuid: {}", err))?;
             let content = rec
                 .try_get::<String, _>("content")
                 .map_err(|err| format!("Error reading memory content: {}", err))?;
@@ -348,11 +344,7 @@ impl MemoryCapability for Worker {
                 .map_err(|err| format!("Error reading memory distance: {}", err))?
                 .unwrap_or(f64::MAX);
 
-            results.push(MemorySearchResult {
-                memory_uuid: MemoryUuid::from_uuid(uuid),
-                content,
-                distance,
-            });
+            results.push(MemorySearchResult { content, distance });
         }
 
         Ok(results)

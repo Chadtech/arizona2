@@ -14,4 +14,5 @@ pub trait GoalCapability {
         &self,
         person_uuid: PersonUuid,
     ) -> Result<Vec<Goal>, String>;
+    async fn delete_goal(&self, goal_uuid: GoalUuid) -> Result<(), String>;
 }

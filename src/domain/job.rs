@@ -1,7 +1,7 @@
+pub mod person_action_handler;
 pub mod person_waiting;
 pub mod process_message;
 pub mod send_message_to_scene;
-pub mod person_action_handler;
 
 use super::job_uuid::JobUuid;
 use crate::domain::job::person_waiting::PersonWaitingJob;
@@ -128,15 +128,13 @@ impl Job {
 
     pub fn status_label(&self) -> String {
         match self.status() {
-            JobStatus::Finished => {
-                match self.finished_at {
-                    Some(finished_at) => {
-                        let date = finished_at.format("%Y-%m-%d %H:%M:%S UTC").to_string();
-                        format!("finished at {}", date)
-                    }
-                    None => "finished".to_string(),
+            JobStatus::Finished => match self.finished_at {
+                Some(finished_at) => {
+                    let date = finished_at.format("%Y-%m-%d %H:%M:%S UTC").to_string();
+                    format!("finished at {}", date)
                 }
-            }
+                None => "finished".to_string(),
+            },
             JobStatus::Failed => "failed".to_string(),
             JobStatus::InProgress => "not finished".to_string(),
             JobStatus::NotStarted => "not started".to_string(),
@@ -166,15 +164,6 @@ impl Job {
             error,
             deleted_at,
         })
-    }
-
-    pub fn to_info_string(&self) -> String {
-        format!(
-            "{}, uuid: {}, {}",
-            self.kind.to_name(),
-            self.uuid.to_string(),
-            self.status_label()
-        )
     }
 
     pub fn uuid(&self) -> &JobUuid {

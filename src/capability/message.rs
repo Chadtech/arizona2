@@ -1,18 +1,10 @@
-use crate::domain::message::{Message, MessageRecipient, MessageSender};
+use crate::domain::message::{Message, MessageSender};
 use crate::domain::message_uuid::MessageUuid;
 use crate::domain::person_uuid::PersonUuid;
 use crate::domain::scene_uuid::SceneUuid;
 use chrono::{DateTime, Utc};
 
-pub struct NewMessage {
-    pub sender: MessageSender,
-    pub recipient: MessageRecipient,
-    pub content: String,
-    pub scene_uuid: Option<SceneUuid>,
-}
-
 pub trait MessageCapability {
-    async fn send_message(&self, new_message: NewMessage) -> Result<MessageUuid, String>;
     async fn send_scene_message(
         &self,
         sender: MessageSender,

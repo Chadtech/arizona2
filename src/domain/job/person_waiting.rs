@@ -1,7 +1,7 @@
 use crate::capability::event::EventCapability;
 use crate::capability::job::JobCapability;
-use crate::capability::message::MessageCapability;
 use crate::capability::memory::{MemoryCapability, MemorySearchResult, MessageTypeArgs};
+use crate::capability::message::MessageCapability;
 use crate::capability::person::PersonCapability;
 use crate::capability::person_identity::PersonIdentityCapability;
 use crate::capability::reaction::ReactionCapability;
@@ -13,7 +13,6 @@ use crate::domain::message::MessageSender;
 use crate::domain::person_name::PersonName;
 use crate::domain::person_uuid::PersonUuid;
 use crate::domain::random_seed::RandomSeed;
-use crate::domain::scene_uuid::SceneUuid;
 use crate::domain::state_of_mind::StateOfMind;
 use crate::nice_display::NiceDisplay;
 use chrono::{DateTime, Utc};
@@ -50,15 +49,6 @@ pub enum Error {
     CouldNotGetPersonsScene {
         person_uuid: PersonUuid,
         details: String,
-    },
-    PersonCouldNotWait {
-        person_uuid: PersonUuid,
-        error: String,
-    },
-    PersonCouldNotSayInScene {
-        scene_uuid: SceneUuid,
-        details: String,
-        subject: String,
     },
     ActionError(ActionHandleError),
 }
@@ -113,21 +103,6 @@ impl NiceDisplay for Error {
                 format!(
                     "Could not get current scene for person {}: {}",
                     person_uuid.to_uuid(),
-                    details
-                )
-            }
-            Error::PersonCouldNotWait { person_uuid, error } => {
-                format!("Person {} could not wait: {}", person_uuid.to_uuid(), error)
-            }
-            Error::PersonCouldNotSayInScene {
-                scene_uuid,
-                details,
-                subject,
-            } => {
-                format!(
-                    "Person {} could not say in scene {}: {}",
-                    subject,
-                    scene_uuid.to_uuid(),
                     details
                 )
             }
@@ -259,7 +234,13 @@ impl PersonWaitingJob {
             };
 
             let action = worker
-                .get_reaction(memories, person_identity, state_of_mind.content, situation)
+                .get_reaction(
+                    memories,
+                    person_uuid.clone(),
+                    person_identity,
+                    state_of_mind.content,
+                    situation,
+                )
                 .await
                 .map_err(Error::GetPersonReactionError)?;
 

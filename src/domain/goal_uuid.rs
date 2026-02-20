@@ -1,6 +1,6 @@
 use uuid::Uuid;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct GoalUuid(Uuid);
 
 impl GoalUuid {

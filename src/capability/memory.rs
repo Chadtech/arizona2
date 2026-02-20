@@ -17,7 +17,6 @@ pub struct MemoryQueryPrompt {
 
 #[derive(Clone, Debug)]
 pub struct MemorySearchResult {
-    pub memory_uuid: MemoryUuid,
     pub content: String,
     pub distance: f64,
 }

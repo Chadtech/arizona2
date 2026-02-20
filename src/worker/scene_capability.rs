@@ -105,8 +105,7 @@ impl SceneCapability for Worker {
             CurrentScene,
             r#"
                 SELECT
-                    scene.uuid AS scene_uuid,
-                    scene_participant.uuid AS scene_participant_uuid
+                    scene.uuid AS scene_uuid
                 FROM scene_participant
                 JOIN scene ON scene_participant.scene_uuid = scene.uuid
                 JOIN person ON scene_participant.person_uuid = person.uuid

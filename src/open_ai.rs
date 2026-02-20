@@ -1,6 +1,6 @@
 pub mod completion;
 pub mod embedding;
-mod history;
+pub mod history;
 pub mod message;
 pub mod model;
 pub mod role;

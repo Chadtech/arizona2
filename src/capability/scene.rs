@@ -36,7 +36,6 @@ pub struct SceneParticipation {
 
 pub struct CurrentScene {
     pub scene_uuid: SceneUuid,
-    pub scene_participant_uuid: SceneParticipantUuid,
 }
 
 #[async_trait]

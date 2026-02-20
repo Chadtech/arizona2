@@ -13,6 +13,8 @@ pub struct Model {
     name_field: String,
     identity_field: String,
     status: Status,
+    lookup_name_field: String,
+    lookup_status: LookupStatus,
 }
 
 enum Status {
@@ -24,12 +26,24 @@ enum Status {
     ErrorCreatingIdentity(String),
 }
 
+enum LookupStatus {
+    Ready,
+    Loading,
+    Loaded {
+        person_uuid: PersonUuid,
+        identity: Option<String>,
+    },
+    Error(String),
+}
+
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Storage {
     #[serde(default)]
     identity_field: String,
     #[serde(default)]
     name_field: String,
+    #[serde(default)]
+    lookup_name_field: String,
 }
 
 impl Default for Storage {
@@ -37,6 +51,7 @@ impl Default for Storage {
         Self {
             identity_field: String::new(),
             name_field: String::new(),
+            lookup_name_field: String::new(),
         }
     }
 }
@@ -48,6 +63,9 @@ pub enum Msg {
     ClickedCreatePerson,
     PersonCreated(Result<PersonUuid, String>),
     IdentityCreated(Result<PersonIdentityUuid, String>),
+    LookupNameChanged(String),
+    ClickedLoadIdentity,
+    LoadedIdentity(Result<(PersonUuid, Option<String>), String>),
 }
 
 impl Model {
@@ -56,12 +74,15 @@ impl Model {
             identity_field: storage.identity_field.clone(),
             name_field: storage.name_field.clone(),
             status: Status::Ready,
+            lookup_name_field: storage.lookup_name_field.clone(),
+            lookup_status: LookupStatus::Ready,
         }
     }
     pub fn to_storage(&self) -> Storage {
         Storage {
             identity_field: self.identity_field.clone(),
             name_field: self.name_field.clone(),
+            lookup_name_field: self.lookup_name_field.clone(),
         }
     }
 
@@ -73,6 +94,11 @@ impl Model {
             }
             Msg::NameFieldChanged(value) => {
                 self.name_field = value;
+                Task::none()
+            }
+            Msg::LookupNameChanged(value) => {
+                self.lookup_name_field = value;
+                self.lookup_status = LookupStatus::Ready;
                 Task::none()
             }
             Msg::ClickedCreatePerson => match self.status {
@@ -118,10 +144,29 @@ impl Model {
                 };
                 Task::none()
             }
+            Msg::ClickedLoadIdentity => {
+                self.lookup_status = LookupStatus::Loading;
+                let person_name = self.lookup_name_field.clone();
+                Task::perform(
+                    async move { load_identity(&worker, person_name).await },
+                    Msg::LoadedIdentity,
+                )
+            }
+            Msg::LoadedIdentity(result) => {
+                self.lookup_status = match result {
+                    Ok((person_uuid, identity)) => LookupStatus::Loaded {
+                        person_uuid,
+                        identity,
+                    },
+                    Err(err) => LookupStatus::Error(err),
+                };
+                Task::none()
+            }
         }
     }
     pub fn view(&self) -> Element<'_, Msg> {
-        w::column![
+        let create_section = w::column![
+            w::text("Create Person"),
             w::text("Person Name"),
             w::text_input("", &self.name_field).on_input(Msg::NameFieldChanged),
             w::text("Identity"),
@@ -129,8 +174,23 @@ impl Model {
             w::button("Create Person").on_press(Msg::ClickedCreatePerson),
             status_view(&self.status),
         ]
-        .spacing(s::S4)
-        .into()
+        .spacing(s::S2);
+
+        let lookup_section = w::column![
+            w::text("Lookup Person Identity"),
+            w::row![
+                w::text_input("Person name", &self.lookup_name_field)
+                    .on_input(Msg::LookupNameChanged),
+                w::button("Load").on_press(Msg::ClickedLoadIdentity),
+            ]
+            .spacing(s::S1),
+            lookup_status_view(&self.lookup_status),
+        ]
+        .spacing(s::S2);
+
+        w::column![create_section, lookup_section]
+            .spacing(s::S4)
+            .into()
     }
 }
 
@@ -149,6 +209,29 @@ fn status_view(status: &Status) -> Element<'_, Msg> {
     }
 }
 
+fn lookup_status_view(status: &LookupStatus) -> Element<'_, Msg> {
+    match status {
+        LookupStatus::Ready => w::text("Ready").into(),
+        LookupStatus::Loading => w::text("Loading...").into(),
+        LookupStatus::Loaded {
+            person_uuid,
+            identity,
+        } => {
+            let identity_text = match identity {
+                Some(text) => text.as_str(),
+                None => "No identity found",
+            };
+            w::column![
+                w::text(format!("Person UUID: {}", person_uuid.to_uuid())),
+                w::text(identity_text),
+            ]
+            .spacing(s::S1)
+            .into()
+        }
+        LookupStatus::Error(err) => w::text(format!("Error: {}", err)).into(),
+    }
+}
+
 async fn create_new_person(worker: &Worker, new_person: NewPerson) -> Result<PersonUuid, String> {
     worker.create_person(new_person).await
 }
@@ -158,4 +241,19 @@ async fn create_new_identity(
     new_identity: NewPersonIdentity,
 ) -> Result<PersonIdentityUuid, String> {
     worker.create_person_identity(new_identity).await
+}
+
+async fn load_identity(
+    worker: &Worker,
+    person_name: String,
+) -> Result<(PersonUuid, Option<String>), String> {
+    if person_name.trim().is_empty() {
+        return Err("Person name cannot be empty".to_string());
+    }
+
+    let person_uuid = worker
+        .get_person_uuid_by_name(PersonName::from_string(person_name))
+        .await?;
+    let identity = worker.get_person_identity(&person_uuid).await?;
+    Ok((person_uuid, identity))
 }

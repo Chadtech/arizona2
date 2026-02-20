@@ -46,19 +46,6 @@ pub enum Error {
     NoPersonIdentityFound {
         person_uuid: PersonUuid,
     },
-    PersonCouldNotWait {
-        person_uuid: PersonUuid,
-        error: String,
-    },
-    FailedToSendSceneMessage {
-        scene_uuid: SceneUuid,
-        details: String,
-        subject: String,
-    },
-    CouldNotGetPersonsScene {
-        person_uuid: PersonUuid,
-        details: String,
-    },
     FailedToGetSendersName {
         person_uuid: PersonUuid,
         details: String,
@@ -135,32 +122,6 @@ impl NiceDisplay for Error {
                 format!(
                     "No person identity found for person {}",
                     person_uuid.to_uuid()
-                )
-            }
-
-            Error::PersonCouldNotWait { person_uuid, error } => {
-                format!("Person {} could not wait: {}", person_uuid.to_uuid(), error)
-            }
-            Error::FailedToSendSceneMessage {
-                scene_uuid,
-                details,
-                subject,
-            } => {
-                format!(
-                    "Person {} could not send message in scene {}: {}",
-                    subject,
-                    scene_uuid.to_uuid(),
-                    details
-                )
-            }
-            Error::CouldNotGetPersonsScene {
-                person_uuid,
-                details,
-            } => {
-                format!(
-                    "Could not get current scene for person {}: {}",
-                    person_uuid.to_uuid(),
-                    details
                 )
             }
             Error::FailedToGetSendersName {
@@ -438,6 +399,13 @@ async fn build_scene_situation<W: SceneCapability + PersonCapability>(
     messages: &[Message],
     person_uuid: &PersonUuid,
 ) -> Result<String, Error> {
+    let person_name = worker
+        .get_persons_name(person_uuid.clone())
+        .await
+        .map_err(Error::FailedToGetPersonsName)?;
+
+    let person_name_str = person_name.as_str();
+
     let scene_name = worker
         .get_scene_name(scene_uuid)
         .await
@@ -474,6 +442,7 @@ async fn build_scene_situation<W: SceneCapability + PersonCapability>(
             ActorUuid::AiPerson(uuid) => uuid.to_uuid() != person_uuid.to_uuid(),
             ActorUuid::RealWorldUser => true,
         })
+        .filter(|participant| participant.person_name.as_str() != person_name_str)
         .map(|participant| participant.person_name.to_string())
         .collect::<Vec<String>>();
 
@@ -496,14 +465,19 @@ async fn build_scene_situation<W: SceneCapability + PersonCapability>(
     let mut lines = Vec::new();
     for message in messages {
         let sender_label = match &message.sender {
-            MessageSender::AiPerson(sender_person_uuid) => worker
-                .get_persons_name(sender_person_uuid.clone())
-                .await
-                .map_err(|err| Error::FailedToGetSendersName {
-                    person_uuid: sender_person_uuid.clone(),
-                    details: err,
-                })?
-                .to_string(),
+            MessageSender::AiPerson(sender_person_uuid) => {
+                if sender_person_uuid.to_uuid() == person_uuid.to_uuid() {
+                    continue;
+                }
+                worker
+                    .get_persons_name(sender_person_uuid.clone())
+                    .await
+                    .map_err(|err| Error::FailedToGetSendersName {
+                        person_uuid: sender_person_uuid.clone(),
+                        details: err,
+                    })?
+                    .to_string()
+            }
             MessageSender::RealWorldUser => "Chadtech".to_string(),
         };
 
@@ -645,6 +619,7 @@ async fn process_message_for_person<
     worker
         .get_reaction(
             memories,
+            person_uuid.clone(),
             person_identity,
             state_of_mind.content,
             reaction_situation,
