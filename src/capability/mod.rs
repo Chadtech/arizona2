@@ -1,5 +1,7 @@
 pub mod event;
+pub mod logging;
 pub mod motivation;
+pub mod job_runner_settings;
 pub mod job;
 pub mod log_event;
 pub mod memory;

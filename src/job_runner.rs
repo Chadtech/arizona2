@@ -1,5 +1,7 @@
 use crate::capability::event::EventCapability;
 use crate::capability::job::JobCapability;
+use crate::capability::job_runner_settings::JobRunnerSettingsCapability;
+use crate::capability::logging::LogCapability;
 use crate::capability::memory::MemoryCapability;
 use crate::capability::message::MessageCapability;
 use crate::capability::person::PersonCapability;
@@ -18,6 +20,8 @@ use crate::worker;
 use crate::worker::Worker;
 use sqlx::Row;
 use std::time::Instant;
+
+const DEFAULT_JOB_RUNNER_POLL_INTERVAL_SECS: u64 = 45;
 
 pub enum Error {
     WorkerInitError(worker::InitError),
@@ -202,7 +206,14 @@ pub async fn run() -> Result<(), Error> {
             }
         }
 
-        tokio::time::sleep(std::time::Duration::from_secs(45)).await;
+        let poll_interval_secs = match worker.get_job_runner_poll_interval_secs().await {
+            Ok(secs) => secs,
+            Err(err) => {
+                tracing::error!("Job runner poll interval error: {}", err);
+                DEFAULT_JOB_RUNNER_POLL_INTERVAL_SECS
+            }
+        };
+        tokio::time::sleep(std::time::Duration::from_secs(poll_interval_secs)).await;
     }
     Ok(())
 }
@@ -262,7 +273,8 @@ async fn run_next_job<
         + PersonCapability
         + EventCapability
         + StateOfMindCapability
-        + PersonIdentityCapability,
+        + PersonIdentityCapability
+        + LogCapability,
 >(
     worker: W,
     random_seed: RandomSeed,
@@ -300,7 +312,8 @@ async fn run_job<
         + PersonCapability
         + EventCapability
         + StateOfMindCapability
-        + PersonIdentityCapability,
+        + PersonIdentityCapability
+        + LogCapability,
 >(
     worker: W,
     random_seed: RandomSeed,
@@ -376,19 +389,36 @@ async fn run_job<
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::capability::event::{EventCapability, GetArgs};
     use crate::capability::job::JobCapability;
+    use crate::capability::memory::{
+        MemoryCapability, MemoryQueryPrompt, MemorySearchResult, MessageTypeArgs, NewMemory,
+    };
     use crate::capability::message::{MessageCapability, NewMessage};
+    use crate::capability::logging::LogCapability;
+    use crate::capability::person::{NewPerson, PersonCapability};
+    use crate::capability::person_identity::{NewPersonIdentity, PersonIdentityCapability};
+    use crate::capability::reaction::ReactionCapability;
     use crate::capability::scene::{
         CurrentScene, NewScene, NewSceneSnapshot, Scene, SceneCapability, SceneParticipant,
+        SceneParticipation,
     };
+    use crate::capability::state_of_mind::{NewStateOfMind, StateOfMindCapability};
     use crate::domain::job::{JobKind, PoppedJob};
     use crate::domain::job_uuid::JobUuid;
+    use crate::domain::logger::Level;
+    use crate::domain::memory::Memory;
+    use crate::domain::memory_uuid::MemoryUuid;
     use crate::domain::message::{Message, MessageSender};
     use crate::domain::message_uuid::MessageUuid;
+    use crate::domain::person_identity_uuid::PersonIdentityUuid;
     use crate::domain::person_name::PersonName;
     use crate::domain::person_uuid::PersonUuid;
+    use crate::domain::state_of_mind::StateOfMind;
+    use crate::domain::state_of_mind_uuid::StateOfMindUuid;
     use crate::domain::scene_participant_uuid::SceneParticipantUuid;
     use crate::domain::scene_uuid::SceneUuid;
+    use crate::person_actions::{PersonAction, PersonReaction, ReflectionDecision};
     use async_trait::async_trait;
     use std::collections::HashSet;
     use std::sync::Arc;
@@ -422,12 +452,6 @@ mod tests {
     }
 
     impl MessageCapability for MockWorker {
-        async fn send_message(&self, new_message: NewMessage) -> Result<MessageUuid, String> {
-            let mut st = self.state.lock().await;
-            st.sent_messages.push(new_message);
-            Ok(MessageUuid::new())
-        }
-
         async fn send_scene_message(
             &self,
             _sender: MessageSender,
@@ -580,6 +604,149 @@ mod tests {
             _scene_uuid: &SceneUuid,
         ) -> Result<Vec<SceneParticipant>, String> {
             Ok(vec![])
+        }
+
+        async fn get_persons_current_scene_uuid(
+            &self,
+            _person_uuid: &PersonUuid,
+        ) -> Result<Option<SceneUuid>, String> {
+            Ok(None)
+        }
+
+        async fn get_scene_participation_history(
+            &self,
+            _scene_uuid: &SceneUuid,
+        ) -> Result<Vec<SceneParticipation>, String> {
+            Ok(vec![])
+        }
+
+        async fn get_scene_name(&self, _scene_uuid: &SceneUuid) -> Result<Option<String>, String> {
+            Ok(None)
+        }
+
+        async fn get_scene_description(
+            &self,
+            _scene_uuid: &SceneUuid,
+        ) -> Result<Option<String>, String> {
+            Ok(None)
+        }
+    }
+
+    impl ReactionCapability for MockWorker {
+        async fn get_reaction(
+            &self,
+            _memories: Vec<Memory>,
+            _person_uuid: PersonUuid,
+            _person_identity: String,
+            _state_of_mind: String,
+            _situation: String,
+        ) -> Result<PersonReaction, String> {
+            Ok(PersonReaction {
+                action: PersonAction::Idle,
+                reflection: ReflectionDecision::NoReflection,
+            })
+        }
+    }
+
+    impl MemoryCapability for MockWorker {
+        async fn create_memory(&self, _new_memory: NewMemory) -> Result<MemoryUuid, String> {
+            Ok(MemoryUuid::new())
+        }
+
+        async fn maybe_create_memories_from_description(
+            &self,
+            _person_uuid: PersonUuid,
+            _description: String,
+        ) -> Result<Vec<MemoryUuid>, String> {
+            Ok(vec![])
+        }
+
+        async fn create_memory_query_prompt(
+            &self,
+            _person_recalling: PersonName,
+            _message_type_args: MessageTypeArgs,
+            _recent_events: Vec<String>,
+            _state_of_mind: &String,
+            _situation: &String,
+        ) -> Result<MemoryQueryPrompt, String> {
+            Ok(MemoryQueryPrompt {
+                prompt: String::new(),
+            })
+        }
+
+        async fn search_memories(
+            &self,
+            _person_uuid: PersonUuid,
+            _query: String,
+            _limit: i64,
+        ) -> Result<Vec<MemorySearchResult>, String> {
+            Ok(vec![])
+        }
+    }
+
+    impl PersonCapability for MockWorker {
+        async fn create_person(&self, _new_person: NewPerson) -> Result<PersonUuid, String> {
+            Ok(PersonUuid::new())
+        }
+
+        async fn get_persons_name(
+            &self,
+            _person_uuid: PersonUuid,
+        ) -> Result<PersonName, String> {
+            Ok(PersonName::from_string("Test".to_string()))
+        }
+
+        async fn get_person_uuid_by_name(
+            &self,
+            _person_name: PersonName,
+        ) -> Result<PersonUuid, String> {
+            Ok(PersonUuid::new())
+        }
+    }
+
+    impl EventCapability for MockWorker {
+        async fn get_events(&self, _args: GetArgs) -> Result<Vec<crate::domain::event::Event>, String> {
+            Ok(vec![])
+        }
+    }
+
+    impl LogCapability for MockWorker {
+        fn log(&self, _level: Level, _message: &str) {
+            // no-op for tests
+        }
+    }
+
+    #[async_trait]
+    impl StateOfMindCapability for MockWorker {
+        async fn create_state_of_mind(
+            &self,
+            _new_state_of_mind: NewStateOfMind,
+        ) -> Result<StateOfMindUuid, String> {
+            Ok(StateOfMindUuid::new())
+        }
+
+        async fn get_latest_state_of_mind(
+            &self,
+            _person_uuid: &PersonUuid,
+        ) -> Result<Option<StateOfMind>, String> {
+            Ok(None)
+        }
+    }
+
+    #[async_trait]
+    impl PersonIdentityCapability for MockWorker {
+        async fn create_person_identity(
+            &self,
+            _new_person_identity: NewPersonIdentity,
+        ) -> Result<PersonIdentityUuid, String> {
+            Ok(PersonIdentityUuid::new())
+        }
+
+        async fn get_person_identity(
+            &self,
+            _person_uuid: &PersonUuid,
+        ) -> Result<Option<String>, String> {
+            Ok(None)
         }
     }
 

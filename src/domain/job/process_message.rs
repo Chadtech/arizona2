@@ -1,6 +1,7 @@
 use crate::capability;
 use crate::capability::event::EventCapability;
 use crate::capability::job::JobCapability;
+use crate::capability::logging::LogCapability;
 use crate::capability::memory::{MemoryCapability, MemorySearchResult, MessageTypeArgs};
 use crate::capability::person::PersonCapability;
 use crate::capability::person_identity::PersonIdentityCapability;
@@ -8,6 +9,7 @@ use crate::capability::reaction::ReactionCapability;
 use crate::capability::state_of_mind::StateOfMindCapability;
 use crate::domain::actor_uuid::ActorUuid;
 use crate::domain::job::person_action_handler::{self, ActionHandleError};
+use crate::domain::logger::Level;
 use crate::domain::memory::Memory;
 use crate::domain::message::{Message, MessageRecipient, MessageSender};
 use crate::domain::person_name::PersonName;
@@ -217,6 +219,7 @@ impl ProcessMessageJob {
             + EventCapability
             + StateOfMindCapability
             + PersonIdentityCapability
+            + LogCapability
             + JobCapability,
     >(
         self,
@@ -253,6 +256,20 @@ impl ProcessMessageJob {
                     })?;
 
                 if pending_messages.is_empty() {
+                    tracing::info!(
+                        "Skipping reaction for person {} in scene {}: no new messages",
+                        person_uuid.to_uuid(),
+                        scene_uuid.to_uuid()
+                    );
+                    worker.log(
+                        Level::Info,
+                        format!(
+                            "Skipping reaction for person {} in scene {}: no new messages",
+                            person_uuid.to_uuid(),
+                            scene_uuid.to_uuid()
+                        )
+                        .as_str(),
+                    );
                     return Ok(());
                 }
 

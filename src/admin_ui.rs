@@ -11,13 +11,14 @@ mod state_of_mind_page;
 mod style;
 
 use self::style as s;
+use crate::capability::job_runner_settings::JobRunnerSettingsCapability;
 use crate::domain::logger::{Level, Logger};
 use crate::nice_display::NiceDisplay;
 use crate::open_ai::completion::CompletionError;
 use crate::worker;
 use crate::worker::Worker;
 use iced;
-use iced::{time, widget as w, Element, Subscription, Task, Theme};
+use iced::{time, widget as w, Element, Length, Subscription, Task, Theme};
 use serde::{Deserialize, Serialize};
 use std::fs::File;
 use std::io::Write;
@@ -44,6 +45,8 @@ struct Model {
     error: Option<Error>,
     time_running: bool,
     last_time_tick: Option<Instant>,
+    job_runner_poll_interval_input: String,
+    job_runner_poll_interval_status: JobRunnerPollIntervalStatus,
 }
 
 impl Model {
@@ -68,6 +71,13 @@ enum PromptStatus {
     Ready,
     Response(String),
     Error(CompletionError),
+}
+
+enum JobRunnerPollIntervalStatus {
+    Loading,
+    Ready,
+    Saving,
+    Error(String),
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -241,6 +251,10 @@ enum Msg {
     JobPageMsg(job_page::Msg),
     ReactionPageMsg(reaction_page::Msg),
     WarmedUpDb,
+    JobRunnerPollIntervalLoaded(Result<u64, String>),
+    JobRunnerPollIntervalInputChanged(String),
+    JobRunnerPollIntervalSubmitted,
+    JobRunnerPollIntervalSaved(Result<(), String>),
     TimeToggle,
     TimeTick,
     TimeTickPersisted(Result<(), String>),
@@ -298,9 +312,12 @@ impl Model {
             state_of_mind_page: state_of_mind_page::Model::new(&flags.storage.state_of_mind),
             time_running: false,
             last_time_tick: None,
+            job_runner_poll_interval_input: String::new(),
+            job_runner_poll_interval_status: JobRunnerPollIntervalStatus::Loading,
         };
 
         let worker2 = model.worker.clone();
+        let worker3 = model.worker.clone();
 
         let tab_task = tab.init_task(&model.worker);
 
@@ -310,6 +327,10 @@ impl Model {
                 Task::perform(async move { worker2.warm_up_db_connection().await }, |_| {
                     Msg::WarmedUpDb
                 }),
+                Task::perform(
+                    async move { worker3.get_job_runner_poll_interval_secs().await },
+                    Msg::JobRunnerPollIntervalLoaded,
+                ),
                 tab_task,
             ]),
         )
@@ -401,6 +422,71 @@ impl Model {
                 task.map(Msg::MessagesPageMsg)
             }
             Msg::WarmedUpDb => Task::none(),
+            Msg::JobRunnerPollIntervalLoaded(result) => {
+                match result {
+                    Ok(secs) => {
+                        self.job_runner_poll_interval_input = secs.to_string();
+                        self.job_runner_poll_interval_status = JobRunnerPollIntervalStatus::Ready;
+                    }
+                    Err(err) => {
+                        self.job_runner_poll_interval_status =
+                            JobRunnerPollIntervalStatus::Error(err);
+                    }
+                }
+                Task::none()
+            }
+            Msg::JobRunnerPollIntervalInputChanged(value) => {
+                self.job_runner_poll_interval_input = value;
+                if matches!(
+                    self.job_runner_poll_interval_status,
+                    JobRunnerPollIntervalStatus::Error(_)
+                ) {
+                    self.job_runner_poll_interval_status = JobRunnerPollIntervalStatus::Ready;
+                }
+                Task::none()
+            }
+            Msg::JobRunnerPollIntervalSubmitted => {
+                let secs_res = self
+                    .job_runner_poll_interval_input
+                    .trim()
+                    .parse::<u64>()
+                    .map_err(|_| "Enter a whole number of seconds".to_string())
+                    .and_then(|secs| {
+                        if secs == 0 {
+                            Err("Seconds must be greater than zero".to_string())
+                        } else {
+                            Ok(secs)
+                        }
+                    });
+
+                let secs = match secs_res {
+                    Ok(secs) => secs,
+                    Err(err) => {
+                        self.job_runner_poll_interval_status =
+                            JobRunnerPollIntervalStatus::Error(err);
+                        return Task::none();
+                    }
+                };
+
+                let worker = self.worker.clone();
+                self.job_runner_poll_interval_status = JobRunnerPollIntervalStatus::Saving;
+                Task::perform(
+                    async move { worker.set_job_runner_poll_interval_secs(secs).await },
+                    Msg::JobRunnerPollIntervalSaved,
+                )
+            }
+            Msg::JobRunnerPollIntervalSaved(result) => {
+                match result {
+                    Ok(()) => {
+                        self.job_runner_poll_interval_status = JobRunnerPollIntervalStatus::Ready;
+                    }
+                    Err(err) => {
+                        self.job_runner_poll_interval_status =
+                            JobRunnerPollIntervalStatus::Error(err);
+                    }
+                }
+                Task::none()
+            }
             Msg::StateOfMindPageMsg(msg) => {
                 let task = self.state_of_mind_page.update(self.worker.clone(), msg);
 
@@ -510,6 +596,13 @@ impl Model {
         let time_controls = w::row![
             w::button(time_toggle_label).on_press(Msg::TimeToggle),
             w::text(time_status),
+            w::text("Job interval (s)"),
+            w::text_input("", &self.job_runner_poll_interval_input)
+                .on_input(Msg::JobRunnerPollIntervalInputChanged)
+                .on_submit(Msg::JobRunnerPollIntervalSubmitted)
+                .width(Length::Fixed(120.0)),
+            w::button("Save").on_press(Msg::JobRunnerPollIntervalSubmitted),
+            view_poll_interval_status(&self.job_runner_poll_interval_status),
         ]
         .spacing(s::S4);
 
@@ -586,6 +679,17 @@ impl Model {
                 danger: s::RED_SOFT,
             },
         )
+    }
+}
+
+fn view_poll_interval_status(
+    status: &JobRunnerPollIntervalStatus,
+) -> Element<'_, Msg> {
+    match status {
+        JobRunnerPollIntervalStatus::Loading => w::text("Loading...").into(),
+        JobRunnerPollIntervalStatus::Saving => w::text("Saving...").into(),
+        JobRunnerPollIntervalStatus::Ready => w::text("").into(),
+        JobRunnerPollIntervalStatus::Error(err) => w::text(format!("Error: {}", err)).into(),
     }
 }
 

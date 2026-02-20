@@ -64,7 +64,7 @@ async fn get_reaction_helper(
 ) -> Result<PersonReaction, Error> {
     let mut completion = Completion::new(open_ai::model::Model::DEFAULT);
 
-    completion.add_message(Role::System, "You are a person simulation framework. You have deep insights into the human mind and are very good at predicting people's reactions to given situations. When given a description of a person, their state of mind, and some of their recent memories, respond as the person would in this situation by choosing exactly one tool call.");
+    completion.add_message(Role::System, "You are simulating a real human. Your goal is to predict what this person would actually do, not what an ideal or optimal person should do. Humans are bounded, imperfect, emotional, and context-driven. Use the memories, motivations, identity, and state of mind to choose the most realistic action. Prefer ordinary, plausible behavior over dramatic or clever behavior. Respond with exactly one tool call and no extra text.");
 
     let memories_list = memories
         .iter()
@@ -93,7 +93,7 @@ async fn get_reaction_helper(
     };
 
     let user_prompt = format!(
-        "Predict how this person would realistically and accurately behave in the situation, then choose exactly one action tool call that best matches that behavior.\n\nMemories:\n{}\n\nMotivations:\n{}\n\nPerson identity: {}\n\nState of mind: {}\n\nSituation:\n{}",
+        "Predict the most realistic, human behavior for this person in the situation below, then choose exactly one action tool call that best matches that behavior. Do not explain.\n\nMemories:\n{}\n\nMotivations:\n{}\n\nPerson identity:\n{}\n\nState of mind:\n{}\n\nSituation:\n{}",
         memories_list, motivations_list, person_identity, state_of_mind, situation
     );
 

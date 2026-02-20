@@ -62,7 +62,8 @@ impl Default for ViewMode {
 pub enum MessagesStatus {
     Loading,
     Loaded(scene_timeline::Model),
-    Error(String),
+    Refreshing(scene_timeline::Model),
+    Error { message: String, cached: Option<scene_timeline::Model> },
 }
 
 #[derive(Debug, Clone)]
@@ -200,7 +201,14 @@ impl Model {
                             return scroll_task;
                         }
                         Err(err) => {
-                            loaded_scene.messages = MessagesStatus::Error(err);
+                            let cached = match &loaded_scene.messages {
+                                MessagesStatus::Loaded(model) => Some(model.clone()),
+                                MessagesStatus::Refreshing(model) => Some(model.clone()),
+                                MessagesStatus::Error { cached, .. } => cached.clone(),
+                                MessagesStatus::Loading => None,
+                            };
+                            loaded_scene.messages =
+                                MessagesStatus::Error { message: err, cached };
                         }
                     }
                 }
@@ -208,7 +216,9 @@ impl Model {
             }
             Msg::OlderMessagesLoaded(result) => {
                 if let SceneLoadStatus::Loaded(loaded_scene) = &mut self.scene_load_status {
-                    if let MessagesStatus::Loaded(timeline_model) = &mut loaded_scene.messages {
+                    if let Some(timeline_model) =
+                        timeline_model_mut(&mut loaded_scene.messages)
+                    {
                         match result {
                             Ok(load_result) => {
                                 timeline_model.apply_older_messages(load_result);
@@ -273,16 +283,7 @@ impl Model {
                         self.message_input.clear();
 
                         // Reload messages after a brief moment to show the newly sent message
-                        if let SceneLoadStatus::Loaded(scene) = &mut self.scene_load_status {
-                            scene.messages = MessagesStatus::Loading;
-                            let scene_uuid = scene.uuid.clone();
-                            return Task::perform(
-                                async move {
-                                    scene_timeline::Model::load(&worker, scene_uuid).await
-                                },
-                                Msg::TimelineLoaded,
-                            );
-                        }
+                        return self.refresh_loaded_scene(worker);
                     }
                     Err(err) => {
                         self.send_status = SendStatus::Error(err);
@@ -292,7 +293,9 @@ impl Model {
             }
             Msg::GotTimelineMsg(sub_msg) => {
                 if let SceneLoadStatus::Loaded(loaded_scene) = &mut self.scene_load_status {
-                    if let MessagesStatus::Loaded(timeline_model) = &mut loaded_scene.messages {
+                    if let Some(timeline_model) =
+                        timeline_model_mut(&mut loaded_scene.messages)
+                    {
                         match sub_msg {
                             scene_timeline::Msg::Copy(_) => {
                                 return timeline_model.update(sub_msg).map(Msg::GotTimelineMsg);
@@ -412,6 +415,7 @@ impl Model {
             SceneLoadStatus::Loaded(scene) => {
                 let message_composer = self.view_message_composer();
                 let auto_refresh_button = self.view_auto_refresh_button();
+                let refresh_status = view_refresh_status(&scene.messages);
 
                 let description_view: Element<'_, Msg> = match &scene.description {
                     Some(desc) => w::text(desc).into(),
@@ -426,6 +430,7 @@ impl Model {
                     )),
                     description_view,
                     auto_refresh_button,
+                    refresh_status,
                     view_messages(&scene.messages),
                     message_composer
                 ]
@@ -482,7 +487,18 @@ impl Model {
 
     fn refresh_loaded_scene(&mut self, worker: Arc<Worker>) -> Task<Msg> {
         if let SceneLoadStatus::Loaded(scene) = &mut self.scene_load_status {
-            scene.messages = MessagesStatus::Loading;
+            let current = std::mem::replace(&mut scene.messages, MessagesStatus::Loading);
+            scene.messages = match current {
+                MessagesStatus::Loaded(model) => MessagesStatus::Refreshing(model),
+                MessagesStatus::Refreshing(model) => MessagesStatus::Refreshing(model),
+                MessagesStatus::Error { cached: Some(model), .. } => {
+                    MessagesStatus::Refreshing(model)
+                }
+                MessagesStatus::Error { message, cached: None } => {
+                    MessagesStatus::Error { message, cached: None }
+                }
+                MessagesStatus::Loading => MessagesStatus::Loading,
+            };
             let scene_uuid = scene.uuid.clone();
             return Task::perform(
                 async move { scene_timeline::Model::load(&worker, scene_uuid).await },
@@ -515,6 +531,31 @@ fn view_messages(messages_status: &MessagesStatus) -> Element<'_, Msg> {
     match &messages_status {
         MessagesStatus::Loading => w::text("Loading messages...").into(),
         MessagesStatus::Loaded(timeline_model) => timeline_model.view().map(Msg::GotTimelineMsg),
-        MessagesStatus::Error(err) => w::text(format!("Error: {}", err)).into(),
+        MessagesStatus::Refreshing(timeline_model) => {
+            timeline_model.view().map(Msg::GotTimelineMsg)
+        }
+        MessagesStatus::Error { message, cached } => match cached {
+            Some(timeline_model) => timeline_model.view().map(Msg::GotTimelineMsg),
+            None => w::text(format!("Error: {}", message)).into(),
+        },
+    }
+}
+
+fn timeline_model_mut(
+    messages_status: &mut MessagesStatus,
+) -> Option<&mut scene_timeline::Model> {
+    match messages_status {
+        MessagesStatus::Loaded(model) => Some(model),
+        MessagesStatus::Refreshing(model) => Some(model),
+        MessagesStatus::Error { cached: Some(model), .. } => Some(model),
+        MessagesStatus::Loading => None,
+        MessagesStatus::Error { cached: None, .. } => None,
+    }
+}
+
+fn view_refresh_status(messages_status: &MessagesStatus) -> Element<'_, Msg> {
+    match messages_status {
+        MessagesStatus::Refreshing(_) => w::text("Refreshing messages...").size(s::S3).into(),
+        _ => w::text("Messages up to date").size(s::S3).into(),
     }
 }
