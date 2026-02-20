@@ -5,6 +5,7 @@ use crate::capability::message::MessageCapability;
 use crate::capability::person::PersonCapability;
 use crate::capability::person_identity::PersonIdentityCapability;
 use crate::capability::reaction::ReactionCapability;
+use crate::capability::reaction_history::ReactionHistoryCapability;
 use crate::capability::scene::SceneCapability;
 use crate::capability::state_of_mind::StateOfMindCapability;
 use crate::domain::job::person_action_handler::{self, ActionHandleError};
@@ -34,6 +35,7 @@ pub enum Error {
     MissingPersonUuid,
     MissingStartedAt,
     FailedToGetEvents(String),
+    FailedToGetReactionHistory(String),
     FailedToGetStateOfMind(String),
     NoStateOfMindFound {
         person_uuid: PersonUuid,
@@ -65,6 +67,9 @@ impl NiceDisplay for Error {
             Error::MissingStartedAt => "Missing started_at on wait job".to_string(),
             Error::FailedToGetEvents(err) => {
                 format!("Failed to get events: {}", err)
+            }
+            Error::FailedToGetReactionHistory(err) => {
+                format!("Failed to get reaction history: {}", err)
             }
             Error::FailedToGetStateOfMind(err) => {
                 format!("Failed to get state of mind: {}", err)
@@ -134,7 +139,8 @@ impl PersonWaitingJob {
             + PersonCapability
             + EventCapability
             + StateOfMindCapability
-            + PersonIdentityCapability,
+            + PersonIdentityCapability
+            + ReactionHistoryCapability,
     >(
         &self,
         worker: &W,
@@ -155,6 +161,15 @@ impl PersonWaitingJob {
             let has_recent_events = events.iter().any(|event| event.timestamp >= started_at);
 
             if has_recent_events {
+                return Ok(WaitOutcome::Ready);
+            }
+
+            let reacted_since_wait = worker
+                .has_reacted_since(&person_uuid, started_at)
+                .await
+                .map_err(Error::FailedToGetReactionHistory)?;
+
+            if reacted_since_wait {
                 return Ok(WaitOutcome::Ready);
             }
 
@@ -197,7 +212,7 @@ impl PersonWaitingJob {
 
             let minutes_waiting = (self.duration_ms / 60000).max(0);
             let situation = format!(
-                "{} decided to wait {} minutes, and nothing happened.",
+                "{} decided to wait {} minutes, and nothing happened. There were no new messages or events. It is normal to do nothing and keep waiting silently.",
                 persons_name.as_str(),
                 minutes_waiting
             );

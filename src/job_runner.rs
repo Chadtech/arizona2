@@ -7,6 +7,7 @@ use crate::capability::message::MessageCapability;
 use crate::capability::person::PersonCapability;
 use crate::capability::person_identity::PersonIdentityCapability;
 use crate::capability::reaction::ReactionCapability;
+use crate::capability::reaction_history::ReactionHistoryCapability;
 use crate::capability::scene::SceneCapability;
 use crate::capability::state_of_mind::StateOfMindCapability;
 use crate::domain::job::{
@@ -274,6 +275,7 @@ async fn run_next_job<
         + EventCapability
         + StateOfMindCapability
         + PersonIdentityCapability
+        + ReactionHistoryCapability
         + LogCapability,
 >(
     worker: W,
@@ -313,6 +315,7 @@ async fn run_job<
         + EventCapability
         + StateOfMindCapability
         + PersonIdentityCapability
+        + ReactionHistoryCapability
         + LogCapability,
 >(
     worker: W,
@@ -395,6 +398,7 @@ mod tests {
         MemoryCapability, MemoryQueryPrompt, MemorySearchResult, MessageTypeArgs, NewMemory,
     };
     use crate::capability::message::{MessageCapability, NewMessage};
+    use crate::capability::reaction_history::ReactionHistoryCapability;
     use crate::capability::logging::LogCapability;
     use crate::capability::person::{NewPerson, PersonCapability};
     use crate::capability::person_identity::{NewPersonIdentity, PersonIdentityCapability};
@@ -414,6 +418,7 @@ mod tests {
     use crate::domain::person_identity_uuid::PersonIdentityUuid;
     use crate::domain::person_name::PersonName;
     use crate::domain::person_uuid::PersonUuid;
+    use chrono::{DateTime, Utc};
     use crate::domain::state_of_mind::StateOfMind;
     use crate::domain::state_of_mind_uuid::StateOfMindUuid;
     use crate::domain::scene_participant_uuid::SceneParticipantUuid;
@@ -645,6 +650,24 @@ mod tests {
                 action: PersonAction::Idle,
                 reflection: ReflectionDecision::NoReflection,
             })
+        }
+    }
+
+    impl ReactionHistoryCapability for MockWorker {
+        async fn record_reaction(
+            &self,
+            _person_uuid: &PersonUuid,
+            _action_kind: &str,
+        ) -> Result<(), String> {
+            Ok(())
+        }
+
+        async fn has_reacted_since(
+            &self,
+            _person_uuid: &PersonUuid,
+            _since: DateTime<Utc>,
+        ) -> Result<bool, String> {
+            Ok(false)
         }
     }
 

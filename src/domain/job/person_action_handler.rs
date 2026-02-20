@@ -2,6 +2,7 @@ use crate::capability::job::JobCapability;
 use crate::capability::message::MessageCapability;
 use crate::capability::scene::SceneCapability;
 use crate::capability::person::PersonCapability;
+use crate::capability::reaction_history::ReactionHistoryCapability;
 use crate::domain::job::person_waiting::PersonWaitingJob;
 use crate::domain::job::send_message_to_scene::send_scene_message_and_enqueue_recipients;
 use crate::domain::job::JobKind;
@@ -14,6 +15,7 @@ use crate::person_actions::PersonAction;
 
 pub enum ActionHandleError {
     Wait(String),
+    ReactionLog(String),
     SceneMissing(String),
     Say {
         scene_uuid: SceneUuid,
@@ -26,6 +28,9 @@ impl NiceDisplay for ActionHandleError {
         match self {
             ActionHandleError::Wait(details) => {
                 format!("Person could not wait: {}", details)
+            }
+            ActionHandleError::ReactionLog(details) => {
+                format!("Could not record reaction: {}", details)
             }
             ActionHandleError::SceneMissing(details) => {
                 format!("Could not get person's scene: {}", details)
@@ -47,7 +52,11 @@ impl NiceDisplay for ActionHandleError {
 const IDLE_DURATION_MS: i64 = 4 * 60 * 1000;
 
 pub async fn handle_person_action<
-    W: SceneCapability + JobCapability + PersonCapability + MessageCapability,
+    W: SceneCapability
+        + JobCapability
+        + PersonCapability
+        + MessageCapability
+        + ReactionHistoryCapability,
 >(
     worker: &W,
     action: &PersonAction,
@@ -89,6 +98,11 @@ pub async fn handle_person_action<
                 scene_uuid,
                 details: err.to_nice_error().to_string(),
             })?;
+
+            worker
+                .record_reaction(person_uuid, "say_in_scene")
+                .await
+                .map_err(ActionHandleError::ReactionLog)?;
 
             Ok(())
         }

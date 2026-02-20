@@ -6,6 +6,7 @@ use crate::capability::memory::{MemoryCapability, MemorySearchResult, MessageTyp
 use crate::capability::person::PersonCapability;
 use crate::capability::person_identity::PersonIdentityCapability;
 use crate::capability::reaction::ReactionCapability;
+use crate::capability::reaction_history::ReactionHistoryCapability;
 use crate::capability::state_of_mind::StateOfMindCapability;
 use crate::domain::actor_uuid::ActorUuid;
 use crate::domain::job::person_action_handler::{self, ActionHandleError};
@@ -219,6 +220,7 @@ impl ProcessMessageJob {
             + EventCapability
             + StateOfMindCapability
             + PersonIdentityCapability
+            + ReactionHistoryCapability
             + LogCapability
             + JobCapability,
     >(

@@ -9,5 +9,6 @@ pub mod message;
 pub mod person;
 pub mod person_identity;
 pub mod reaction;
+pub mod reaction_history;
 pub mod scene;
 pub mod state_of_mind;
