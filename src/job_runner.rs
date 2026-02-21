@@ -177,15 +177,53 @@ pub async fn run() -> Result<(), Error> {
     let shutdown = tokio::signal::ctrl_c();
     tokio::pin!(shutdown);
     loop {
-        let random_seed = match worker.get_random_seed() {
-            Ok(seed) => seed,
+        let poll_interval_secs = match worker.get_job_runner_poll_interval_secs().await {
+            Ok(secs) => secs,
             Err(err) => {
-                tracing::error!("Job runner seed error: {}", err);
-                continue;
+                tracing::error!("Job runner poll interval error: {}", err);
+                DEFAULT_JOB_RUNNER_POLL_INTERVAL_SECS
             }
         };
-        let current_active_ms = active_clock.current_ms();
-        let job_fut = run_next_job(worker.clone(), random_seed, current_active_ms);
+
+        let job_runner_enabled = match worker.get_job_runner_enabled().await {
+            Ok(enabled) => enabled,
+            Err(err) => {
+                tracing::error!("Job runner enabled flag error: {}", err);
+                true
+            }
+        };
+
+        if job_runner_enabled {
+            let random_seed = match worker.get_random_seed() {
+                Ok(seed) => seed,
+                Err(err) => {
+                    tracing::error!("Job runner seed error: {}", err);
+                    continue;
+                }
+            };
+            let current_active_ms = active_clock.current_ms();
+            let job_fut = run_next_job(worker.clone(), random_seed, current_active_ms);
+
+            tokio::select! {
+                _ = &mut shutdown => {
+                    if let Err(err) = active_clock.persist(&worker).await {
+                        tracing::error!("Job runner active clock error: {}", err);
+                    }
+                    tracing::info!("Job runner shutting down");
+                    break;
+                }
+                res = job_fut => {
+                    if let Err(err) = res {
+                        // Log the error but continue processing other jobs
+                        let err_message = err.to_nice_error().to_string();
+                        tracing::error!("Job runner error: {}", err_message);
+                        worker
+                            .logger
+                            .log(Level::Error, &format!("Job runner error: {}", err_message));
+                    }
+                }
+            }
+        }
 
         tokio::select! {
             _ = &mut shutdown => {
@@ -195,26 +233,8 @@ pub async fn run() -> Result<(), Error> {
                 tracing::info!("Job runner shutting down");
                 break;
             }
-            res = job_fut => {
-                if let Err(err) = res {
-                    // Log the error but continue processing other jobs
-                    let err_message = err.to_nice_error().to_string();
-                    tracing::error!("Job runner error: {}", err_message);
-                    worker
-                        .logger
-                        .log(Level::Error, &format!("Job runner error: {}", err_message));
-                }
-            }
+            _ = tokio::time::sleep(std::time::Duration::from_secs(poll_interval_secs)) => {}
         }
-
-        let poll_interval_secs = match worker.get_job_runner_poll_interval_secs().await {
-            Ok(secs) => secs,
-            Err(err) => {
-                tracing::error!("Job runner poll interval error: {}", err);
-                DEFAULT_JOB_RUNNER_POLL_INTERVAL_SECS
-            }
-        };
-        tokio::time::sleep(std::time::Duration::from_secs(poll_interval_secs)).await;
     }
     Ok(())
 }

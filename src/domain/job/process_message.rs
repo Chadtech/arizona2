@@ -1,3 +1,5 @@
+mod relfection;
+
 use crate::capability;
 use crate::capability::event::EventCapability;
 use crate::capability::job::JobCapability;
@@ -18,7 +20,7 @@ use crate::domain::person_uuid::PersonUuid;
 use crate::domain::random_seed::RandomSeed;
 use crate::domain::scene_uuid::SceneUuid;
 use crate::domain::state_of_mind::StateOfMind;
-use crate::person_actions::{PersonAction, PersonReaction};
+use crate::person_actions::{PersonAction, PersonReaction, ReflectionDecision};
 use crate::{
     capability::{message::MessageCapability, scene::SceneCapability},
     domain::message_uuid::MessageUuid,
@@ -85,6 +87,7 @@ pub enum Error {
     },
     FailedToCreateMemory(String),
     ActionError(ActionHandleError),
+    ReflectionError(relfection::Error),
 }
 
 impl NiceDisplay for Error {
@@ -206,6 +209,9 @@ impl NiceDisplay for Error {
                 format!("Failed to create memory:\n{}", err)
             }
             Error::ActionError(err) => err.to_nice_error().to_string(),
+            Error::ReflectionError(err) => {
+                format!("Reflection error:\n{}", err.to_nice_error().to_string())
+            }
         }
     }
 }
@@ -291,6 +297,15 @@ impl ProcessMessageJob {
 
                 let action = reaction.action;
 
+                match reaction.reflection {
+                    ReflectionDecision::Reflection => {
+                        relfection::run(worker)
+                            .await
+                            .map_err(Error::ReflectionError)?;
+                    }
+                    ReflectionDecision::NoReflection => {}
+                }
+
                 person_action_handler::handle_person_action(
                     worker,
                     &action,
@@ -327,46 +342,47 @@ impl ProcessMessageJob {
                     })?;
             }
             (Some(person_uuid), None) => {
-                let situation = build_direct_situation(worker, &message).await?;
-
-                let reaction = process_message_for_person(
-                    worker,
-                    MessageTypeArgs::Direct {
-                        from: message.sender.clone(),
-                    },
-                    &situation,
-                    person_uuid,
-                )
-                .await?;
-
-                let action = reaction.action;
-
-                person_action_handler::handle_person_action(
-                    worker,
-                    &action,
-                    person_uuid,
-                    random_seed.clone(),
-                    current_active_ms,
-                )
-                .await
-                .map_err(Error::ActionError)?;
-
-                let action_summary = summarize_action(action);
-                let description = if action_summary.is_empty() {
-                    situation
-                } else {
-                    format!("{}\n\nResponse:\n{}", situation, action_summary)
-                };
-
-                worker
-                    .maybe_create_memories_from_description(person_uuid.clone(), description)
-                    .await
-                    .map_err(Error::FailedToCreateMemory)?;
-
-                worker
-                    .mark_message_read(&self.message_uuid)
-                    .await
-                    .map_err(Error::FailedToMarkMessageRead)?;
+                // let situation = build_direct_situation(worker, &message).await?;
+                //
+                // let reaction = process_message_for_person(
+                //     worker,
+                //     MessageTypeArgs::Direct {
+                //         from: message.sender.clone(),
+                //     },
+                //     &situation,
+                //     person_uuid,
+                // )
+                // .await?;
+                //
+                // let action = reaction.action;
+                //
+                // person_action_handler::handle_person_action(
+                //     worker,
+                //     &action,
+                //     person_uuid,
+                //     random_seed.clone(),
+                //     current_active_ms,
+                // )
+                // .await
+                // .map_err(Error::ActionError)?;
+                //
+                // let action_summary = summarize_action(action);
+                // let description = if action_summary.is_empty() {
+                //     situation
+                // } else {
+                //     format!("{}\n\nResponse:\n{}", situation, action_summary)
+                // };
+                //
+                // worker
+                //     .maybe_create_memories_from_description(person_uuid.clone(), description)
+                //     .await
+                //     .map_err(Error::FailedToCreateMemory)?;
+                //
+                // worker
+                //     .mark_message_read(&self.message_uuid)
+                //     .await
+                //     .map_err(Error::FailedToMarkMessageRead)?;
+                todo!("This is basically DMs, which have not been implemented yet")
             }
             (None, Some(_)) => {
                 return Err(Error::SceneMessageRecipientMissing {
@@ -394,27 +410,27 @@ fn summarize_action(action: PersonAction) -> String {
     }
 }
 
-async fn build_direct_situation<W: PersonCapability>(
-    worker: &W,
-    message: &Message,
-) -> Result<String, Error> {
-    let sender_name = match &message.sender {
-        MessageSender::AiPerson(sender_person_uuid) => worker
-            .get_persons_name(sender_person_uuid.clone())
-            .await
-            .map_err(|err| Error::FailedToGetSendersName {
-                person_uuid: sender_person_uuid.clone(),
-                details: err,
-            })?,
-        MessageSender::RealWorldUser => PersonName::from_string("Chadtech".to_string()),
-    };
-
-    Ok(format!(
-        "You received a direct message from {}:\n\n\"{}\"",
-        sender_name.as_str(),
-        normalize_message_content(&message.content)
-    ))
-}
+// async fn build_direct_situation<W: PersonCapability>(
+//     worker: &W,
+//     message: &Message,
+// ) -> Result<String, Error> {
+//     let sender_name = match &message.sender {
+//         MessageSender::AiPerson(sender_person_uuid) => worker
+//             .get_persons_name(sender_person_uuid.clone())
+//             .await
+//             .map_err(|err| Error::FailedToGetSendersName {
+//                 person_uuid: sender_person_uuid.clone(),
+//                 details: err,
+//             })?,
+//         MessageSender::RealWorldUser => PersonName::from_string("Chadtech".to_string()),
+//     };
+//
+//     Ok(format!(
+//         "You received a direct message from {}:\n\n\"{}\"",
+//         sender_name.as_str(),
+//         normalize_message_content(&message.content)
+//     ))
+// }
 
 async fn build_scene_situation<W: SceneCapability + PersonCapability>(
     worker: &W,

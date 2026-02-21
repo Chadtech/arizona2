@@ -57,4 +57,46 @@ impl JobRunnerSettingsCapability for Worker {
 
         Ok(())
     }
+
+    async fn get_job_runner_enabled(&self) -> Result<bool, String> {
+        let row = sqlx::query(
+            r#"
+                SELECT enabled
+                FROM job_runner_setting
+                WHERE id = TRUE;
+            "#,
+        )
+        .fetch_optional(&self.sqlx)
+        .await
+        .map_err(|err| format!("Error fetching job runner enabled flag: {}", err))?;
+
+        let row = match row {
+            Some(row) => row,
+            None => {
+                return Err("Job runner setting is missing from job_runner_setting".to_string());
+            }
+        };
+
+        let enabled: bool = row
+            .try_get::<bool, _>("enabled")
+            .map_err(|err| format!("Error reading job runner enabled flag: {}", err))?;
+
+        Ok(enabled)
+    }
+
+    async fn set_job_runner_enabled(&self, enabled: bool) -> Result<(), String> {
+        sqlx::query(
+            r#"
+                UPDATE job_runner_setting
+                SET enabled = $1
+                WHERE id = TRUE;
+            "#,
+        )
+        .bind(enabled)
+        .execute(&self.sqlx)
+        .await
+        .map_err(|err| format!("Error updating job runner enabled flag: {}", err))?;
+
+        Ok(())
+    }
 }

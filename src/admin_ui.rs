@@ -1,8 +1,8 @@
 mod call;
-mod motivation_page;
 mod job_page;
 mod memory_page;
 mod messages_page;
+mod motivation_page;
 mod new_identity_page;
 mod new_person_page;
 mod reaction_page;
@@ -18,13 +18,12 @@ use crate::open_ai::completion::CompletionError;
 use crate::worker;
 use crate::worker::Worker;
 use iced;
-use iced::{time, widget as w, Element, Length, Subscription, Task, Theme};
+use iced::{widget as w, Element, Length, Subscription, Task, Theme};
 use serde::{Deserialize, Serialize};
 use std::fs::File;
 use std::io::Write;
 use std::path::Path;
 use std::sync::Arc;
-use std::time::Instant;
 
 const STORAGE_FILE_PATH: &str = "storage.json";
 
@@ -43,10 +42,10 @@ struct Model {
     tab: Tab,
     worker: Arc<Worker>,
     error: Option<Error>,
-    time_running: bool,
-    last_time_tick: Option<Instant>,
     job_runner_poll_interval_input: String,
     job_runner_poll_interval_status: JobRunnerPollIntervalStatus,
+    job_runner_enabled: bool,
+    job_runner_enabled_status: JobRunnerEnabledStatus,
 }
 
 impl Model {
@@ -74,6 +73,13 @@ enum PromptStatus {
 }
 
 enum JobRunnerPollIntervalStatus {
+    Loading,
+    Ready,
+    Saving,
+    Error(String),
+}
+
+enum JobRunnerEnabledStatus {
     Loading,
     Ready,
     Saving,
@@ -255,16 +261,15 @@ enum Msg {
     JobRunnerPollIntervalInputChanged(String),
     JobRunnerPollIntervalSubmitted,
     JobRunnerPollIntervalSaved(Result<(), String>),
-    TimeToggle,
-    TimeTick,
-    TimeTickPersisted(Result<(), String>),
+    JobRunnerEnabledLoaded(Result<bool, String>),
+    JobRunnerEnabledToggled,
+    JobRunnerEnabledSaved(Result<(), String>),
 }
 
 #[derive(Debug)]
 pub enum Error {
     IcedRunError(iced::Error),
     WorkerInitError(worker::InitError),
-    ActiveClockError(String),
     StorageFileCreationError(std::io::Error),
     StorageFileWriteError(std::io::Error),
     StorageSerializationError(String),
@@ -277,7 +282,6 @@ impl NiceDisplay for Error {
         match self {
             Error::IcedRunError(err) => format!("Iced run error: {}", err),
             Error::WorkerInitError(err) => err.message(),
-            Error::ActiveClockError(err) => format!("Active clock error: {}", err),
             Error::StorageFileCreationError(err) => format!("Storage file creation error: {}", err),
             Error::StorageFileWriteError(err) => format!("Storage file write error: {}", err),
             Error::StorageSerializationError(msg) => {
@@ -310,14 +314,15 @@ impl Model {
             worker: Arc::new(flags.worker),
             error: None,
             state_of_mind_page: state_of_mind_page::Model::new(&flags.storage.state_of_mind),
-            time_running: false,
-            last_time_tick: None,
             job_runner_poll_interval_input: String::new(),
             job_runner_poll_interval_status: JobRunnerPollIntervalStatus::Loading,
+            job_runner_enabled: true,
+            job_runner_enabled_status: JobRunnerEnabledStatus::Loading,
         };
 
         let worker2 = model.worker.clone();
         let worker3 = model.worker.clone();
+        let worker4 = model.worker.clone();
 
         let tab_task = tab.init_task(&model.worker);
 
@@ -330,6 +335,10 @@ impl Model {
                 Task::perform(
                     async move { worker3.get_job_runner_poll_interval_secs().await },
                     Msg::JobRunnerPollIntervalLoaded,
+                ),
+                Task::perform(
+                    async move { worker4.get_job_runner_enabled().await },
+                    Msg::JobRunnerEnabledLoaded,
                 ),
                 tab_task,
             ]),
@@ -487,6 +496,39 @@ impl Model {
                 }
                 Task::none()
             }
+            Msg::JobRunnerEnabledLoaded(result) => {
+                match result {
+                    Ok(enabled) => {
+                        self.job_runner_enabled = enabled;
+                        self.job_runner_enabled_status = JobRunnerEnabledStatus::Ready;
+                    }
+                    Err(err) => {
+                        self.job_runner_enabled_status = JobRunnerEnabledStatus::Error(err);
+                    }
+                }
+                Task::none()
+            }
+            Msg::JobRunnerEnabledToggled => {
+                let new_value = !self.job_runner_enabled;
+                self.job_runner_enabled = new_value;
+                let worker = self.worker.clone();
+                self.job_runner_enabled_status = JobRunnerEnabledStatus::Saving;
+                Task::perform(
+                    async move { worker.set_job_runner_enabled(new_value).await },
+                    Msg::JobRunnerEnabledSaved,
+                )
+            }
+            Msg::JobRunnerEnabledSaved(result) => {
+                match result {
+                    Ok(()) => {
+                        self.job_runner_enabled_status = JobRunnerEnabledStatus::Ready;
+                    }
+                    Err(err) => {
+                        self.job_runner_enabled_status = JobRunnerEnabledStatus::Error(err);
+                    }
+                }
+                Task::none()
+            }
             Msg::StateOfMindPageMsg(msg) => {
                 let task = self.state_of_mind_page.update(self.worker.clone(), msg);
 
@@ -523,62 +565,10 @@ impl Model {
 
                 task.map(Msg::ReactionPageMsg)
             }
-            Msg::TimeToggle => {
-                self.time_running = !self.time_running;
-                self.last_time_tick = if self.time_running {
-                    Some(Instant::now())
-                } else {
-                    None
-                };
-                Task::none()
-            }
-            Msg::TimeTick => {
-                if !self.time_running {
-                    return Task::none();
-                }
-
-                let now = Instant::now();
-                let delta_ms = match self.last_time_tick {
-                    Some(last) => now
-                        .duration_since(last)
-                        .as_millis()
-                        .try_into()
-                        .unwrap_or(i64::MAX),
-                    None => 0,
-                };
-                self.last_time_tick = Some(now);
-
-                if delta_ms <= 0 {
-                    return Task::none();
-                }
-
-                let worker = self.worker.clone();
-                Task::perform(
-                    async move { advance_active_clock(worker, delta_ms).await },
-                    Msg::TimeTickPersisted,
-                )
-            }
-            Msg::TimeTickPersisted(result) => {
-                if let Err(err) = result {
-                    self.error = Some(Error::ActiveClockError(err));
-                }
-                Task::none()
-            }
         }
     }
 
     fn view(&self) -> Element<'_, Msg> {
-        let time_toggle_label = if self.time_running {
-            "Pause Time"
-        } else {
-            "Play Time"
-        };
-        let time_status = if self.time_running {
-            "Time: Running"
-        } else {
-            "Time: Paused"
-        };
-
         let tabs = Tab::all()
             .iter()
             .map(|tab: &Tab| {
@@ -594,8 +584,6 @@ impl Model {
 
         let tab_row = w::Row::with_children(tabs).spacing(s::S4);
         let time_controls = w::row![
-            w::button(time_toggle_label).on_press(Msg::TimeToggle),
-            w::text(time_status),
             w::text("Job interval (s)"),
             w::text_input("", &self.job_runner_poll_interval_input)
                 .on_input(Msg::JobRunnerPollIntervalInputChanged)
@@ -603,6 +591,9 @@ impl Model {
                 .width(Length::Fixed(120.0)),
             w::button("Save").on_press(Msg::JobRunnerPollIntervalSubmitted),
             view_poll_interval_status(&self.job_runner_poll_interval_status),
+            w::button(job_runner_enabled_label(self.job_runner_enabled))
+                .on_press(Msg::JobRunnerEnabledToggled),
+            view_enabled_status(&self.job_runner_enabled_status),
         ]
         .spacing(s::S4);
 
@@ -629,10 +620,7 @@ impl Model {
             Tab::Identity => self.new_identity_page.view().map(Msg::NewIdentityPageMsg),
             Tab::Person => self.new_person_page.view().map(Msg::NewPersonPageMsg),
             Tab::Memory => self.memory_page.view().map(Msg::MemoryPageMsg),
-            Tab::Motivation => self
-                .motivation_page
-                .view()
-                .map(Msg::MotivationPageMsg),
+            Tab::Motivation => self.motivation_page.view().map(Msg::MotivationPageMsg),
             Tab::Messages => self.messages_page.view().map(Msg::MessagesPageMsg),
             Tab::StateOfMind => self.state_of_mind_page.view().map(Msg::StateOfMindPageMsg),
             Tab::Scene => self.scene_page.view().map(Msg::SceneMsg),
@@ -649,20 +637,12 @@ impl Model {
     fn subscription(&self) -> Subscription<Msg> {
         let mut subs = Vec::new();
 
-        if self.time_running {
-            subs.push(time::every(time::Duration::from_secs(1)).map(|_| Msg::TimeTick));
-        }
-
         if self.tab == Tab::Job {
             subs.push(self.job_page.subscription().map(Msg::JobPageMsg));
         }
 
         if self.tab == Tab::Messages {
-            subs.push(
-                self.messages_page
-                    .subscription()
-                    .map(Msg::MessagesPageMsg),
-            );
+            subs.push(self.messages_page.subscription().map(Msg::MessagesPageMsg));
         }
 
         Subscription::batch(subs)
@@ -682,14 +662,29 @@ impl Model {
     }
 }
 
-fn view_poll_interval_status(
-    status: &JobRunnerPollIntervalStatus,
-) -> Element<'_, Msg> {
+fn view_poll_interval_status(status: &JobRunnerPollIntervalStatus) -> Element<'_, Msg> {
     match status {
         JobRunnerPollIntervalStatus::Loading => w::text("Loading...").into(),
         JobRunnerPollIntervalStatus::Saving => w::text("Saving...").into(),
         JobRunnerPollIntervalStatus::Ready => w::text("").into(),
         JobRunnerPollIntervalStatus::Error(err) => w::text(format!("Error: {}", err)).into(),
+    }
+}
+
+fn job_runner_enabled_label<'a>(enabled: bool) -> &'a str {
+    if enabled {
+        "Job runner: On"
+    } else {
+        "Job runner: Off"
+    }
+}
+
+fn view_enabled_status(status: &JobRunnerEnabledStatus) -> Element<'_, Msg> {
+    match status {
+        JobRunnerEnabledStatus::Loading => w::text("Loading...").into(),
+        JobRunnerEnabledStatus::Saving => w::text("Saving...").into(),
+        JobRunnerEnabledStatus::Ready => w::text("").into(),
+        JobRunnerEnabledStatus::Error(err) => w::text(format!("Error: {}", err)).into(),
     }
 }
 
@@ -702,20 +697,4 @@ pub async fn run() -> Result<(), Error> {
         .run_with(move || Model::new(flags));
 
     iced_result.map_err(Error::IcedRunError)
-}
-
-async fn advance_active_clock(worker: Arc<Worker>, delta_ms: i64) -> Result<(), String> {
-    sqlx::query(
-        r#"
-            UPDATE active_clock
-            SET active_ms = active_ms + $1
-            WHERE id = TRUE
-        "#,
-    )
-    .bind(delta_ms)
-    .execute(&worker.sqlx)
-    .await
-    .map_err(|err| format!("Error advancing active clock: {}", err))?;
-
-    Ok(())
 }
