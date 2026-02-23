@@ -5,6 +5,7 @@ mod messages_page;
 mod motivation_page;
 mod new_identity_page;
 mod new_person_page;
+mod prompt_lab_page;
 mod reaction_page;
 mod scene_page;
 mod state_of_mind_page;
@@ -39,6 +40,7 @@ struct Model {
     scene_page: scene_page::Model,
     job_page: job_page::Model,
     reaction_page: reaction_page::Model,
+    prompt_lab_page: prompt_lab_page::Model,
     tab: Tab,
     worker: Arc<Worker>,
     error: Option<Error>,
@@ -61,6 +63,7 @@ impl Model {
             scene: self.scene_page.to_storage(),
             job: self.job_page.to_storage(),
             reaction: self.reaction_page.to_storage(),
+            prompt_lab: self.prompt_lab_page.to_storage(),
             tab: self.tab.clone(),
         }
     }
@@ -109,6 +112,8 @@ struct Storage {
     job: job_page::Storage,
     #[serde(default)]
     reaction: reaction_page::Storage,
+    #[serde(default)]
+    prompt_lab: prompt_lab_page::Storage,
 }
 
 impl Storage {
@@ -158,6 +163,7 @@ impl Storage {
             scene: scene_page::Storage::default(),
             job: job_page::Storage::default(),
             reaction: reaction_page::Storage::default(),
+            prompt_lab: prompt_lab_page::Storage::default(),
         }
     }
 }
@@ -165,6 +171,7 @@ impl Storage {
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, Eq, PartialEq)]
 enum Tab {
     Prompt,
+    PromptLab,
     Reaction,
     Identity,
     Person,
@@ -181,6 +188,7 @@ impl Tab {
     pub fn to_label(&self) -> String {
         match self {
             Tab::Prompt => "Prompt".to_string(),
+            Tab::PromptLab => "Prompt Lab".to_string(),
             Tab::Reaction => "Reaction".to_string(),
             Tab::Identity => "Identity".to_string(),
             Tab::Person => "Person".to_string(),
@@ -196,6 +204,7 @@ impl Tab {
     pub fn all() -> Vec<Tab> {
         vec![
             Tab::Prompt,
+            Tab::PromptLab,
             Tab::Reaction,
             Tab::Identity,
             Tab::Person,
@@ -256,6 +265,7 @@ enum Msg {
     SceneMsg(scene_page::Msg),
     JobPageMsg(job_page::Msg),
     ReactionPageMsg(reaction_page::Msg),
+    PromptLabMsg(prompt_lab_page::Msg),
     WarmedUpDb,
     JobRunnerPollIntervalLoaded(Result<u64, String>),
     JobRunnerPollIntervalInputChanged(String),
@@ -310,6 +320,7 @@ impl Model {
             scene_page: scene_page::Model::new(&flags.storage.scene),
             job_page: job_page::Model::new(&flags.storage.job),
             reaction_page: reaction_page::Model::new(&flags.storage.reaction),
+            prompt_lab_page: prompt_lab_page::Model::new(&flags.storage.prompt_lab),
             tab,
             worker: Arc::new(flags.worker),
             error: None,
@@ -573,6 +584,15 @@ impl Model {
 
                 task.map(Msg::ReactionPageMsg)
             }
+            Msg::PromptLabMsg(sub_msg) => {
+                self.prompt_lab_page.update(sub_msg);
+
+                if let Err(err) = self.to_storage().save_to_file_system() {
+                    self.error = Some(err);
+                }
+
+                Task::none()
+            }
         }
     }
 
@@ -590,7 +610,9 @@ impl Model {
             })
             .collect::<Vec<Element<Msg>>>();
 
-        let tab_row = w::Row::with_children(tabs).spacing(s::S4);
+        let tab_column = w::Column::with_children(tabs)
+            .spacing(s::S2)
+            .width(Length::Fixed(180.0));
         let time_controls = w::row![
             w::text("Job interval (s)"),
             w::text_input("", &self.job_runner_poll_interval_input)
@@ -624,6 +646,7 @@ impl Model {
                 ]
                 .into()
             }
+            Tab::PromptLab => self.prompt_lab_page.view().map(Msg::PromptLabMsg),
             Tab::Reaction => self.reaction_page.view().map(Msg::ReactionPageMsg),
             Tab::Identity => self.new_identity_page.view().map(Msg::NewIdentityPageMsg),
             Tab::Person => self.new_person_page.view().map(Msg::NewPersonPageMsg),
@@ -636,8 +659,9 @@ impl Model {
         };
 
         let scrollable_content = w::scrollable(tab_content);
+        let main_content = w::column![time_controls, scrollable_content].spacing(s::S4);
 
-        w::container(w::column![tab_row, time_controls, scrollable_content].spacing(s::S4))
+        w::container(w::row![tab_column, main_content].spacing(s::S4))
             .padding(s::S4)
             .into()
     }
