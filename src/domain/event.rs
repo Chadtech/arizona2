@@ -2,6 +2,7 @@ use super::message::MessageSender;
 use crate::domain::person_uuid::PersonUuid;
 use chrono::{DateTime, Utc};
 
+#[derive(Clone, Debug)]
 pub struct Event {
     pub timestamp: DateTime<Utc>,
     pub event_type: EventType,
@@ -23,7 +24,7 @@ impl Event {
                 comment,
             } => {
                 format!(
-                    "At {}, in scene {}, {} said: {}",
+                    "At {}, in scene {}, {} said: \"{}\"",
                     self.timestamp, scene_name, speaker_name, comment
                 )
             }
@@ -59,8 +60,26 @@ impl Event {
             }
         }
     }
+
+    pub fn many_to_prompt_list(events: Vec<Event>) -> String {
+        if events.is_empty() {
+            "None.".to_string()
+        } else {
+            events
+                .iter()
+                .map(|event| event.to_text())
+                .rev()
+                .take(16)
+                .collect::<Vec<String>>()
+                .into_iter()
+                .rev()
+                .collect::<Vec<String>>()
+                .join("\n")
+        }
+    }
 }
 
+#[derive(Clone, Debug)]
 pub enum EventType {
     PersonSaidInScene {
         scene_name: String,

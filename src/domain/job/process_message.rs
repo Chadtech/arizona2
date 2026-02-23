@@ -1,5 +1,3 @@
-mod relfection;
-
 use crate::capability;
 use crate::capability::event::EventCapability;
 use crate::capability::job::JobCapability;
@@ -9,8 +7,10 @@ use crate::capability::person::PersonCapability;
 use crate::capability::person_identity::PersonIdentityCapability;
 use crate::capability::reaction::ReactionCapability;
 use crate::capability::reaction_history::ReactionHistoryCapability;
+use crate::capability::reflection::ReflectionCapability;
 use crate::capability::state_of_mind::StateOfMindCapability;
 use crate::domain::actor_uuid::ActorUuid;
+use crate::domain::event::Event;
 use crate::domain::job::person_action_handler::{self, ActionHandleError};
 use crate::domain::logger::Level;
 use crate::domain::memory::Memory;
@@ -19,6 +19,8 @@ use crate::domain::person_name::PersonName;
 use crate::domain::person_uuid::PersonUuid;
 use crate::domain::random_seed::RandomSeed;
 use crate::domain::scene_uuid::SceneUuid;
+use crate::domain::situation;
+use crate::domain::situation::Situation;
 use crate::domain::state_of_mind::StateOfMind;
 use crate::person_actions::{PersonAction, PersonReaction, ReflectionDecision};
 use crate::{
@@ -87,7 +89,7 @@ pub enum Error {
     },
     FailedToCreateMemory(String),
     ActionError(ActionHandleError),
-    ReflectionError(relfection::Error),
+    ReflectionError(String),
 }
 
 impl NiceDisplay for Error {
@@ -210,10 +212,16 @@ impl NiceDisplay for Error {
             }
             Error::ActionError(err) => err.to_nice_error().to_string(),
             Error::ReflectionError(err) => {
-                format!("Reflection error:\n{}", err.to_nice_error().to_string())
+                format!("Reflection error:\n{}", err)
             }
         }
     }
+}
+
+struct ReflectionInput {
+    memories: Vec<Memory>,
+    person_identity: String,
+    state_of_mind: String,
 }
 
 impl ProcessMessageJob {
@@ -227,6 +235,7 @@ impl ProcessMessageJob {
             + StateOfMindCapability
             + PersonIdentityCapability
             + ReactionHistoryCapability
+            + ReflectionCapability
             + LogCapability
             + JobCapability,
     >(
@@ -255,91 +264,14 @@ impl ProcessMessageJob {
 
         match (person_uuid, &message.scene_uuid) {
             (Some(person_uuid), Some(scene_uuid)) => {
-                let pending_messages = worker
-                    .get_unhandled_scene_messages_for_person(person_uuid, scene_uuid)
-                    .await
-                    .map_err(|err| Error::FailedToGetUnhandledSceneMessages {
-                        scene_uuid: scene_uuid.clone(),
-                        details: err,
-                    })?;
-
-                if pending_messages.is_empty() {
-                    tracing::info!(
-                        "Skipping reaction for person {} in scene {}: no new messages",
-                        person_uuid.to_uuid(),
-                        scene_uuid.to_uuid()
-                    );
-                    worker.log(
-                        Level::Info,
-                        format!(
-                            "Skipping reaction for person {} in scene {}: no new messages",
-                            person_uuid.to_uuid(),
-                            scene_uuid.to_uuid()
-                        )
-                        .as_str(),
-                    );
-                    return Ok(());
-                }
-
-                let situation =
-                    build_scene_situation(worker, scene_uuid, &pending_messages, person_uuid)
-                        .await?;
-
-                let reaction = process_message_for_person(
+                run_message_in_scene(
                     worker,
-                    MessageTypeArgs::SceneByUuid {
-                        scene_uuid: scene_uuid.clone(),
-                    },
-                    &situation,
                     person_uuid,
-                )
-                .await?;
-
-                let action = reaction.action;
-
-                match reaction.reflection {
-                    ReflectionDecision::Reflection => {
-                        relfection::run(worker)
-                            .await
-                            .map_err(Error::ReflectionError)?;
-                    }
-                    ReflectionDecision::NoReflection => {}
-                }
-
-                person_action_handler::handle_person_action(
-                    worker,
-                    &action,
-                    person_uuid,
+                    scene_uuid,
                     random_seed.clone(),
                     current_active_ms,
                 )
-                .await
-                .map_err(Error::ActionError)?;
-
-                let action_summary = summarize_action(action);
-                let description = if action_summary.is_empty() {
-                    situation
-                } else {
-                    format!("{}\n\nResponse:\n{}", situation, action_summary)
-                };
-
-                worker
-                    .maybe_create_memories_from_description(person_uuid.clone(), description)
-                    .await
-                    .map_err(Error::FailedToCreateMemory)?;
-
-                let handled_ids = pending_messages
-                    .into_iter()
-                    .map(|msg| msg.uuid)
-                    .collect::<Vec<_>>();
-
-                worker
-                    .mark_scene_messages_handled_for_person(person_uuid, handled_ids)
-                    .await
-                    .map_err(|err| Error::FailedToMarkSceneMessagesHandled {
-                        scene_uuid: scene_uuid.clone(),
-                        details: err,
-                    })?;
+                .await?;
             }
             (Some(person_uuid), None) => {
                 // let situation = build_direct_situation(worker, &message).await?;
@@ -398,18 +330,6 @@ impl ProcessMessageJob {
     }
 }
 
-fn summarize_action(action: PersonAction) -> String {
-    match action {
-        PersonAction::Wait { duration } => {
-            format!("Waited for {} seconds.", duration)
-        }
-        PersonAction::Idle => "Did nothing.".to_string(),
-        PersonAction::SayInScene { comment } => {
-            format!("Spoke in scene: {}", comment)
-        }
-    }
-}
-
 // async fn build_direct_situation<W: PersonCapability>(
 //     worker: &W,
 //     message: &Message,
@@ -437,7 +357,7 @@ async fn build_scene_situation<W: SceneCapability + PersonCapability>(
     scene_uuid: &SceneUuid,
     messages: &[Message],
     person_uuid: &PersonUuid,
-) -> Result<String, Error> {
+) -> Result<Situation, Error> {
     let person_name = worker
         .get_persons_name(person_uuid.clone())
         .await
@@ -495,12 +415,6 @@ async fn build_scene_situation<W: SceneCapability + PersonCapability>(
         participant_names.push("Chadtech".to_string());
     }
 
-    let participant_list = if participant_names.is_empty() {
-        "none".to_string()
-    } else {
-        participant_names.join(", ")
-    };
-
     let mut lines = Vec::new();
     for message in messages {
         let sender_label = match &message.sender {
@@ -533,13 +447,15 @@ async fn build_scene_situation<W: SceneCapability + PersonCapability>(
         lines.join("\n")
     };
 
-    Ok(format!(
-        "You are in the scene \"{}\". {}\n\nOther people present: {}\n\nMessages received (oldest to newest):\n{}",
+    let situation = Situation::new(situation::Input {
+        person_name: person_name.to_string(),
         scene_name,
         scene_description,
-        participant_list,
-        messages_block
-    ))
+        particpants: participant_names,
+        messages: lines,
+    });
+
+    Ok(situation)
 }
 
 fn normalize_message_content(content: &str) -> &str {
@@ -555,10 +471,163 @@ fn normalize_message_content(content: &str) -> &str {
     content
 }
 
-async fn process_message_for_person<
+async fn run_message_in_scene<
     W: MessageCapability
         + SceneCapability
         + ReactionCapability
+        + MemoryCapability
+        + PersonCapability
+        + EventCapability
+        + StateOfMindCapability
+        + PersonIdentityCapability
+        + ReflectionCapability
+        + LogCapability
+        + ReactionHistoryCapability
+        + JobCapability,
+>(
+    worker: &W,
+    person_uuid: &PersonUuid,
+    scene_uuid: &SceneUuid,
+    random_seed: RandomSeed,
+    current_active_ms: i64,
+) -> Result<(), Error> {
+    let pending_messages = worker
+        .get_unhandled_scene_messages_for_person(person_uuid, scene_uuid)
+        .await
+        .map_err(|err| Error::FailedToGetUnhandledSceneMessages {
+            scene_uuid: scene_uuid.clone(),
+            details: err,
+        })?;
+
+    if pending_messages.is_empty() {
+        tracing::info!(
+            "Skipping reaction for person {} in scene {}: no new messages",
+            person_uuid.to_uuid(),
+            scene_uuid.to_uuid()
+        );
+        worker.log(
+            Level::Info,
+            format!(
+                "Skipping reaction for person {} in scene {}: no new messages",
+                person_uuid.to_uuid(),
+                scene_uuid.to_uuid()
+            )
+            .as_str(),
+        );
+        return Ok(());
+    }
+
+    let situation =
+        build_scene_situation(worker, scene_uuid, &pending_messages, person_uuid).await?;
+
+    let reflection_input = build_reflection_input(
+        worker,
+        MessageTypeArgs::SceneByUuid {
+            scene_uuid: scene_uuid.clone(),
+        },
+        &situation,
+        person_uuid,
+    )
+    .await?;
+
+    let reaction_recent_events = get_recent_events_text(
+        worker,
+        MessageTypeArgs::SceneByUuid {
+            scene_uuid: scene_uuid.clone(),
+        },
+        person_uuid,
+    )
+    .await?;
+
+    let reaction_situation = format!(
+        "{}\n\nRecent events:\n{}",
+        situation.to_string(),
+        Event::many_to_prompt_list(reaction_recent_events)
+    );
+
+    let reaction = worker
+        .get_reaction(
+            reflection_input.memories.clone(),
+            person_uuid.clone(),
+            reflection_input.person_identity.clone(),
+            reflection_input.state_of_mind.clone(),
+            reaction_situation,
+        )
+        .await
+        .map_err(Error::GetPersonReactionError)?;
+
+    let action = reaction.action;
+
+    person_action_handler::handle_person_action(
+        worker,
+        &action,
+        person_uuid,
+        random_seed,
+        current_active_ms,
+    )
+    .await
+    .map_err(Error::ActionError)?;
+
+    match reaction.reflection {
+        ReflectionDecision::Reflection => {
+            let reflection_recent_events = get_recent_events_text(
+                worker,
+                MessageTypeArgs::SceneByUuid {
+                    scene_uuid: scene_uuid.clone(),
+                },
+                person_uuid,
+            )
+            .await?;
+
+            let reflection_situation = format!(
+                "{}\n\nRecent events:\n{}",
+                situation.to_string(),
+                Event::many_to_prompt_list(reflection_recent_events)
+            );
+            let _changes = worker
+                .get_reflection_changes(
+                    reflection_input.memories.clone(),
+                    person_uuid.clone(),
+                    reflection_input.person_identity.clone(),
+                    reflection_input.state_of_mind.clone(),
+                    reflection_situation,
+                )
+                .await
+                .map_err(Error::ReflectionError)?;
+        }
+        ReflectionDecision::NoReflection => {}
+    }
+
+    let description = format!(
+        "{}\n\nResponse:\n{}",
+        situation.to_string(),
+        action.summarize()
+    );
+
+    worker
+        .maybe_create_memories_from_description(person_uuid.clone(), description)
+        .await
+        .map_err(Error::FailedToCreateMemory)?;
+
+    let handled_ids = pending_messages
+        .into_iter()
+        .map(|msg| msg.uuid)
+        .collect::<Vec<_>>();
+
+    worker
+        .mark_scene_messages_handled_for_person(person_uuid, handled_ids)
+        .await
+        .map_err(|err| Error::FailedToMarkSceneMessagesHandled {
+            scene_uuid: scene_uuid.clone(),
+            details: err,
+        })?;
+
+    Ok(())
+}
+
+async fn build_reflection_input<
+    W: MessageCapability
+        + SceneCapability
         + MemoryCapability
         + PersonCapability
         + EventCapability
@@ -567,9 +636,9 @@ async fn process_message_for_person<
 >(
     worker: &W,
     message_type_args: MessageTypeArgs,
-    situation: &String,
+    situation: &Situation,
     person_uuid: &PersonUuid,
-) -> Result<PersonReaction, Error> {
+) -> Result<ReflectionInput, Error> {
     let persons_name: PersonName = worker
         .get_persons_name(person_uuid.clone())
         .await
@@ -595,21 +664,6 @@ async fn process_message_for_person<
         .map(|event| event.to_text())
         .collect::<Vec<String>>();
 
-    let recent_events = if events.is_empty() {
-        "None.".to_string()
-    } else {
-        events
-            .iter()
-            .rev()
-            .take(16)
-            .cloned()
-            .collect::<Vec<String>>()
-            .into_iter()
-            .rev()
-            .collect::<Vec<String>>()
-            .join("\n")
-    };
-
     let maybe_state_of_mind: Option<StateOfMind> = worker
         .get_latest_state_of_mind(&person_uuid)
         .await
@@ -628,7 +682,7 @@ async fn process_message_for_person<
             message_type_args,
             events,
             &state_of_mind.content,
-            situation,
+            &situation.to_string(),
         )
         .await
         .map_err(Error::CouldNotCreateMemoriesPrompt)?;
@@ -653,18 +707,32 @@ async fn process_message_for_person<
         })?,
     };
 
-    let reaction_situation = format!("{}\n\nRecent events:\n{}", situation, recent_events);
+    Ok(ReflectionInput {
+        memories,
+        person_identity,
+        state_of_mind: state_of_mind.content,
+    })
+}
 
-    let reaction = worker
-        .get_reaction(
-            memories,
-            person_uuid.clone(),
-            person_identity,
-            state_of_mind.content,
-            reaction_situation,
-        )
+async fn get_recent_events_text<W: EventCapability>(
+    worker: &W,
+    message_type_args: MessageTypeArgs,
+    person_uuid: &PersonUuid,
+) -> Result<Vec<Event>, Error> {
+    let get_args: capability::event::GetArgs = match &message_type_args {
+        MessageTypeArgs::SceneByUuid { scene_uuid } => capability::event::GetArgs::new()
+            .with_person_uuid(person_uuid.clone())
+            .with_scene_uuid(scene_uuid.clone()),
+        MessageTypeArgs::Scene { .. } => {
+            capability::event::GetArgs::new().with_person_uuid(person_uuid.clone())
+        }
+        MessageTypeArgs::Direct { .. } => {
+            capability::event::GetArgs::new().with_person_uuid(person_uuid.clone())
+        }
+    };
+
+    worker
+        .get_events(get_args)
         .await
-        .map_err(Error::GetPersonReactionError)?;
-
-    Ok(reaction)
+        .map_err(Error::FailedToGetEvents)
 }

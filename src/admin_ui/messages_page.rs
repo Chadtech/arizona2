@@ -193,12 +193,21 @@ impl Model {
             },
             Msg::TimelineLoaded(res) => {
                 if let SceneLoadStatus::Loaded(loaded_scene) = &mut self.scene_load_status {
+                    let should_scroll_to_bottom = match &loaded_scene.messages {
+                        MessagesStatus::Loading => true,
+                        MessagesStatus::Error { cached: None, .. } => true,
+                        MessagesStatus::Loaded(_) => false,
+                        MessagesStatus::Refreshing(_) => false,
+                        MessagesStatus::Error { cached: Some(_), .. } => false,
+                    };
                     match res {
                         Ok(timeline_model) => {
-                            let scroll_task =
-                                timeline_model.scroll_to_bottom().map(Msg::GotTimelineMsg);
                             loaded_scene.messages = MessagesStatus::Loaded(timeline_model);
-                            return scroll_task;
+                            if should_scroll_to_bottom {
+                                if let MessagesStatus::Loaded(model) = &loaded_scene.messages {
+                                    return model.scroll_to_bottom().map(Msg::GotTimelineMsg);
+                                }
+                            }
                         }
                         Err(err) => {
                             let cached = match &loaded_scene.messages {
@@ -340,6 +349,30 @@ impl Model {
                     Task::none()
                 }
             }
+        }
+    }
+
+    pub fn on_tab_activated(&mut self) -> Task<Msg> {
+        if self.view_mode != ViewMode::Scene {
+            return Task::none();
+        }
+
+        match &self.scene_load_status {
+            SceneLoadStatus::Loaded(scene) => match &scene.messages {
+                MessagesStatus::Loaded(model) => model.scroll_to_bottom().map(Msg::GotTimelineMsg),
+                MessagesStatus::Refreshing(model) => {
+                    model.scroll_to_bottom().map(Msg::GotTimelineMsg)
+                }
+                MessagesStatus::Error { cached: Some(model), .. } => {
+                    model.scroll_to_bottom().map(Msg::GotTimelineMsg)
+                }
+                MessagesStatus::Loading => Task::none(),
+                MessagesStatus::Error { cached: None, .. } => Task::none(),
+            },
+            SceneLoadStatus::Ready => Task::none(),
+            SceneLoadStatus::Loading => Task::none(),
+            SceneLoadStatus::NotFound(_) => Task::none(),
+            SceneLoadStatus::Error(_) => Task::none(),
         }
     }
 
@@ -528,18 +561,20 @@ impl Model {
 }
 
 fn view_messages(messages_status: &MessagesStatus) -> Element<'_, Msg> {
-    match &messages_status {
-        MessagesStatus::Loading => w::text("Loading messages...").into(),
-        MessagesStatus::Loaded(timeline_model) => timeline_model.view().map(Msg::GotTimelineMsg),
-        MessagesStatus::Refreshing(timeline_model) => {
-            timeline_model.view().map(Msg::GotTimelineMsg)
+        match &messages_status {
+            MessagesStatus::Loading => w::text("Loading messages...").into(),
+            MessagesStatus::Loaded(timeline_model) => {
+                timeline_model.view().map(Msg::GotTimelineMsg)
+            }
+            MessagesStatus::Refreshing(timeline_model) => {
+                timeline_model.view().map(Msg::GotTimelineMsg)
+            }
+            MessagesStatus::Error { message, cached } => match cached {
+                Some(timeline_model) => timeline_model.view().map(Msg::GotTimelineMsg),
+                None => w::text(format!("Error: {}", message)).into(),
+            },
         }
-        MessagesStatus::Error { message, cached } => match cached {
-            Some(timeline_model) => timeline_model.view().map(Msg::GotTimelineMsg),
-            None => w::text(format!("Error: {}", message)).into(),
-        },
     }
-}
 
 fn timeline_model_mut(
     messages_status: &mut MessagesStatus,

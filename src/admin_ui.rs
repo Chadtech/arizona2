@@ -383,7 +383,15 @@ impl Model {
                     self.error = Some(err);
                 }
 
-                self.tab.init_task(&self.worker)
+                let init_task = self.tab.init_task(&self.worker);
+                let tab_task = match self.tab {
+                    Tab::Messages => self
+                        .messages_page
+                        .on_tab_activated()
+                        .map(Msg::MessagesPageMsg),
+                    _ => Task::none(),
+                };
+                Task::batch(vec![init_task, tab_task])
             }
             Msg::NewIdentityPageMsg(sub_msg) => {
                 let task = self.new_identity_page.update(self.worker.clone(), sub_msg);

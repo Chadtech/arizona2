@@ -1,5 +1,6 @@
 use crate::capability::job::JobCapability;
 use crate::capability::message::MessageCapability;
+use crate::capability::logging::LogCapability;
 use crate::capability::scene::SceneCapability;
 use crate::capability::person::PersonCapability;
 use crate::capability::reaction_history::ReactionHistoryCapability;
@@ -7,6 +8,7 @@ use crate::domain::job::person_waiting::PersonWaitingJob;
 use crate::domain::job::send_message_to_scene::send_scene_message_and_enqueue_recipients;
 use crate::domain::job::JobKind;
 use crate::domain::message::MessageSender;
+use crate::domain::logger::Level;
 use crate::domain::person_uuid::PersonUuid;
 use crate::domain::random_seed::RandomSeed;
 use crate::domain::scene_uuid::SceneUuid;
@@ -56,7 +58,8 @@ pub async fn handle_person_action<
         + JobCapability
         + PersonCapability
         + MessageCapability
-        + ReactionHistoryCapability,
+        + ReactionHistoryCapability
+        + LogCapability,
 >(
     worker: &W,
     action: &PersonAction,
@@ -98,6 +101,16 @@ pub async fn handle_person_action<
                 scene_uuid,
                 details: err.to_nice_error().to_string(),
             })?;
+
+            let person_label = worker
+                .get_persons_name(person_uuid.clone())
+                .await
+                .map(|name| name.to_string())
+                .unwrap_or_else(|_| person_uuid.to_uuid().to_string());
+            worker.log(
+                Level::Info,
+                format!("AI person {} said in scene: {}", person_label, comment).as_str(),
+            );
 
             worker
                 .record_reaction(person_uuid, "say_in_scene")

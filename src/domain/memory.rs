@@ -1,5 +1,6 @@
 use crate::capability::memory::MemorySearchResult;
 
+#[derive(Clone)]
 pub struct Memory {
     pub content: String,
 }

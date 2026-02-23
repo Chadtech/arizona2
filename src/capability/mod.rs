@@ -10,5 +10,6 @@ pub mod person;
 pub mod person_identity;
 pub mod reaction;
 pub mod reaction_history;
+pub mod reflection;
 pub mod scene;
 pub mod state_of_mind;

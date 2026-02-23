@@ -57,7 +57,7 @@ impl MemoryCapability for Worker {
         let mut completion = Completion::new(open_ai::model::Model::DEFAULT);
         completion.add_message(
             Role::System,
-            "You decide whether a person should store a memory of a recent event. Be conservative: only store memories that are useful, relevant to motivations, emotionally significant, or important to relationships. If the event is not meaningful or lasting, do not call any tool. When you do create a memory, write it in standardized, first-person language (e.g., \"I ...\").",
+            "You decide whether a person should store a memory of a recent event. Be conservative: only store memories that are useful, relevant to motivations, emotionally significant, or important to relationships. If the event is not meaningful or lasting, do not call any tool. When you do create a memory, write it in standardized, first-person language (e.g., \"I ...\"), and include a memorable_score from 0-100.",
         );
 
         let user_prompt = format!(
@@ -70,12 +70,20 @@ impl MemoryCapability for Worker {
         let tool = ToolFunction::new(
             "create_memory".to_string(),
             "Store a memory if the event is worth remembering.".to_string(),
-            vec![ToolFunctionParameter::StringParam {
-                name: "content".to_string(),
-                description: "The memory to store, written in standardized first-person language."
-                    .to_string(),
-                required: true,
-            }],
+            vec![
+                ToolFunctionParameter::StringParam {
+                    name: "content".to_string(),
+                    description:
+                        "The memory to store, written in standardized first-person language."
+                            .to_string(),
+                    required: true,
+                },
+                ToolFunctionParameter::IntegerParam {
+                    name: "memorable_score".to_string(),
+                    description: "A 0-100 score for how memorable this is.".to_string(),
+                    required: true,
+                },
+            ],
         );
         completion.add_tool_call(tool.into());
         let response = completion
@@ -85,31 +93,54 @@ impl MemoryCapability for Worker {
 
         let tool_calls = response.maybe_tool_calls().map_err(|err| err.message())?;
 
-        let new_memories: Vec<String> = match tool_calls {
+        let new_memories: Vec<MemoryCandidate> = match tool_calls {
             None => {
-                log_memory_decision(self, None).await;
+                log_memory_decision(self, None, None, Some("no_tool_call")).await;
                 vec![]
             }
             Some(tool_calls) => extract_memory_content(tool_calls)?,
         };
 
         let mut ret = vec![];
-        for memory_content in new_memories.into_iter() {
-            let is_distinct = is_memory_distinct(self, &person_uuid, &memory_content).await?;
+        for candidate in new_memories.into_iter() {
+            if candidate.memorable_score < MIN_MEMORABLE_SCORE {
+                log_memory_decision(
+                    self,
+                    None,
+                    Some(candidate.memorable_score),
+                    Some("score_below_threshold"),
+                )
+                .await;
+                continue;
+            }
+
+            let is_distinct = is_memory_distinct(self, &person_uuid, &candidate.content).await?;
             if !is_distinct {
-                log_memory_decision(self, None).await;
+                log_memory_decision(
+                    self,
+                    None,
+                    Some(candidate.memorable_score),
+                    Some("not_distinct"),
+                )
+                .await;
                 continue;
             }
 
             let new_memory = NewMemory {
                 memory_uuid: MemoryUuid::new(),
-                content: memory_content,
+                content: candidate.content,
                 person_uuid: person_uuid.clone(),
             };
 
             let memory_uuid = self.create_memory(new_memory).await?;
 
-            log_memory_decision(self, Some(&memory_uuid)).await;
+            log_memory_decision(
+                self,
+                Some(&memory_uuid),
+                Some(candidate.memorable_score),
+                None,
+            )
+            .await;
 
             ret.push(memory_uuid);
         }
@@ -352,14 +383,27 @@ impl MemoryCapability for Worker {
 }
 
 const MIN_MEMORY_DISTANCE: f64 = 0.15;
+const MIN_MEMORABLE_SCORE: i64 = 60;
 
-async fn log_memory_decision(worker: &Worker, memory_uuid: Option<&MemoryUuid>) {
+async fn log_memory_decision(
+    worker: &Worker,
+    memory_uuid: Option<&MemoryUuid>,
+    memorable_score: Option<i64>,
+    reason: Option<&str>,
+) {
+    let reason = reason.map(|value| value.to_string());
     let data = match memory_uuid {
         Some(uuid) => serde_json::json!({
             "created": true,
             "memory_uuid": uuid.to_uuid().to_string(),
+            "memorable_score": memorable_score,
+            "reason": reason,
         }),
-        None => serde_json::json!({ "created": false }),
+        None => serde_json::json!({
+            "created": false,
+            "memorable_score": memorable_score,
+            "reason": reason,
+        }),
     };
 
     if let Err(err) = worker
@@ -388,23 +432,42 @@ async fn is_memory_distinct(
 
     Ok(matches[0].distance > MIN_MEMORY_DISTANCE)
 }
-fn extract_memory_content(tool_calls: Vec<ToolCall>) -> Result<Vec<String>, String> {
-    let mut ret = vec![];
+struct MemoryCandidate {
+    content: String,
+    memorable_score: i64,
+}
+
+fn extract_memory_content(tool_calls: Vec<ToolCall>) -> Result<Vec<MemoryCandidate>, String> {
+    let mut ret: Vec<MemoryCandidate> = vec![];
 
     for call in tool_calls
         .into_iter()
         .filter(|call| call.name == "create_memory")
     {
-        if let Some(value) = call
+        let content = call
             .arguments
             .iter()
             .find(|(name, _)| name == "content")
             .and_then(|(_, value)| value.as_str())
-        {
-            ret.push(value.to_string());
-        } else {
-            Err("Missing 'content' argument in 'create_memory' tool call".to_string())?;
+            .ok_or_else(|| "Missing 'content' argument in 'create_memory' tool call".to_string())?;
+
+        let memorable_score = call
+            .arguments
+            .iter()
+            .find(|(name, _)| name == "memorable_score")
+            .and_then(|(_, value)| value.as_i64())
+            .ok_or_else(|| {
+                "Missing 'memorable_score' argument in 'create_memory' tool call".to_string()
+            })?;
+
+        if !(0..=100).contains(&memorable_score) {
+            Err("Invalid 'memorable_score' (expected 0-100)".to_string())?;
         }
+
+        ret.push(MemoryCandidate {
+            content: content.to_string(),
+            memorable_score,
+        });
     }
 
     Ok(ret)

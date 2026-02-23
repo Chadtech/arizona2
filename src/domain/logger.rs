@@ -1,3 +1,4 @@
+use std::io::Write;
 use std::path::Path;
 
 #[derive(Clone, Debug)]
@@ -53,26 +54,26 @@ impl Logger {
     }
 
     fn log_helper(&self, level: Level, message: &str) -> Result<(), String> {
-        let log_message = format!("[{}] {}\n", level.to_string(), message);
-
         match self.log_to {
             LogTo::Console => {
+                let log_message = format!("[{}] {}\n", level.to_string(), message);
                 print!("{}", log_message);
                 Ok(())
             }
             LogTo::File => {
+                let log_message = format!(
+                    "[{}] {}\n\n\n========================================\n",
+                    level.to_string(),
+                    message
+                );
                 if !Path::new("logs").is_dir() {
                     std::fs::create_dir("logs")
                         .map_err(|e| format!("Failed to create logs directory: {}", e))?;
                 }
 
-                std::fs::OpenOptions::new()
-                    .create(true)
-                    .append(true)
-                    .open("logs/log.txt")
-                    .and_then(|mut file| {
-                        std::io::Write::write_all(&mut file, log_message.as_bytes())
-                    })
+                let mut appender = tracing_appender::rolling::daily("logs", "log.txt");
+                appender
+                    .write_all(log_message.as_bytes())
                     .map_err(|e| format!("Failed to write to log file: {}", e))
             }
         }

@@ -443,6 +443,15 @@ fn selected_job_view(selected: &SelectedJobStatus) -> Element<'_, Msg> {
                 None => "Error: none".to_string(),
             };
 
+            let data_text = match selected_job.job.data() {
+                Ok(Some(data)) => match serde_json::to_string_pretty(&data) {
+                    Ok(pretty) => format!("Data:\n{}", pretty),
+                    Err(err) => format!("Data: <failed to format JSON: {}>", err),
+                },
+                Ok(None) => "Data: none".to_string(),
+                Err(err) => format!("Data error: {}", err),
+            };
+
             let reset_controls: Element<Msg> = match &selected_job.reset_status {
                 ResetJobStatus::Resetting => w::text("Resetting job...").into(),
                 ResetJobStatus::ResetOk => w::text("Job reset").into(),
@@ -500,6 +509,7 @@ fn selected_job_view(selected: &SelectedJobStatus) -> Element<'_, Msg> {
                 w::text(finished_at),
                 w::text(deleted_at),
                 w::text(error_text),
+                w::text(data_text),
                 action_row
             ]
             .spacing(s::S2)

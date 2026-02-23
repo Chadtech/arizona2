@@ -1,5 +1,6 @@
 use crate::capability::event::EventCapability;
 use crate::capability::job::JobCapability;
+use crate::capability::logging::LogCapability;
 use crate::capability::memory::{MemoryCapability, MemorySearchResult, MessageTypeArgs};
 use crate::capability::message::MessageCapability;
 use crate::capability::person::PersonCapability;
@@ -140,7 +141,8 @@ impl PersonWaitingJob {
             + EventCapability
             + StateOfMindCapability
             + PersonIdentityCapability
-            + ReactionHistoryCapability,
+            + ReactionHistoryCapability
+            + LogCapability,
     >(
         &self,
         worker: &W,

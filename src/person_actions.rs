@@ -89,6 +89,20 @@ pub enum PersonAction {
     SayInScene { comment: String },
 }
 
+impl PersonAction {
+    pub fn summarize(&self) -> String {
+        match self {
+            PersonAction::Wait { duration } => {
+                format!("Waited for {} seconds.", duration)
+            }
+            PersonAction::Idle => "Did nothing.".to_string(),
+            PersonAction::SayInScene { comment } => {
+                format!("Spoke in scene: {}", comment)
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct PersonReaction {
     pub action: PersonAction,
@@ -113,6 +127,7 @@ pub enum PersonActionError {
     ParameterMissing {
         action_name: String,
         parameter_name: String,
+        arguments: serde_json::Value,
     },
     UnexpectedType {
         action_name: String,
@@ -140,9 +155,10 @@ impl NiceDisplay for PersonActionError {
             PersonActionError::ParameterMissing {
                 action_name,
                 parameter_name,
+                arguments,
             } => format!(
-                "Missing required parameter '{}' for action '{}'",
-                parameter_name, action_name
+                "Missing required parameter '{}' for action '{}'. Arguments: {}",
+                parameter_name, action_name, arguments
             ),
             PersonActionError::UnexpectedType {
                 action_name,
@@ -168,12 +184,15 @@ impl PersonReaction {
             });
         }
 
+        let arguments = tool_call.arguments;
+        let arguments_json = tool_args_to_json(&arguments);
+
         let mut maybe_reflection: Option<String> = None;
         let mut maybe_action: Option<String> = None;
         let mut maybe_comment: Option<String> = None;
         let mut maybe_duration: Option<u64> = None;
 
-        for (key, value) in tool_call.arguments {
+        for (key, value) in arguments {
             match key.as_str() {
                 "reflection" => {
                     maybe_reflection = value.as_str().map(|s| s.to_string());
@@ -215,12 +234,14 @@ impl PersonReaction {
             None => Err(PersonActionError::ParameterMissing {
                 action_name: tool_call_name.clone(),
                 parameter_name: "reflection".to_string(),
+                arguments: arguments_json.clone(),
             })?,
         };
 
         let action = maybe_action.ok_or_else(|| PersonActionError::ParameterMissing {
             action_name: tool_call_name.clone(),
             parameter_name: "action".to_string(),
+            arguments: arguments_json.clone(),
         })?;
 
         let action = match action.as_str() {
@@ -228,6 +249,7 @@ impl PersonReaction {
                 let comment = maybe_comment.ok_or_else(|| PersonActionError::ParameterMissing {
                     action_name: tool_call_name.clone(),
                     parameter_name: "comment".to_string(),
+                    arguments: arguments_json.clone(),
                 })?;
                 PersonAction::SayInScene { comment }
             }
@@ -236,6 +258,7 @@ impl PersonReaction {
                     maybe_duration.ok_or_else(|| PersonActionError::ParameterMissing {
                         action_name: tool_call_name.clone(),
                         parameter_name: "duration".to_string(),
+                        arguments: arguments_json.clone(),
                     })?;
                 PersonAction::Wait { duration }
             }
@@ -247,4 +270,12 @@ impl PersonReaction {
 
         Ok(PersonReaction { action, reflection })
     }
+}
+
+fn tool_args_to_json(args: &[(String, serde_json::Value)]) -> serde_json::Value {
+    let mut map = serde_json::Map::new();
+    for (key, value) in args {
+        map.insert(key.clone(), value.clone());
+    }
+    serde_json::Value::Object(map)
 }

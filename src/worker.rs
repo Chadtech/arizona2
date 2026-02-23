@@ -10,6 +10,7 @@ mod person_capability;
 mod person_identity_capability;
 mod reaction_history_capability;
 mod reaction_capability;
+mod reflection_capability;
 mod scene_capability;
 mod state_of_mind_capability;
 

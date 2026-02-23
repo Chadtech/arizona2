@@ -8,6 +8,7 @@ use crate::capability::person::PersonCapability;
 use crate::capability::person_identity::PersonIdentityCapability;
 use crate::capability::reaction::ReactionCapability;
 use crate::capability::reaction_history::ReactionHistoryCapability;
+use crate::capability::reflection::ReflectionCapability;
 use crate::capability::scene::SceneCapability;
 use crate::capability::state_of_mind::StateOfMindCapability;
 use crate::domain::job::{
@@ -296,6 +297,7 @@ async fn run_next_job<
         + StateOfMindCapability
         + PersonIdentityCapability
         + ReactionHistoryCapability
+        + ReflectionCapability
         + LogCapability,
 >(
     worker: W,
@@ -336,6 +338,7 @@ async fn run_job<
         + StateOfMindCapability
         + PersonIdentityCapability
         + ReactionHistoryCapability
+        + ReflectionCapability
         + LogCapability,
 >(
     worker: W,
@@ -427,6 +430,7 @@ mod tests {
         CurrentScene, NewScene, NewSceneSnapshot, Scene, SceneCapability, SceneParticipant,
         SceneParticipation,
     };
+    use crate::capability::reflection::{ReflectionCapability, ReflectionChange};
     use crate::capability::state_of_mind::{NewStateOfMind, StateOfMindCapability};
     use crate::domain::job::{JobKind, PoppedJob};
     use crate::domain::job_uuid::JobUuid;
@@ -670,6 +674,19 @@ mod tests {
                 action: PersonAction::Idle,
                 reflection: ReflectionDecision::NoReflection,
             })
+        }
+    }
+
+    impl ReflectionCapability for MockWorker {
+        async fn get_reflection_changes(
+            &self,
+            _memories: Vec<Memory>,
+            _person_uuid: PersonUuid,
+            _person_identity: String,
+            _state_of_mind: String,
+            _situation: String,
+        ) -> Result<Vec<ReflectionChange>, String> {
+            Ok(vec![])
         }
     }
 

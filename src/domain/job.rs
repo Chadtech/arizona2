@@ -185,6 +185,10 @@ impl Job {
     pub fn deleted_at(&self) -> Option<DateTime<Utc>> {
         self.deleted_at
     }
+
+    pub fn data(&self) -> Result<Option<serde_json::Value>, String> {
+        self.kind.to_data()
+    }
 }
 
 impl PoppedJob {

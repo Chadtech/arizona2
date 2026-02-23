@@ -8,6 +8,7 @@ use crate::domain::scene_uuid::SceneUuid;
 use crate::worker::Worker;
 use chrono::{DateTime, Utc};
 use iced::clipboard;
+use iced::widget::container;
 use iced::widget::scrollable;
 use iced::{widget as w, Element, Length, Task};
 use std::collections::{HashMap, HashSet};
@@ -216,7 +217,7 @@ impl Model {
     }
 
     pub fn view(&self) -> Element<'_, Msg> {
-        if self.items.is_empty() {
+        let content: Element<'_, Msg> = if self.items.is_empty() {
             w::text("No messages or events in this scene").into()
         } else {
             let timeline = self
@@ -233,7 +234,20 @@ impl Model {
                 .width(Length::Fill)
                 .height(Length::Fixed(s::LIST_HEIGHT))
                 .into()
-        }
+        };
+
+        w::container(content)
+            .padding(s::S1)
+            .width(Length::Fill)
+            .style(|_| container::Style {
+                border: iced::border::Border {
+                    width: 1.0,
+                    color: s::GRAY_SOFT,
+                    ..Default::default()
+                },
+                ..Default::default()
+            })
+            .into()
     }
 
     fn view_timeline_item<'a>(&'a self, item: &'a TimelineItem) -> Element<'a, Msg> {
