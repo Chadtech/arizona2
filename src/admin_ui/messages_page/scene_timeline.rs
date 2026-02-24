@@ -228,7 +228,14 @@ impl Model {
                 })
                 .spacing(s::S2);
 
-            w::scrollable(timeline)
+            let padded_timeline = w::container(timeline).padding(iced::Padding {
+                top: s::S0,
+                right: s::S1,
+                bottom: s::S0,
+                left: s::S0,
+            });
+
+            w::scrollable(padded_timeline)
                 .id(self.scrollable_id.clone())
                 .on_scroll(Msg::Scrolled)
                 .width(Length::Fill)
@@ -265,10 +272,7 @@ impl Model {
                 let copy_text = format!("{}\n{}", header_text, display_content);
 
                 w::column![
-                    w::row![
-                        w::text(sender_label).size(s::S4).color(name_color),
-                    ]
-                    .spacing(s::S1),
+                    w::row![w::text(sender_label).size(s::S4).color(name_color),].spacing(s::S1),
                     w::row![
                         w::text(format!("[{}]", time_str))
                             .size(s::S3)

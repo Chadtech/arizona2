@@ -19,6 +19,7 @@ use crate::open_ai::completion::CompletionError;
 use crate::worker;
 use crate::worker::Worker;
 use iced;
+use iced::futures::StreamExt;
 use iced::{widget as w, Element, Length, Subscription, Task, Theme};
 use serde::{Deserialize, Serialize};
 use std::fs::File;
@@ -203,6 +204,8 @@ impl Tab {
 
     pub fn all() -> Vec<Tab> {
         vec![
+            Tab::Messages,
+            Tab::Job,
             Tab::Prompt,
             Tab::PromptLab,
             Tab::Reaction,
@@ -210,10 +213,8 @@ impl Tab {
             Tab::Person,
             Tab::Memory,
             Tab::Motivation,
-            Tab::Messages,
             Tab::StateOfMind,
             Tab::Scene,
-            Tab::Job,
         ]
     }
 
@@ -478,14 +479,7 @@ impl Model {
                     .job_runner_poll_interval_input
                     .trim()
                     .parse::<u64>()
-                    .map_err(|_| "Enter a whole number of seconds".to_string())
-                    .and_then(|secs| {
-                        if secs == 0 {
-                            Err("Seconds must be greater than zero".to_string())
-                        } else {
-                            Ok(secs)
-                        }
-                    });
+                    .map_err(|_| "Enter a whole number of seconds".to_string());
 
                 let secs = match secs_res {
                     Ok(secs) => secs,
@@ -600,19 +594,27 @@ impl Model {
         let tabs = Tab::all()
             .iter()
             .map(|tab: &Tab| {
-                w::radio(
+                let radio_tab: Element<Msg> = w::radio(
                     tab.to_label(),
                     tab.clone(),
                     Some(self.tab.clone()),
                     Msg::TabSelected,
                 )
-                .into()
+                .into();
+
+                if *tab == Tab::Job {
+                    vec![radio_tab, w::horizontal_rule(1).into()]
+                } else {
+                    vec![radio_tab]
+                }
             })
+            .flatten()
             .collect::<Vec<Element<Msg>>>();
 
         let tab_column = w::Column::with_children(tabs)
             .spacing(s::S2)
             .width(Length::Fixed(180.0));
+
         let time_controls = w::row![
             w::text("Job interval (s)"),
             w::text_input("", &self.job_runner_poll_interval_input)

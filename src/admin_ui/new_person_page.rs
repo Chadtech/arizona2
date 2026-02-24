@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 pub struct Model {
     name_field: String,
-    identity_field: String,
+    identity_field: w::text_editor::Content,
     status: Status,
     lookup_name_field: String,
     lookup_status: LookupStatus,
@@ -58,7 +58,7 @@ impl Default for Storage {
 
 #[derive(Debug, Clone)]
 pub enum Msg {
-    IdentityFieldChanged(String),
+    IdentityFieldChanged(w::text_editor::Action),
     NameFieldChanged(String),
     ClickedCreatePerson,
     PersonCreated(Result<PersonUuid, String>),
@@ -71,7 +71,7 @@ pub enum Msg {
 impl Model {
     pub fn new(storage: &Storage) -> Self {
         Self {
-            identity_field: storage.identity_field.clone(),
+            identity_field: w::text_editor::Content::with_text(&storage.identity_field),
             name_field: storage.name_field.clone(),
             status: Status::Ready,
             lookup_name_field: storage.lookup_name_field.clone(),
@@ -80,7 +80,7 @@ impl Model {
     }
     pub fn to_storage(&self) -> Storage {
         Storage {
-            identity_field: self.identity_field.clone(),
+            identity_field: self.identity_field.text(),
             name_field: self.name_field.clone(),
             lookup_name_field: self.lookup_name_field.clone(),
         }
@@ -88,8 +88,8 @@ impl Model {
 
     pub fn update(&mut self, worker: Arc<Worker>, msg: Msg) -> Task<Msg> {
         match msg {
-            Msg::IdentityFieldChanged(value) => {
-                self.identity_field = value;
+            Msg::IdentityFieldChanged(action) => {
+                self.identity_field.perform(action);
                 Task::none()
             }
             Msg::NameFieldChanged(value) => {
@@ -123,7 +123,7 @@ impl Model {
 
                     let new_identity = NewPersonIdentity {
                         person_identity_uuid: PersonIdentityUuid::new(),
-                        identity: self.identity_field.clone(),
+                        identity: self.identity_field.text(),
                         person_name: self.name_field.clone(),
                     };
 
@@ -170,7 +170,9 @@ impl Model {
             w::text("Person Name"),
             w::text_input("", &self.name_field).on_input(Msg::NameFieldChanged),
             w::text("Identity"),
-            w::text_input("", &self.identity_field).on_input(Msg::IdentityFieldChanged),
+            w::text_editor(&self.identity_field)
+                .on_action(Msg::IdentityFieldChanged)
+                .height(iced::Length::Fixed(220.0)),
             w::button("Create Person").on_press(Msg::ClickedCreatePerson),
             status_view(&self.status),
         ]

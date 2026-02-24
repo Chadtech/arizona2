@@ -28,9 +28,9 @@ impl JobRunnerSettingsCapability for Worker {
             .try_get::<i64, _>("poll_interval_secs")
             .map_err(|err| format!("Error reading job runner poll interval: {}", err))?;
 
-        if secs <= 0 {
+        if secs < 0 {
             return Err(format!(
-                "Job runner poll interval must be positive, got {}",
+                "Job runner poll interval must be non-negative, got {}",
                 secs
             ));
         }
@@ -39,9 +39,7 @@ impl JobRunnerSettingsCapability for Worker {
     }
 
     async fn set_job_runner_poll_interval_secs(&self, secs: u64) -> Result<(), String> {
-        if secs == 0 {
-            return Err("Job runner poll interval must be positive".to_string());
-        }
+        // zero is allowed (no cooldown)
 
         sqlx::query(
             r#"

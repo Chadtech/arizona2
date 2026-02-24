@@ -97,7 +97,7 @@ async fn get_reaction_helper(
     };
 
     let user_prompt = format!(
-        "Predict the most realistic, human behavior for this person in the situation below, then choose exactly one action tool call that best matches that behavior. Do not explain.\n\nMemories:\n{}\n\nMotivations:\n{}\n\nPerson identity:\n{}\n\nState of mind:\n{}\n\nSituation:\n{}",
+        "Predict the most realistic, human behavior for this person in the situation below, then choose exactly one action tool call that best matches that behavior. Do not explain. The background drives should influence behavior implicitly; avoid stating them directly in dialogue.\n\nMemories:\n{}\n\nBackground drives:\n{}\n\nPerson identity:\n{}\n\nState of mind:\n{}\n\nSituation:\n{}",
         memories_list, motivations_list, person_identity, state_of_mind, situation
     );
 
