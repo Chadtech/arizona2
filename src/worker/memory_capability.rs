@@ -57,11 +57,11 @@ impl MemoryCapability for Worker {
         let mut completion = Completion::new(open_ai::model::Model::DEFAULT);
         completion.add_message(
             Role::System,
-            "You decide whether a person should store a memory of a recent event. Be conservative: only store memories that are useful, relevant to motivations, emotionally significant, or important to relationships. If the event is not meaningful or lasting, do not call any tool. When you do create a memory, write it in standardized, first-person language (e.g., \"I ...\"), and include a memorable_score from 0-100.",
+            "You decide whether a person should store a memory of a recent event. Be conservative: only store memories that are useful, relevant to motivations, emotionally significant, or important to relationships. If the event is not meaningful or lasting, do not call any tool. When you do create a memory, write it in standardized, first-person language (e.g., \"I ...\"), never refer to the person by name, and include a memorable_score from 0-100. Use the full scale: 0-20 = trivial/noisy, 21-49 = minor context, 50-69 = somewhat meaningful, 70-84 = memorable, 85-100 = highly significant. Most memories should score below 50; only rare, highly salient events should be 70+.",
         );
 
         let user_prompt = format!(
-            "Person: {}\n\nEvent description:\n{}",
+            "Person (memory owner): {}\n\nEvent description (quote):\n\"{}\"",
             person_name.as_str(),
             description
         );

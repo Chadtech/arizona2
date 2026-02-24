@@ -60,6 +60,11 @@ impl Response {
         Self { json }
     }
 
+    pub fn as_pretty_json(&self) -> String {
+        serde_json::to_string_pretty(&self.json)
+            .unwrap_or_else(|_| self.json.to_string())
+    }
+
     pub fn as_message(&self) -> Result<String, MessageError> {
         self.json
             .get("choices")

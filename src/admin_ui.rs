@@ -585,13 +585,13 @@ impl Model {
                 task.map(Msg::ReactionPageMsg)
             }
             Msg::PromptLabMsg(sub_msg) => {
-                self.prompt_lab_page.update(sub_msg);
+                let task = self.prompt_lab_page.update(self.worker.clone(), sub_msg);
 
                 if let Err(err) = self.to_storage().save_to_file_system() {
                     self.error = Some(err);
                 }
 
-                Task::none()
+                task.map(Msg::PromptLabMsg)
             }
         }
     }

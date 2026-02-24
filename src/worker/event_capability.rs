@@ -3,6 +3,7 @@ use crate::capability::person::PersonCapability;
 use crate::capability::scene::SceneCapability;
 use crate::domain::event::{Event, EventType};
 use crate::domain::message::MessageSender;
+use crate::domain::message_uuid::MessageUuid;
 use crate::domain::person_uuid::PersonUuid;
 use crate::worker::Worker;
 
@@ -24,7 +25,7 @@ impl EventCapability for Worker {
                 // Get direct messages to this person
                 let direct_messages = sqlx::query!(
                     r#"
-                    SELECT sender_person_uuid, content, sent_at
+                    SELECT uuid, sender_person_uuid, content, sent_at
                     FROM message
                     WHERE receiver_person_uuid = $1
                       AND scene_uuid IS NULL
@@ -46,6 +47,7 @@ impl EventCapability for Worker {
                                 ),
                             ),
                             comment: msg.content,
+                            message_uuid: MessageUuid::from_uuid(msg.uuid),
                         },
                     ));
                 }
@@ -74,7 +76,7 @@ impl EventCapability for Worker {
                     // Get scene messages since they joined
                     let scene_messages = sqlx::query!(
                         r#"
-                        SELECT sender_person_uuid, content, sent_at
+                        SELECT uuid, sender_person_uuid, content, sent_at
                         FROM message
                         WHERE scene_uuid = $1
                           AND sent_at >= $2
@@ -106,6 +108,7 @@ impl EventCapability for Worker {
                                 scene_name: scene_name.clone(),
                                 speaker_name,
                                 comment: msg.content,
+                                message_uuid: MessageUuid::from_uuid(msg.uuid),
                             },
                         ));
                     }
@@ -129,12 +132,19 @@ impl EventCapability for Worker {
                     for participant in participant_events {
                         let participant_person_uuid =
                             PersonUuid::from_uuid(participant.person_uuid);
+                        let participant_name = self
+                            .get_persons_name(participant_person_uuid.clone())
+                            .await
+                            .map_err(|err| format!("Error fetching participant name: {}", err))?
+                            .as_str()
+                            .to_string();
 
                         // Add join event
                         events.push(Event::new(
                             participant.joined_at,
                             EventType::PersonJoinedScene {
                                 person_uuid: participant_person_uuid.clone(),
+                                person_name: participant_name.clone(),
                                 scene_name: scene_name.clone(),
                             },
                         ));
@@ -145,6 +155,7 @@ impl EventCapability for Worker {
                                 left_at,
                                 EventType::PersonLeftScene {
                                     person_uuid: participant_person_uuid,
+                                    person_name: participant_name.clone(),
                                     scene_name: scene_name.clone(),
                                 },
                             ));
@@ -157,7 +168,7 @@ impl EventCapability for Worker {
             (Some(person_uuid), None) => {
                 let direct_messages = sqlx::query!(
                     r#"
-                    SELECT sender_person_uuid, content, sent_at
+                    SELECT uuid, sender_person_uuid, content, sent_at
                     FROM message
                     WHERE receiver_person_uuid = $1
                       AND scene_uuid IS NULL
@@ -179,6 +190,7 @@ impl EventCapability for Worker {
                                 ),
                             ),
                             comment: msg.content,
+                            message_uuid: MessageUuid::from_uuid(msg.uuid),
                         },
                     ));
                 }
@@ -197,7 +209,7 @@ impl EventCapability for Worker {
                 // Get all scene messages
                 let scene_messages = sqlx::query!(
                     r#"
-                    SELECT sender_person_uuid, content, sent_at
+                    SELECT uuid, sender_person_uuid, content, sent_at
                     FROM message
                     WHERE scene_uuid = $1
                     ORDER BY sent_at
@@ -227,6 +239,7 @@ impl EventCapability for Worker {
                             scene_name: scene_name.clone(),
                             speaker_name,
                             comment: msg.content,
+                            message_uuid: MessageUuid::from_uuid(msg.uuid),
                         },
                     ));
                 }
@@ -247,12 +260,19 @@ impl EventCapability for Worker {
 
                 for participant in participant_events {
                     let participant_person_uuid = PersonUuid::from_uuid(participant.person_uuid);
+                    let participant_name = self
+                        .get_persons_name(participant_person_uuid.clone())
+                        .await
+                        .map_err(|err| format!("Error fetching participant name: {}", err))?
+                        .as_str()
+                        .to_string();
 
                     // Add join event
                     events.push(Event::new(
                         participant.joined_at,
                         EventType::PersonJoinedScene {
                             person_uuid: participant_person_uuid.clone(),
+                            person_name: participant_name.clone(),
                             scene_name: scene_name.clone(),
                         },
                     ));
@@ -263,6 +283,7 @@ impl EventCapability for Worker {
                             left_at,
                             EventType::PersonLeftScene {
                                 person_uuid: participant_person_uuid,
+                                person_name: participant_name.clone(),
                                 scene_name: scene_name.clone(),
                             },
                         ));

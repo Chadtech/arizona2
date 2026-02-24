@@ -64,13 +64,17 @@ async fn get_reaction_helper(
 ) -> Result<PersonReaction, Error> {
     let mut completion = Completion::new(open_ai::model::Model::DEFAULT);
 
-    completion.add_message(Role::System, "You are simulating a real human. Your goal is to predict what this person would actually do, not what an ideal or optimal person should do. Humans are bounded, imperfect, emotional, and context-driven. Use the memories, motivations, identity, and state of mind to choose the most realistic action. Prefer ordinary, plausible behavior over dramatic or clever behavior. If nothing new has happened, predict what a human realistically would do if that period of time elapsed with nothing happening. The person understands they can only do the following actions, and these are the only possible actions: wait, idle, say in scene. Respond with exactly one tool call and no extra text.");
+    completion.add_message(Role::System, "You are simulating a real human. Your goal is to predict what this person would actually do. The information provided is complete; the person has no other knowledge or context beyond what is in the prompt, and their behavior must not assume anything else. Use the memories, motivations, identity, and state of mind to choose the most realistic action. Prefer ordinary, plausible behavior over dramatic or clever behavior. If the latest message is clearly addressed to someone else and not to this person, prefer waiting unless there is a strong, realistic reason to interject. If the person does speak, they will contribute something novel instead of repeating what has already been said. If nothing new has happened, predict what a human of the following description realistically would do if that period of time elapsed with nothing happening. The person understands they can only do the following actions, and these are the only possible actions: wait, idle, say in scene. Respond with exactly one tool call and no extra text.");
 
-    let memories_list = memories
-        .iter()
-        .map(|memory| format!("- {}", memory.content))
-        .collect::<Vec<String>>()
-        .join("\n");
+    let memories_list = if memories.is_empty() {
+        "None.".to_string()
+    } else {
+        memories
+            .iter()
+            .map(|memory| format!("- {}", memory.content))
+            .collect::<Vec<String>>()
+            .join("\n")
+    };
 
     let motivations = worker
         .get_motivations_for_person(person_uuid.clone())

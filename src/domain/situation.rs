@@ -50,7 +50,7 @@ impl Situation {
         };
 
         format!(
-            "{} is in the scene \"{}\". {}\n\nOther people present: {}\n\nMessages received (oldest to newest):\n{}",
+            "{} is in the scene \"{}\". {}\n\nPeople present (complete list): {}\n\nMessages received (oldest to newest):\n{}",
             self.person_name,
             self.scene_name,
             self.scene_description,

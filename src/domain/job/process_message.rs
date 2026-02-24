@@ -10,6 +10,7 @@ use crate::capability::reaction_history::ReactionHistoryCapability;
 use crate::capability::reflection::ReflectionCapability;
 use crate::capability::state_of_mind::StateOfMindCapability;
 use crate::domain::actor_uuid::ActorUuid;
+use crate::domain::event::EventType;
 use crate::domain::event::Event;
 use crate::domain::job::person_action_handler::{self, ActionHandleError};
 use crate::domain::logger::Level;
@@ -29,6 +30,7 @@ use crate::{
     nice_display::NiceDisplay,
 };
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProcessMessageJob {
@@ -397,11 +399,6 @@ async fn build_scene_situation<W: SceneCapability + PersonCapability>(
 
     let mut participant_names = participants
         .iter()
-        .filter(|participant| match &participant.actor_uuid {
-            ActorUuid::AiPerson(uuid) => uuid.to_uuid() != person_uuid.to_uuid(),
-            ActorUuid::RealWorldUser => true,
-        })
-        .filter(|participant| participant.person_name.as_str() != person_name_str)
         .map(|participant| participant.person_name.to_string())
         .collect::<Vec<String>>();
 
@@ -469,6 +466,26 @@ fn normalize_message_content(content: &str) -> &str {
     }
 
     content
+}
+
+fn filter_reaction_events(events: Vec<Event>, messages: &[Message]) -> Vec<Event> {
+    let mut message_ids = HashSet::new();
+    for message in messages {
+        message_ids.insert(message.uuid.clone());
+    }
+
+    events
+        .into_iter()
+        .filter(|event| match &event.event_type {
+            EventType::PersonSaidInScene { message_uuid, .. } => {
+                !message_ids.contains(message_uuid)
+            }
+            EventType::PersonDirectMessaged { message_uuid, .. } => {
+                !message_ids.contains(message_uuid)
+            }
+            _ => true,
+        })
+        .collect()
 }
 
 async fn run_message_in_scene<
@@ -539,10 +556,11 @@ async fn run_message_in_scene<
     )
     .await?;
 
+    let reaction_events = filter_reaction_events(reaction_recent_events, &pending_messages);
     let reaction_situation = format!(
         "{}\n\nRecent events:\n{}",
         situation.to_string(),
-        Event::many_to_prompt_list(reaction_recent_events)
+        Event::many_to_prompt_list(reaction_events)
     );
 
     let reaction = worker
@@ -687,13 +705,12 @@ async fn build_reflection_input<
         .await
         .map_err(Error::CouldNotCreateMemoriesPrompt)?;
 
-    let memories: Vec<Memory> = worker
-        .search_memories(person_uuid.clone(), memories_prompt.prompt, 8)
-        .await
-        .map_err(Error::FailedToSearchMemories)?
-        .into_iter()
-        .map(|memory_search_result: MemorySearchResult| Memory::from(memory_search_result))
-        .collect();
+    let memories: Vec<Memory> = crate::domain::memory::filter_memory_results(
+        worker
+            .search_memories(person_uuid.clone(), memories_prompt.prompt, 5)
+            .await
+            .map_err(Error::FailedToSearchMemories)?,
+    );
 
     let maybe_person_identity: Option<String> = worker
         .get_person_identity(person_uuid)

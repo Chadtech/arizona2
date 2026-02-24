@@ -230,13 +230,12 @@ impl PersonWaitingJob {
                 .await
                 .map_err(Error::CouldNotCreateMemoriesPrompt)?;
 
-            let memories: Vec<Memory> = worker
-                .search_memories(person_uuid.clone(), memories_prompt.prompt, 8)
-                .await
-                .map_err(Error::FailedToSearchMemories)?
-                .into_iter()
-                .map(|memory_search_result: MemorySearchResult| Memory::from(memory_search_result))
-                .collect();
+            let memories: Vec<Memory> = crate::domain::memory::filter_memory_results(
+                worker
+                    .search_memories(person_uuid.clone(), memories_prompt.prompt, 5)
+                    .await
+                    .map_err(Error::FailedToSearchMemories)?,
+            );
 
             let maybe_person_identity: Option<String> = worker
                 .get_person_identity(&person_uuid)

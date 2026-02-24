@@ -1,4 +1,5 @@
 use super::message::MessageSender;
+use crate::domain::message_uuid::MessageUuid;
 use crate::domain::person_uuid::PersonUuid;
 use chrono::{DateTime, Utc};
 
@@ -22,13 +23,18 @@ impl Event {
                 scene_name,
                 speaker_name,
                 comment,
+                message_uuid: _,
             } => {
                 format!(
                     "At {}, in scene {}, {} said: \"{}\"",
                     self.timestamp, scene_name, speaker_name, comment
                 )
             }
-            EventType::PersonDirectMessaged { sender, comment } => {
+            EventType::PersonDirectMessaged {
+                sender,
+                comment,
+                message_uuid: _,
+            } => {
                 format!(
                     "At {}, {} sent a direct message: {}",
                     self.timestamp,
@@ -37,24 +43,26 @@ impl Event {
                 )
             }
             EventType::PersonJoinedScene {
-                person_uuid,
+                person_uuid: _,
+                person_name,
                 scene_name,
             } => {
                 format!(
-                    "At {}, person {} joined scene {}",
+                    "At {}, {} joined scene {}",
                     self.timestamp,
-                    person_uuid.to_uuid(),
+                    person_name,
                     scene_name
                 )
             }
             EventType::PersonLeftScene {
-                person_uuid,
+                person_uuid: _,
+                person_name,
                 scene_name,
             } => {
                 format!(
-                    "At {}, person {} left scene {}",
+                    "At {}, {} left scene {}",
                     self.timestamp,
-                    person_uuid.to_uuid(),
+                    person_name,
                     scene_name
                 )
             }
@@ -69,7 +77,7 @@ impl Event {
                 .iter()
                 .map(|event| event.to_text())
                 .rev()
-                .take(16)
+                .take(8)
                 .collect::<Vec<String>>()
                 .into_iter()
                 .rev()
@@ -85,17 +93,21 @@ pub enum EventType {
         scene_name: String,
         speaker_name: String,
         comment: String,
+        message_uuid: MessageUuid,
     },
     PersonDirectMessaged {
         sender: MessageSender,
         comment: String,
+        message_uuid: MessageUuid,
     },
     PersonJoinedScene {
         person_uuid: PersonUuid,
+        person_name: String,
         scene_name: String,
     },
     PersonLeftScene {
         person_uuid: PersonUuid,
+        person_name: String,
         scene_name: String,
     },
 }

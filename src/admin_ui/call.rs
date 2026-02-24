@@ -64,3 +64,24 @@ pub async fn submit_reaction(
 
     Ok(person_actions)
 }
+
+pub async fn submit_prompt_lab(
+    open_ai_key: OpenAiKey,
+    system_prompt: String,
+    user_prompt: String,
+) -> Result<String, CompletionError> {
+    let mut completion = Completion::new(open_ai::model::Model::DEFAULT);
+
+    if !system_prompt.trim().is_empty() {
+        completion.add_message(Role::System, system_prompt.trim());
+    }
+
+    completion.add_message(Role::User, user_prompt.as_str());
+    completion.add_tool_call(PersonActionKind::to_choice_tool());
+
+    let response = completion
+        .send_request(&open_ai_key, reqwest::Client::new())
+        .await?;
+
+    Ok(response.as_pretty_json())
+}
