@@ -371,7 +371,7 @@ async fn generate_prompt_and_search_memories(
     // Generate the prompt
     let prompt_result = worker
         .create_memory_query_prompt(
-            person_recalling.clone(),
+            &person_recalling,
             message_type_args,
             recent_events,
             &state_of_mind,

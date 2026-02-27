@@ -1,5 +1,7 @@
 use crate::capability::event::EventCapability;
 use crate::capability::job::JobCapability;
+use crate::capability::motivation::MotivationCapability;
+use crate::capability::log_event::LogEventCapability;
 use crate::capability::job_runner_settings::JobRunnerSettingsCapability;
 use crate::capability::logging::LogCapability;
 use crate::capability::memory::MemoryCapability;
@@ -297,7 +299,9 @@ async fn run_next_job<
         + StateOfMindCapability
         + PersonIdentityCapability
         + ReactionHistoryCapability
+        + LogEventCapability
         + ReflectionCapability
+        + MotivationCapability
         + LogCapability,
 >(
     worker: W,
@@ -338,7 +342,9 @@ async fn run_job<
         + StateOfMindCapability
         + PersonIdentityCapability
         + ReactionHistoryCapability
+        + LogEventCapability
         + ReflectionCapability
+        + MotivationCapability
         + LogCapability,
 >(
     worker: W,
@@ -416,11 +422,13 @@ async fn run_job<
 mod tests {
     use super::*;
     use crate::capability::event::{EventCapability, GetArgs};
+    use crate::capability::log_event::LogEventCapability;
     use crate::capability::job::JobCapability;
     use crate::capability::memory::{
         MemoryCapability, MemoryQueryPrompt, MemorySearchResult, MessageTypeArgs, NewMemory,
     };
     use crate::capability::message::{MessageCapability, NewMessage};
+    use crate::capability::motivation::{MotivationCapability, NewMotivation};
     use crate::capability::reaction_history::ReactionHistoryCapability;
     use crate::capability::logging::LogCapability;
     use crate::capability::person::{NewPerson, PersonCapability};
@@ -439,6 +447,8 @@ mod tests {
     use crate::domain::memory_uuid::MemoryUuid;
     use crate::domain::message::{Message, MessageSender};
     use crate::domain::message_uuid::MessageUuid;
+    use crate::domain::motivation_uuid::MotivationUuid;
+    use crate::domain::motivation::Motivation;
     use crate::domain::person_identity_uuid::PersonIdentityUuid;
     use crate::domain::person_name::PersonName;
     use crate::domain::person_uuid::PersonUuid;
@@ -449,6 +459,7 @@ mod tests {
     use crate::domain::scene_uuid::SceneUuid;
     use crate::person_actions::{PersonAction, PersonReaction, ReflectionDecision};
     use async_trait::async_trait;
+    use serde_json;
     use std::collections::HashSet;
     use std::sync::Arc;
     use tokio::sync::Mutex;
@@ -708,6 +719,29 @@ mod tests {
         }
     }
 
+    impl MotivationCapability for MockWorker {
+        async fn create_motivation(
+            &self,
+            _new_motivation: NewMotivation,
+        ) -> Result<MotivationUuid, String> {
+            Ok(MotivationUuid::new())
+        }
+
+        async fn get_motivations_for_person(
+            &self,
+            _person_uuid: PersonUuid,
+        ) -> Result<Vec<Motivation>, String> {
+            Ok(vec![])
+        }
+
+        async fn delete_motivation(
+            &self,
+            _motivation_uuid: MotivationUuid,
+        ) -> Result<(), String> {
+            Ok(())
+        }
+    }
+
     impl MemoryCapability for MockWorker {
         async fn create_memory(&self, _new_memory: NewMemory) -> Result<MemoryUuid, String> {
             Ok(MemoryUuid::new())
@@ -773,6 +807,17 @@ mod tests {
     impl LogCapability for MockWorker {
         fn log(&self, _level: Level, _message: &str) {
             // no-op for tests
+        }
+    }
+
+    #[async_trait]
+    impl LogEventCapability for MockWorker {
+        async fn log_event(
+            &self,
+            _event_name: String,
+            _data: Option<serde_json::Value>,
+        ) -> Result<(), String> {
+            Ok(())
         }
     }
 

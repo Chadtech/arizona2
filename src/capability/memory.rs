@@ -44,7 +44,7 @@ pub trait MemoryCapability: SceneCapability {
     ) -> Result<Vec<MemoryUuid>, String>;
     async fn create_memory_query_prompt(
         &self,
-        person_recalling: PersonName,
+        person_recalling: &PersonName,
         message_type_args: MessageTypeArgs,
         recent_events: Vec<String>,
         state_of_mind: &String,

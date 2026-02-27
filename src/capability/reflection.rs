@@ -1,9 +1,12 @@
 use crate::domain::memory::Memory;
+use crate::domain::motivation_uuid::MotivationUuid;
 use crate::domain::person_uuid::PersonUuid;
 
 pub enum ReflectionChange {
     StateOfMind { content: String },
     MemorySummary { summary: String },
+    NewMotivation { content: String, priority: i64 },
+    DeleteMotivation { motivation_uuid: MotivationUuid },
 }
 
 pub trait ReflectionCapability {

@@ -221,7 +221,7 @@ impl PersonWaitingJob {
 
             let memories_prompt = worker
                 .create_memory_query_prompt(
-                    persons_name,
+                    &persons_name,
                     message_type_args,
                     events_text,
                     &state_of_mind.content,

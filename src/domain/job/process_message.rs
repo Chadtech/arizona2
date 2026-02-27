@@ -1,20 +1,27 @@
 use crate::capability;
 use crate::capability::event::EventCapability;
 use crate::capability::job::JobCapability;
+use crate::capability::log_event::LogEventCapability;
 use crate::capability::logging::LogCapability;
+use crate::capability::memory::NewMemory;
+use crate::capability::motivation::MotivationCapability;
+use crate::capability::motivation::NewMotivation;
 use crate::capability::memory::{MemoryCapability, MemorySearchResult, MessageTypeArgs};
 use crate::capability::person::PersonCapability;
 use crate::capability::person_identity::PersonIdentityCapability;
 use crate::capability::reaction::ReactionCapability;
 use crate::capability::reaction_history::ReactionHistoryCapability;
 use crate::capability::reflection::ReflectionCapability;
+use crate::capability::reflection::ReflectionChange;
+use crate::capability::state_of_mind::NewStateOfMind;
 use crate::capability::state_of_mind::StateOfMindCapability;
 use crate::domain::actor_uuid::ActorUuid;
-use crate::domain::event::EventType;
 use crate::domain::event::Event;
+use crate::domain::event::EventType;
 use crate::domain::job::person_action_handler::{self, ActionHandleError};
 use crate::domain::logger::Level;
 use crate::domain::memory::Memory;
+use crate::domain::memory_uuid::MemoryUuid;
 use crate::domain::message::{Message, MessageRecipient, MessageSender};
 use crate::domain::person_name::PersonName;
 use crate::domain::person_uuid::PersonUuid;
@@ -23,6 +30,7 @@ use crate::domain::scene_uuid::SceneUuid;
 use crate::domain::situation;
 use crate::domain::situation::Situation;
 use crate::domain::state_of_mind::StateOfMind;
+use crate::domain::state_of_mind_uuid::StateOfMindUuid;
 use crate::person_actions::{PersonAction, PersonReaction, ReflectionDecision};
 use crate::{
     capability::{message::MessageCapability, scene::SceneCapability},
@@ -30,6 +38,7 @@ use crate::{
     nice_display::NiceDisplay,
 };
 use serde::{Deserialize, Serialize};
+use serde_json;
 use std::collections::HashSet;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -90,6 +99,10 @@ pub enum Error {
         details: String,
     },
     FailedToCreateMemory(String),
+    FailedToCreateReflectionStateOfMind(String),
+    FailedToCreateReflectionMemory(String),
+    FailedToCreateReflectionMotivation(String),
+    FailedToDeleteReflectionMotivation(String),
     ActionError(ActionHandleError),
     ReflectionError(String),
 }
@@ -212,6 +225,18 @@ impl NiceDisplay for Error {
             Error::FailedToCreateMemory(err) => {
                 format!("Failed to create memory:\n{}", err)
             }
+            Error::FailedToCreateReflectionStateOfMind(err) => {
+                format!("Failed to create reflection state of mind:\n{}", err)
+            }
+            Error::FailedToCreateReflectionMemory(err) => {
+                format!("Failed to create reflection memory:\n{}", err)
+            }
+            Error::FailedToCreateReflectionMotivation(err) => {
+                format!("Failed to create reflection motivation:\n{}", err)
+            }
+            Error::FailedToDeleteReflectionMotivation(err) => {
+                format!("Failed to delete reflection motivation:\n{}", err)
+            }
             Error::ActionError(err) => err.to_nice_error().to_string(),
             Error::ReflectionError(err) => {
                 format!("Reflection error:\n{}", err)
@@ -221,6 +246,7 @@ impl NiceDisplay for Error {
 }
 
 struct ReflectionInput {
+    person_name: PersonName,
     memories: Vec<Memory>,
     person_identity: String,
     state_of_mind: String,
@@ -239,6 +265,8 @@ impl ProcessMessageJob {
             + ReactionHistoryCapability
             + ReflectionCapability
             + LogCapability
+            + LogEventCapability
+            + MotivationCapability
             + JobCapability,
     >(
         self,
@@ -499,6 +527,8 @@ async fn run_message_in_scene<
         + PersonIdentityCapability
         + ReflectionCapability
         + LogCapability
+        + LogEventCapability
+        + MotivationCapability
         + ReactionHistoryCapability
         + JobCapability,
 >(
@@ -602,7 +632,7 @@ async fn run_message_in_scene<
                 situation.to_string(),
                 Event::many_to_prompt_list(reflection_recent_events)
             );
-            let _changes = worker
+            let changes = worker
                 .get_reflection_changes(
                     reflection_input.memories.clone(),
                     person_uuid.clone(),
@@ -612,6 +642,8 @@ async fn run_message_in_scene<
                 )
                 .await
                 .map_err(Error::ReflectionError)?;
+
+            apply_reflection_changes(worker, person_uuid, &reflection_input, changes).await?;
         }
         ReflectionDecision::NoReflection => {}
     }
@@ -639,6 +671,103 @@ async fn run_message_in_scene<
             scene_uuid: scene_uuid.clone(),
             details: err,
         })?;
+
+    Ok(())
+}
+
+async fn apply_reflection_changes<
+    W: StateOfMindCapability + MemoryCapability + LogEventCapability + MotivationCapability,
+>(
+    worker: &W,
+    person_uuid: &PersonUuid,
+    reflection_input: &ReflectionInput,
+    changes: Vec<ReflectionChange>,
+) -> Result<(), Error> {
+    for change in changes {
+        match change {
+            ReflectionChange::StateOfMind { content } => {
+                let new_state_of_mind = NewStateOfMind {
+                    uuid: StateOfMindUuid::new(),
+                    person_name: reflection_input.person_name.clone(),
+                    state_of_mind: content.clone(),
+                };
+                worker
+                    .create_state_of_mind(new_state_of_mind)
+                    .await
+                    .map_err(Error::FailedToCreateReflectionStateOfMind)?;
+                let data = serde_json::json!({
+                    "person_uuid": person_uuid.to_uuid().to_string(),
+                    "change_type": "state_of_mind",
+                    "content": content,
+                });
+                let _ = worker
+                    .log_event("reflection_change".to_string(), Some(data))
+                    .await;
+            }
+            ReflectionChange::MemorySummary { summary } => {
+                if summary.trim().is_empty() {
+                    continue;
+                }
+                let new_memory = NewMemory {
+                    memory_uuid: MemoryUuid::new(),
+                    content: summary.clone(),
+                    person_uuid: person_uuid.clone(),
+                };
+                worker
+                    .create_memory(new_memory)
+                    .await
+                    .map_err(Error::FailedToCreateReflectionMemory)?;
+                let data = serde_json::json!({
+                    "person_uuid": person_uuid.to_uuid().to_string(),
+                    "change_type": "memory_summary",
+                    "summary": summary,
+                });
+                let _ = worker
+                    .log_event("reflection_change".to_string(), Some(data))
+                    .await;
+            }
+            ReflectionChange::NewMotivation { content, priority } => {
+                let priority_i32 = i32::try_from(priority).map_err(|_| {
+                    Error::FailedToCreateReflectionMotivation(
+                        "Motivation priority must fit in i32".to_string(),
+                    )
+                })?;
+                let new_motivation = NewMotivation {
+                    person_uuid: person_uuid.clone(),
+                    content: content.clone(),
+                    priority: priority_i32,
+                };
+                let motivation_uuid = worker
+                    .create_motivation(new_motivation)
+                    .await
+                    .map_err(Error::FailedToCreateReflectionMotivation)?;
+                let data = serde_json::json!({
+                    "person_uuid": person_uuid.to_uuid().to_string(),
+                    "change_type": "add_motivation",
+                    "content": content,
+                    "priority": priority,
+                    "motivation_uuid": motivation_uuid.to_uuid().to_string(),
+                });
+                let _ = worker
+                    .log_event("reflection_change".to_string(), Some(data))
+                    .await;
+            }
+            ReflectionChange::DeleteMotivation { motivation_uuid } => {
+                worker
+                    .delete_motivation(motivation_uuid.clone())
+                    .await
+                    .map_err(Error::FailedToDeleteReflectionMotivation)?;
+                let data = serde_json::json!({
+                    "person_uuid": person_uuid.to_uuid().to_string(),
+                    "change_type": "remove_motivation",
+                    "motivation_uuid": motivation_uuid.to_uuid().to_string(),
+                });
+                let _ = worker
+                    .log_event("reflection_change".to_string(), Some(data))
+                    .await;
+            }
+        }
+    }
 
     Ok(())
 }
@@ -696,7 +825,7 @@ async fn build_reflection_input<
 
     let memories_prompt = worker
         .create_memory_query_prompt(
-            persons_name,
+            &persons_name,
             message_type_args,
             events,
             &state_of_mind.content,
@@ -725,6 +854,7 @@ async fn build_reflection_input<
     };
 
     Ok(ReflectionInput {
+        person_name: persons_name,
         memories,
         person_identity,
         state_of_mind: state_of_mind.content,
