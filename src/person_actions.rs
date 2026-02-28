@@ -7,6 +7,7 @@ pub enum PersonActionKind {
     Wait,
     Idle,
     SayInScene,
+    MoveToScene,
 }
 
 #[derive(Debug, Clone)]
@@ -37,6 +38,7 @@ impl PersonActionKind {
             PersonActionKind::Wait => "wait".to_string(),
             PersonActionKind::Idle => "idle".to_string(),
             PersonActionKind::SayInScene => "say in scene".to_string(),
+            PersonActionKind::MoveToScene => "move to scene".to_string(),
         }
     }
 
@@ -45,6 +47,7 @@ impl PersonActionKind {
             PersonActionKind::Wait.to_name(),
             PersonActionKind::Idle.to_name(),
             PersonActionKind::SayInScene.to_name(),
+            PersonActionKind::MoveToScene.to_name(),
         ]
     }
 
@@ -67,6 +70,11 @@ impl PersonActionKind {
                 description: "What to say if action is say in scene.".to_string(),
                 required: false,
             },
+            ToolFunctionParameter::StringParam {
+                name: "scene_name".to_string(),
+                description: "Scene name to move to if action is move to scene.".to_string(),
+                required: false,
+            },
             ToolFunctionParameter::IntegerParam {
                 name: "duration".to_string(),
                 description: "How long to wait in milliseconds if action is wait.".to_string(),
@@ -87,6 +95,7 @@ pub enum PersonAction {
     Wait { duration: u64 },
     Idle,
     SayInScene { comment: String },
+    MoveToScene { scene_name: String },
 }
 
 impl PersonAction {
@@ -98,6 +107,9 @@ impl PersonAction {
             PersonAction::Idle => "Did nothing.".to_string(),
             PersonAction::SayInScene { comment } => {
                 format!("Spoke in scene: {}", comment)
+            }
+            PersonAction::MoveToScene { scene_name } => {
+                format!("Moved to scene: {}", scene_name)
             }
         }
     }
@@ -190,6 +202,7 @@ impl PersonReaction {
         let mut maybe_reflection: Option<String> = None;
         let mut maybe_action: Option<String> = None;
         let mut maybe_comment: Option<String> = None;
+        let mut maybe_scene_name: Option<String> = None;
         let mut maybe_duration: Option<u64> = None;
 
         for (key, value) in arguments {
@@ -202,6 +215,9 @@ impl PersonReaction {
                 }
                 "comment" => {
                     maybe_comment = value.as_str().map(|s| s.to_string());
+                }
+                "scene_name" => {
+                    maybe_scene_name = value.as_str().map(|s| s.to_string());
                 }
                 "duration" => {
                     if let Some(dur) = value.as_u64() {
@@ -263,6 +279,15 @@ impl PersonReaction {
                 PersonAction::Wait { duration }
             }
             "idle" => PersonAction::Idle,
+            "move to scene" => {
+                let scene_name =
+                    maybe_scene_name.ok_or_else(|| PersonActionError::ParameterMissing {
+                        action_name: tool_call_name.clone(),
+                        parameter_name: "scene_name".to_string(),
+                        arguments: arguments_json.clone(),
+                    })?;
+                PersonAction::MoveToScene { scene_name }
+            }
             _ => Err(PersonActionError::UnrecognizedAction {
                 action_name: action,
             })?,

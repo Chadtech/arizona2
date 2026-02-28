@@ -220,7 +220,10 @@ impl Tab {
 
     pub fn init_task(self, worker: &Arc<Worker>) -> Task<Msg> {
         if self == Tab::Job {
-            Task::perform(job_page::get_jobs(worker.clone()), Msg::JobPageMsg)
+            Task::perform(
+                job_page::get_jobs(worker.clone(), job_page::initial_jobs_limit()),
+                Msg::JobPageMsg,
+            )
         } else {
             Task::none()
         }

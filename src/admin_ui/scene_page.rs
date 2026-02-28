@@ -224,7 +224,7 @@ impl Model {
                 Task::none()
             }
             Msg::ClickedCreateScene => match self.status {
-                NewSceneStatus::Ready => {
+                NewSceneStatus::Ready | NewSceneStatus::Done => {
                     self.status = NewSceneStatus::CreatingScene;
 
                     let new_scene = NewScene {
@@ -366,7 +366,12 @@ fn scene_creation_status_view(status: &NewSceneStatus) -> Element<'_, Msg> {
         NewSceneStatus::CreatingScene => w::text("Creating scene...").into(),
         NewSceneStatus::Done => w::text("Done!").into(),
         NewSceneStatus::ErrorCreatingScene(err) => {
-            w::text(format!("Error creating scene: {}", err)).into()
+            w::column![
+                w::text("Error creating scene:").color(s::RED_SOFT),
+                w::text(err),
+            ]
+            .spacing(s::S1)
+            .into()
         }
     }
 }

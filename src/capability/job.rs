@@ -9,5 +9,6 @@ pub trait JobCapability {
     async fn mark_job_finished(&self, job_uuid: &JobUuid) -> Result<(), String>;
     async fn mark_job_failed(&self, job_uuid: &JobUuid, details: &str) -> Result<(), String>;
     async fn reset_job(&self, job_uuid: &JobUuid) -> Result<(), String>;
+    async fn reset_all_failed_jobs(&self) -> Result<(), String>;
     async fn delete_job(&self, job_uuid: &JobUuid) -> Result<(), String>;
 }

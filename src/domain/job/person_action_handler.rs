@@ -18,11 +18,13 @@ use crate::person_actions::PersonAction;
 pub enum ActionHandleError {
     Wait(String),
     ReactionLog(String),
+    PersonName(String),
     SceneMissing(String),
     Say {
         scene_uuid: SceneUuid,
         details: String,
     },
+    MoveToScene(String),
 }
 
 impl NiceDisplay for ActionHandleError {
@@ -33,6 +35,9 @@ impl NiceDisplay for ActionHandleError {
             }
             ActionHandleError::ReactionLog(details) => {
                 format!("Could not record reaction: {}", details)
+            }
+            ActionHandleError::PersonName(details) => {
+                format!("Could not get person's name: {}", details)
             }
             ActionHandleError::SceneMissing(details) => {
                 format!("Could not get person's scene: {}", details)
@@ -46,6 +51,9 @@ impl NiceDisplay for ActionHandleError {
                     scene_uuid.to_uuid(),
                     details
                 )
+            }
+            ActionHandleError::MoveToScene(details) => {
+                format!("Person could not move to scene: {}", details)
             }
         }
     }
@@ -82,6 +90,10 @@ pub async fn handle_person_action<
         }
         PersonAction::SayInScene { comment } => {
             let sender = MessageSender::AiPerson(person_uuid.clone());
+            let person_name = worker
+                .get_persons_name(person_uuid.clone())
+                .await
+                .map_err(ActionHandleError::PersonName)?;
 
             let scene_uuid = worker
                 .get_persons_current_scene_uuid(person_uuid)
@@ -102,11 +114,7 @@ pub async fn handle_person_action<
                 details: err.to_nice_error().to_string(),
             })?;
 
-            let person_label = worker
-                .get_persons_name(person_uuid.clone())
-                .await
-                .map(|name| name.to_string())
-                .unwrap_or_else(|_| person_uuid.to_uuid().to_string());
+            let person_label = person_name.to_string();
             worker.log(
                 Level::Info,
                 format!("AI person {} said in scene: {}", person_label, comment).as_str(),
@@ -114,6 +122,68 @@ pub async fn handle_person_action<
 
             worker
                 .record_reaction(person_uuid, "say_in_scene")
+                .await
+                .map_err(ActionHandleError::ReactionLog)?;
+
+            Ok(())
+        }
+        PersonAction::MoveToScene { scene_name } => {
+            let person_name = worker
+                .get_persons_name(person_uuid.clone())
+                .await
+                .map_err(ActionHandleError::PersonName)?;
+
+            let from_scene_uuid = worker
+                .get_persons_current_scene_uuid(person_uuid)
+                .await
+                .map_err(ActionHandleError::SceneMissing)?;
+
+            let maybe_scene = worker
+                .get_scene_from_name(scene_name.clone())
+                .await
+                .map_err(ActionHandleError::MoveToScene)?;
+
+            let scene = maybe_scene.ok_or_else(|| {
+                ActionHandleError::MoveToScene(format!(
+                    "Scene named '{}' not found",
+                    scene_name
+                ))
+            })?;
+
+            let from_scene_desc = match &from_scene_uuid {
+                Some(uuid) => uuid.to_uuid().to_string(),
+                None => "none".to_string(),
+            };
+            worker.log(
+                Level::Info,
+                format!(
+                    "AI person {} moving from scene {} to scene: {}",
+                    person_name.as_str(),
+                    from_scene_desc,
+                    scene_name
+                )
+                .as_str(),
+            );
+
+            worker
+                .add_person_to_scene(scene.uuid.clone(), person_name.clone())
+                .await
+                .map_err(ActionHandleError::MoveToScene)?;
+
+            let person_label = person_name.to_string();
+            worker.log(
+                Level::Info,
+                format!(
+                    "AI person {} moved to scene {} ({})",
+                    person_label,
+                    scene_name,
+                    scene.uuid.to_uuid()
+                )
+                .as_str(),
+            );
+
+            worker
+                .record_reaction(person_uuid, "move_to_scene")
                 .await
                 .map_err(ActionHandleError::ReactionLog)?;
 

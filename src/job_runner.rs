@@ -594,6 +594,10 @@ mod tests {
             Ok(())
         }
 
+        async fn reset_all_failed_jobs(&self) -> Result<(), String> {
+            Ok(())
+        }
+
         async fn delete_job(&self, _job_uuid: &JobUuid) -> Result<(), String> {
             Ok(())
         }

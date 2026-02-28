@@ -5,7 +5,7 @@ use crate::domain::person_identity_uuid::PersonIdentityUuid;
 use crate::domain::person_name::PersonName;
 use crate::domain::person_uuid::PersonUuid;
 use crate::worker::Worker;
-use iced::{widget as w, Element, Task};
+use iced::{clipboard, widget as w, Element, Task};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -65,6 +65,7 @@ pub enum Msg {
     IdentityCreated(Result<PersonIdentityUuid, String>),
     LookupNameChanged(String),
     ClickedLoadIdentity,
+    ClickedCopyIdentity(String),
     LoadedIdentity(Result<(PersonUuid, Option<String>), String>),
 }
 
@@ -152,6 +153,7 @@ impl Model {
                     Msg::LoadedIdentity,
                 )
             }
+            Msg::ClickedCopyIdentity(identity) => clipboard::write(identity),
             Msg::LoadedIdentity(result) => {
                 self.lookup_status = match result {
                     Ok((person_uuid, identity)) => LookupStatus::Loaded {
@@ -182,7 +184,8 @@ impl Model {
             w::text("Lookup Person Identity"),
             w::row![
                 w::text_input("Person name", &self.lookup_name_field)
-                    .on_input(Msg::LookupNameChanged),
+                    .on_input(Msg::LookupNameChanged)
+                    .on_submit(Msg::ClickedLoadIdentity),
                 w::button("Load").on_press(Msg::ClickedLoadIdentity),
             ]
             .spacing(s::S1),
@@ -223,9 +226,16 @@ fn lookup_status_view(status: &LookupStatus) -> Element<'_, Msg> {
                 Some(text) => text.as_str(),
                 None => "No identity found",
             };
+            let copy_button: Element<'_, Msg> = match identity {
+                Some(text) => w::button("Copy identity")
+                    .on_press(Msg::ClickedCopyIdentity(text.clone()))
+                    .into(),
+                None => w::text("").into(),
+            };
             w::column![
                 w::text(format!("Person UUID: {}", person_uuid.to_uuid())),
                 w::text(identity_text),
+                copy_button,
             ]
             .spacing(s::S1)
             .into()

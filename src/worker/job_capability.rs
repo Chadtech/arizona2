@@ -237,6 +237,24 @@ impl JobCapability for Worker {
         Ok(())
     }
 
+    async fn reset_all_failed_jobs(&self) -> Result<(), String> {
+        sqlx::query(
+            r#"
+                UPDATE job
+                SET started_at = NULL,
+                    finished_at = NULL,
+                    error = NULL
+                WHERE error IS NOT NULL
+                  AND deleted_at IS NULL;
+            "#,
+        )
+        .execute(&self.sqlx)
+        .await
+        .map_err(|err| format!("Error resetting failed jobs: {}", err))?;
+
+        Ok(())
+    }
+
     async fn delete_job(&self, job_uuid: &JobUuid) -> Result<(), String> {
         sqlx::query!(
             r#"

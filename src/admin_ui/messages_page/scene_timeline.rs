@@ -93,28 +93,8 @@ impl Model {
 
         timeline_items.extend(load_result.items.iter().cloned());
 
-        let participation = worker.get_scene_participation_history(&scene_uuid).await?;
-
-        let mut name_cache: HashMap<String, String> = HashMap::new();
-        for event in participation {
-            if let Some(left_at) = event.left_at {
-                let person_label =
-                    person_label(worker, &mut name_cache, &event.person_uuid).await?;
-                let left_item = TimelineItem::PersonLeft {
-                    person_label,
-                    timestamp: left_at,
-                };
-                timeline_items.push(left_item);
-            }
-
-            let person_label = person_label(worker, &mut name_cache, &event.person_uuid).await?;
-            let joined_item = TimelineItem::PersonJoined {
-                person_label,
-                timestamp: event.joined_at,
-            };
-
-            timeline_items.push(joined_item);
-        }
+        let participation_items = load_participation_items(worker, scene_uuid.clone()).await?;
+        timeline_items.extend(participation_items);
 
         timeline_items.sort_by_key(|item| item.posix_timestamp());
 
@@ -199,6 +179,17 @@ impl Model {
                 }
             }
         }
+    }
+
+    pub fn replace_participation_items(&mut self, participation_items: Vec<TimelineItem>) {
+        self.items.retain(|item| match item {
+            TimelineItem::PersonJoined { .. } => false,
+            TimelineItem::PersonLeft { .. } => false,
+            TimelineItem::Message { .. } => true,
+        });
+
+        self.items.extend(participation_items);
+        self.items.sort_by_key(|item| item.posix_timestamp());
     }
 
     pub fn finish_loading_older_error(&mut self) {
@@ -343,6 +334,36 @@ pub async fn load_older_messages(
         known_keys,
     )
     .await
+}
+
+pub async fn load_participation_items(
+    worker: &Worker,
+    scene_uuid: SceneUuid,
+) -> Result<Vec<TimelineItem>, String> {
+    let participation = worker.get_scene_participation_history(&scene_uuid).await?;
+    let mut items = Vec::with_capacity(participation.len().saturating_mul(2));
+    let mut name_cache: HashMap<String, String> = HashMap::new();
+
+    for event in participation {
+        if let Some(left_at) = event.left_at {
+            let person_label = person_label(worker, &mut name_cache, &event.person_uuid).await?;
+            let left_item = TimelineItem::PersonLeft {
+                person_label,
+                timestamp: left_at,
+            };
+            items.push(left_item);
+        }
+
+        let person_label = person_label(worker, &mut name_cache, &event.person_uuid).await?;
+        let joined_item = TimelineItem::PersonJoined {
+            person_label,
+            timestamp: event.joined_at,
+        };
+
+        items.push(joined_item);
+    }
+
+    Ok(items)
 }
 
 fn normalize_message_content(content: &str) -> &str {

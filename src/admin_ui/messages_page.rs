@@ -1,5 +1,5 @@
 use super::s;
-use crate::capability::scene::{Scene, SceneCapability};
+use crate::capability::scene::{Scene, SceneCapability, SceneParticipant};
 use crate::domain::job::send_message_to_scene::send_scene_message_and_enqueue_recipients;
 use crate::domain::message::MessageSender;
 use crate::domain::random_seed::RandomSeed;
@@ -36,6 +36,7 @@ pub struct LoadedSceneModel {
     pub name: String,
     pub description: Option<String>,
     pub messages: MessagesStatus,
+    pub participants: Vec<SceneParticipant>,
 }
 
 enum SceneLoadStatus {
@@ -63,7 +64,10 @@ pub enum MessagesStatus {
     Loading,
     Loaded(scene_timeline::Model),
     Refreshing(scene_timeline::Model),
-    Error { message: String, cached: Option<scene_timeline::Model> },
+    Error {
+        message: String,
+        cached: Option<scene_timeline::Model>,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -76,13 +80,16 @@ enum SendStatus {
 
 #[derive(Debug, Clone)]
 pub enum Msg {
-    ViewModeChanged(ViewMode),
+    ViewModeRadioSelected(ViewMode),
     Person1Selected(String),
     Person2Selected(String),
     SceneNameInputChanged(String),
-    LoadScene,
+    SceneLoadButtonClicked,
+    SceneNameSubmitted,
     SceneLoaded(Result<Option<Scene>, String>),
+    ParticipantsLoaded(Result<Vec<SceneParticipant>, String>),
     TimelineLoaded(Result<scene_timeline::Model, String>),
+    ParticipationHistoryLoaded(Result<Vec<scene_timeline::TimelineItem>, String>),
     OlderMessagesLoaded(Result<scene_timeline::LoadOlderResult, String>),
     MessageInputChanged(String),
     SubmitMessage,
@@ -131,7 +138,7 @@ impl Model {
 
     pub fn update(&mut self, worker: Arc<Worker>, msg: Msg) -> Task<Msg> {
         match msg {
-            Msg::ViewModeChanged(mode) => {
+            Msg::ViewModeRadioSelected(mode) => {
                 self.view_mode = mode;
                 self.send_status = SendStatus::Ready;
                 Task::none()
@@ -150,32 +157,43 @@ impl Model {
                 self.send_status = SendStatus::Ready;
                 Task::none()
             }
-            Msg::LoadScene => {
-                self.scene_load_status = SceneLoadStatus::Loading;
-                let scene_name = self.scene_name_input.clone();
-                Task::perform(
-                    async move { worker.get_scene_from_name(scene_name.clone()).await },
-                    Msg::SceneLoaded,
-                )
-            }
+            Msg::SceneLoadButtonClicked => self.load_scene(worker),
+            Msg::SceneNameSubmitted => self.load_scene(worker),
             Msg::SceneLoaded(result) => match result {
                 Ok(Some(scene)) => {
                     let scene_uuid = scene.uuid.clone();
+                    let participants_scene_uuid = scene.uuid.clone();
 
                     let loaded_scene = LoadedSceneModel {
                         uuid: scene.uuid,
                         name: scene.name,
                         description: scene.description,
                         messages: MessagesStatus::Loading,
+                        participants: Vec::new(),
                     };
 
                     self.scene_load_status = SceneLoadStatus::Loaded(loaded_scene);
                     self.send_status = SendStatus::Ready;
 
-                    Task::perform(
-                        async move { scene_timeline::Model::load(&worker, scene_uuid).await },
-                        Msg::TimelineLoaded,
-                    )
+                    let scene_timeline_worker = worker.clone();
+
+                    Task::batch(vec![
+                        Task::perform(
+                            async move {
+                                scene_timeline::Model::load(&scene_timeline_worker, scene_uuid)
+                                    .await
+                            },
+                            Msg::TimelineLoaded,
+                        ),
+                        Task::perform(
+                            async move {
+                                worker
+                                    .get_scene_current_participants(&participants_scene_uuid)
+                                    .await
+                            },
+                            Msg::ParticipantsLoaded,
+                        ),
+                    ])
                 }
                 Ok(None) => {
                     self.scene_load_status =
@@ -191,6 +209,19 @@ impl Model {
                     Task::none()
                 }
             },
+            Msg::ParticipantsLoaded(result) => {
+                if let SceneLoadStatus::Loaded(loaded_scene) = &mut self.scene_load_status {
+                    match result {
+                        Ok(participants) => {
+                            loaded_scene.participants = participants;
+                        }
+                        Err(err) => {
+                            self.scene_load_status = SceneLoadStatus::Error(err);
+                        }
+                    }
+                }
+                Task::none()
+            }
             Msg::TimelineLoaded(res) => {
                 if let SceneLoadStatus::Loaded(loaded_scene) = &mut self.scene_load_status {
                     let should_scroll_to_bottom = match &loaded_scene.messages {
@@ -198,7 +229,9 @@ impl Model {
                         MessagesStatus::Error { cached: None, .. } => true,
                         MessagesStatus::Loaded(_) => false,
                         MessagesStatus::Refreshing(_) => false,
-                        MessagesStatus::Error { cached: Some(_), .. } => false,
+                        MessagesStatus::Error {
+                            cached: Some(_), ..
+                        } => false,
                     };
                     match res {
                         Ok(timeline_model) => {
@@ -216,8 +249,20 @@ impl Model {
                                 MessagesStatus::Error { cached, .. } => cached.clone(),
                                 MessagesStatus::Loading => None,
                             };
-                            loaded_scene.messages =
-                                MessagesStatus::Error { message: err, cached };
+                            loaded_scene.messages = MessagesStatus::Error {
+                                message: err,
+                                cached,
+                            };
+                        }
+                    }
+                }
+                Task::none()
+            }
+            Msg::ParticipationHistoryLoaded(result) => {
+                if let SceneLoadStatus::Loaded(loaded_scene) = &mut self.scene_load_status {
+                    if let Some(timeline_model) = timeline_model_mut(&mut loaded_scene.messages) {
+                        if let Ok(items) = result {
+                            timeline_model.replace_participation_items(items);
                         }
                     }
                 }
@@ -225,9 +270,7 @@ impl Model {
             }
             Msg::OlderMessagesLoaded(result) => {
                 if let SceneLoadStatus::Loaded(loaded_scene) = &mut self.scene_load_status {
-                    if let Some(timeline_model) =
-                        timeline_model_mut(&mut loaded_scene.messages)
-                    {
+                    if let Some(timeline_model) = timeline_model_mut(&mut loaded_scene.messages) {
                         match result {
                             Ok(load_result) => {
                                 timeline_model.apply_older_messages(load_result);
@@ -302,9 +345,7 @@ impl Model {
             }
             Msg::GotTimelineMsg(sub_msg) => {
                 if let SceneLoadStatus::Loaded(loaded_scene) = &mut self.scene_load_status {
-                    if let Some(timeline_model) =
-                        timeline_model_mut(&mut loaded_scene.messages)
-                    {
+                    if let Some(timeline_model) = timeline_model_mut(&mut loaded_scene.messages) {
                         match sub_msg {
                             scene_timeline::Msg::Copy(_) => {
                                 return timeline_model.update(sub_msg).map(Msg::GotTimelineMsg);
@@ -313,7 +354,9 @@ impl Model {
                                 match timeline_model.handle_scroll(viewport) {
                                     scene_timeline::ScrollDecision::None => {}
                                     scene_timeline::ScrollDecision::AdjustScroll(delta) => {
-                                        return timeline_model.scroll_by(delta).map(Msg::GotTimelineMsg);
+                                        return timeline_model
+                                            .scroll_by(delta)
+                                            .map(Msg::GotTimelineMsg);
                                     }
                                     scene_timeline::ScrollDecision::LoadOlder => {
                                         let before = timeline_model.oldest_message_at();
@@ -324,10 +367,7 @@ impl Model {
                                             return Task::perform(
                                                 async move {
                                                     scene_timeline::load_older_messages(
-                                                        &worker,
-                                                        scene_uuid,
-                                                        before,
-                                                        known_keys,
+                                                        &worker, scene_uuid, before, known_keys,
                                                     )
                                                     .await
                                                 },
@@ -363,9 +403,10 @@ impl Model {
                 MessagesStatus::Refreshing(model) => {
                     model.scroll_to_bottom().map(Msg::GotTimelineMsg)
                 }
-                MessagesStatus::Error { cached: Some(model), .. } => {
-                    model.scroll_to_bottom().map(Msg::GotTimelineMsg)
-                }
+                MessagesStatus::Error {
+                    cached: Some(model),
+                    ..
+                } => model.scroll_to_bottom().map(Msg::GotTimelineMsg),
                 MessagesStatus::Loading => Task::none(),
                 MessagesStatus::Error { cached: None, .. } => Task::none(),
             },
@@ -382,13 +423,13 @@ impl Model {
                 "Direct Message",
                 ViewMode::DirectMessage,
                 Some(self.view_mode),
-                Msg::ViewModeChanged
+                Msg::ViewModeRadioSelected
             ),
             w::radio(
                 "Scene",
                 ViewMode::Scene,
                 Some(self.view_mode),
-                Msg::ViewModeChanged
+                Msg::ViewModeRadioSelected
             )
         ]
         .spacing(s::S4);
@@ -437,8 +478,9 @@ impl Model {
     fn view_scene(&self) -> Element<'_, Msg> {
         let scene_input = w::row![
             w::text_input("Enter scene name", &self.scene_name_input)
-                .on_input(Msg::SceneNameInputChanged),
-            w::button("Load Scene").on_press(Msg::LoadScene),
+                .on_input(Msg::SceneNameInputChanged)
+                .on_submit(Msg::SceneNameSubmitted),
+            w::button("Load Scene").on_press(Msg::SceneLoadButtonClicked),
         ]
         .spacing(s::S1);
 
@@ -449,6 +491,18 @@ impl Model {
                 let message_composer = self.view_message_composer();
                 let auto_refresh_button = self.view_auto_refresh_button();
                 let refresh_status = view_refresh_status(&scene.messages);
+
+                let participants_text = if scene.participants.is_empty() {
+                    "Participants: none".to_string()
+                } else {
+                    let names = scene
+                        .participants
+                        .iter()
+                        .map(|participant| participant.person_name.to_string())
+                        .collect::<Vec<String>>()
+                        .join(", ");
+                    format!("Participants: {}", names)
+                };
 
                 let description_view: Element<'_, Msg> = match &scene.description {
                     Some(desc) => w::text(desc).into(),
@@ -461,6 +515,7 @@ impl Model {
                         scene.name,
                         scene.uuid.to_uuid()
                     )),
+                    w::text(participants_text),
                     description_view,
                     auto_refresh_button,
                     refresh_status,
@@ -515,7 +570,9 @@ impl Model {
             "Auto refresh: Off"
         };
 
-        w::button(label).on_press(Msg::ClickedToggleAutoRefresh).into()
+        w::button(label)
+            .on_press(Msg::ClickedToggleAutoRefresh)
+            .into()
     }
 
     fn refresh_loaded_scene(&mut self, worker: Arc<Worker>) -> Task<Msg> {
@@ -524,22 +581,61 @@ impl Model {
             scene.messages = match current {
                 MessagesStatus::Loaded(model) => MessagesStatus::Refreshing(model),
                 MessagesStatus::Refreshing(model) => MessagesStatus::Refreshing(model),
-                MessagesStatus::Error { cached: Some(model), .. } => {
-                    MessagesStatus::Refreshing(model)
-                }
-                MessagesStatus::Error { message, cached: None } => {
-                    MessagesStatus::Error { message, cached: None }
-                }
+                MessagesStatus::Error {
+                    cached: Some(model),
+                    ..
+                } => MessagesStatus::Refreshing(model),
+                MessagesStatus::Error {
+                    message,
+                    cached: None,
+                } => MessagesStatus::Error {
+                    message,
+                    cached: None,
+                },
                 MessagesStatus::Loading => MessagesStatus::Loading,
             };
             let scene_uuid = scene.uuid.clone();
-            return Task::perform(
-                async move { scene_timeline::Model::load(&worker, scene_uuid).await },
-                Msg::TimelineLoaded,
-            );
+            let participants_scene_uuid = scene.uuid.clone();
+            let participation_scene_uuid = scene.uuid.clone();
+
+            let scene_timeline_worker = worker.clone();
+            let participation_worker = worker.clone();
+            return Task::batch(vec![
+                Task::perform(
+                    async move { scene_timeline::Model::load(&scene_timeline_worker, scene_uuid).await },
+                    Msg::TimelineLoaded,
+                ),
+                Task::perform(
+                    async move {
+                        scene_timeline::load_participation_items(
+                            &participation_worker,
+                            participation_scene_uuid,
+                        )
+                        .await
+                    },
+                    Msg::ParticipationHistoryLoaded,
+                ),
+                Task::perform(
+                    async move {
+                        worker
+                            .get_scene_current_participants(&participants_scene_uuid)
+                            .await
+                    },
+                    Msg::ParticipantsLoaded,
+                ),
+            ]);
         }
 
         Task::none()
+    }
+
+    fn load_scene(&mut self, worker: Arc<Worker>) -> Task<Msg> {
+        self.scene_load_status = SceneLoadStatus::Loading;
+        let scene_name = self.scene_name_input.clone();
+        Task::perform(
+            async move { worker.get_scene_from_name(scene_name.clone()).await },
+            Msg::SceneLoaded,
+        )
     }
 
     pub fn to_storage(&self) -> Storage {
@@ -561,28 +657,27 @@ impl Model {
 }
 
 fn view_messages(messages_status: &MessagesStatus) -> Element<'_, Msg> {
-        match &messages_status {
-            MessagesStatus::Loading => w::text("Loading messages...").into(),
-            MessagesStatus::Loaded(timeline_model) => {
-                timeline_model.view().map(Msg::GotTimelineMsg)
-            }
-            MessagesStatus::Refreshing(timeline_model) => {
-                timeline_model.view().map(Msg::GotTimelineMsg)
-            }
-            MessagesStatus::Error { message, cached } => match cached {
-                Some(timeline_model) => timeline_model.view().map(Msg::GotTimelineMsg),
-                None => w::text(format!("Error: {}", message)).into(),
-            },
+    match &messages_status {
+        MessagesStatus::Loading => w::text("Loading messages...").into(),
+        MessagesStatus::Loaded(timeline_model) => timeline_model.view().map(Msg::GotTimelineMsg),
+        MessagesStatus::Refreshing(timeline_model) => {
+            timeline_model.view().map(Msg::GotTimelineMsg)
         }
+        MessagesStatus::Error { message, cached } => match cached {
+            Some(timeline_model) => timeline_model.view().map(Msg::GotTimelineMsg),
+            None => w::text(format!("Error: {}", message)).into(),
+        },
     }
+}
 
-fn timeline_model_mut(
-    messages_status: &mut MessagesStatus,
-) -> Option<&mut scene_timeline::Model> {
+fn timeline_model_mut(messages_status: &mut MessagesStatus) -> Option<&mut scene_timeline::Model> {
     match messages_status {
         MessagesStatus::Loaded(model) => Some(model),
         MessagesStatus::Refreshing(model) => Some(model),
-        MessagesStatus::Error { cached: Some(model), .. } => Some(model),
+        MessagesStatus::Error {
+            cached: Some(model),
+            ..
+        } => Some(model),
         MessagesStatus::Loading => None,
         MessagesStatus::Error { cached: None, .. } => None,
     }

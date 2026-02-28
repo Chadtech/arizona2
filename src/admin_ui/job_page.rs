@@ -6,11 +6,15 @@ use crate::job_runner::{self, RunNextJobResult};
 use crate::nice_display::NiceDisplay;
 use crate::worker::Worker;
 use iced::widget::container;
+use iced::widget::scrollable;
 use iced::{
     clipboard, time, widget as w, Alignment, Background, Element, Length, Subscription, Task,
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+
+const JOB_PAGE_SIZE: usize = 100;
+const LOAD_MORE_THRESHOLD: f32 = 0.95;
 
 pub struct Model {
     add_ping_status: AddPingStatus,
@@ -18,12 +22,22 @@ pub struct Model {
     process_next_status: ProcessNextStatus,
     selected_job_status: SelectedJobStatus,
     auto_refresh: bool,
+    jobs_limit: usize,
+    jobs_scrollable_id: scrollable::Id,
+    load_more_status: LoadMoreStatus,
+    reset_failed_status: ResetFailedStatus,
 }
 
 enum GetJobsStatus {
     Fetching,
     Error(String),
     GotJobs(Vec<Job>),
+}
+
+enum LoadMoreStatus {
+    Ready { can_load_more: bool },
+    Loading,
+    Exhausted,
 }
 
 enum AddPingStatus {
@@ -43,6 +57,13 @@ enum ProcessNextStatus {
 }
 
 enum ResetJobStatus {
+    Ready,
+    Resetting,
+    ResetOk,
+    ResetErr(String),
+}
+
+enum ResetFailedStatus {
     Ready,
     Resetting,
     ResetOk,
@@ -79,6 +100,8 @@ pub enum Msg {
     ProcessedNext(Result<RunNextJobResult, String>),
     ClickedResetJob(JobUuid),
     ResetJobResult(Result<JobUuid, String>),
+    ClickedResetAllFailedJobs,
+    ResetAllFailedJobs(Result<(), String>),
     LoadedRecent(Result<Vec<Job>, String>),
     ClickedSelectJob(JobUuid),
     LoadedJob(Result<Option<Job>, String>),
@@ -90,6 +113,7 @@ pub enum Msg {
     ClickedRefreshSelected,
     ClickedToggleAutoRefresh,
     AutoRefreshTick,
+    JobListScrolled(scrollable::Viewport),
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -109,6 +133,12 @@ impl Model {
             process_next_status: ProcessNextStatus::Ready,
             selected_job_status: SelectedJobStatus::None,
             auto_refresh: false,
+            jobs_limit: JOB_PAGE_SIZE,
+            jobs_scrollable_id: scrollable::Id::unique(),
+            load_more_status: LoadMoreStatus::Ready {
+                can_load_more: true,
+            },
+            reset_failed_status: ResetFailedStatus::Ready,
         }
     }
 
@@ -116,7 +146,7 @@ impl Model {
         match msg {
             Msg::ClickedRefresh => {
                 let worker = worker.clone();
-                Task::perform(get_jobs(worker), |m| m)
+                Task::perform(get_jobs(worker, self.jobs_limit), |m| m)
             }
             Msg::ClickedAddPing => {
                 self.add_ping_status = AddPingStatus::AddingPing;
@@ -130,7 +160,7 @@ impl Model {
                 Ok(()) => {
                     self.add_ping_status = AddPingStatus::AddPingOk;
                     let worker = worker.clone();
-                    Task::perform(get_jobs(worker), |m| m)
+                    Task::perform(get_jobs(worker, self.jobs_limit), |m| m)
                 }
                 Err(err) => {
                     self.add_ping_status = AddPingStatus::AddPingErr(err);
@@ -149,7 +179,7 @@ impl Model {
                         job_kind,
                     };
                     let worker = worker.clone();
-                    Task::perform(get_jobs(worker), |m| m)
+                    Task::perform(get_jobs(worker, self.jobs_limit), |m| m)
                 }
                 Ok(RunNextJobResult::Deferred { job_uuid, job_kind }) => {
                     self.process_next_status = ProcessNextStatus::Deferred {
@@ -157,7 +187,7 @@ impl Model {
                         job_kind,
                     };
                     let worker = worker.clone();
-                    Task::perform(get_jobs(worker), |m| m)
+                    Task::perform(get_jobs(worker, self.jobs_limit), |m| m)
                 }
                 Ok(RunNextJobResult::NoJob) => {
                     self.process_next_status = ProcessNextStatus::NoJob;
@@ -186,7 +216,10 @@ impl Model {
                     }
                     let mut tasks = vec![];
                     let worker = worker.clone();
-                    tasks.push(Task::perform(get_jobs(worker.clone()), |m| m));
+                    tasks.push(Task::perform(
+                        get_jobs(worker.clone(), self.jobs_limit),
+                        |m| m,
+                    ));
 
                     if let SelectedJobStatus::Loaded(selected_job) = &self.selected_job_status {
                         if selected_job.job.uuid() == &job_uuid {
@@ -204,10 +237,52 @@ impl Model {
                     Task::none()
                 }
             },
+            Msg::ClickedResetAllFailedJobs => {
+                self.reset_failed_status = ResetFailedStatus::Resetting;
+                let worker = worker.clone();
+                Task::perform(reset_all_failed_jobs(worker), Msg::ResetAllFailedJobs)
+            }
+            Msg::ResetAllFailedJobs(res) => match res {
+                Ok(()) => {
+                    self.reset_failed_status = ResetFailedStatus::ResetOk;
+                    let mut tasks = vec![];
+                    let worker = worker.clone();
+                    tasks.push(Task::perform(
+                        get_jobs(worker.clone(), self.jobs_limit),
+                        |m| m,
+                    ));
+
+                    if let SelectedJobStatus::Loaded(selected_job) = &self.selected_job_status {
+                        let worker = worker.clone();
+                        tasks.push(Task::perform(
+                            get_job(worker, selected_job.job.uuid().clone()),
+                            Msg::LoadedJob,
+                        ));
+                    }
+
+                    Task::batch(tasks)
+                }
+                Err(err) => {
+                    self.reset_failed_status = ResetFailedStatus::ResetErr(err);
+                    Task::none()
+                }
+            },
             Msg::LoadedRecent(res) => {
                 self.get_jobs_status = match res {
                     Ok(names) => GetJobsStatus::GotJobs(names),
                     Err(err) => GetJobsStatus::Error(err),
+                };
+                self.load_more_status = match &self.get_jobs_status {
+                    GetJobsStatus::GotJobs(jobs) => {
+                        if jobs.len() >= self.jobs_limit {
+                            LoadMoreStatus::Ready {
+                                can_load_more: true,
+                            }
+                        } else {
+                            LoadMoreStatus::Exhausted
+                        }
+                    }
+                    _ => LoadMoreStatus::Exhausted,
                 };
                 Task::none()
             }
@@ -252,7 +327,7 @@ impl Model {
             Msg::AutoRefreshTick => {
                 if self.auto_refresh {
                     let worker = worker.clone();
-                    Task::perform(get_jobs(worker), |m| m)
+                    Task::perform(get_jobs(worker, self.jobs_limit), |m| m)
                 } else {
                     Task::none()
                 }
@@ -277,7 +352,7 @@ impl Model {
                     }
                     self.selected_job_status = SelectedJobStatus::None;
                     let worker = worker.clone();
-                    Task::perform(get_jobs(worker), |m| m)
+                    Task::perform(get_jobs(worker, self.jobs_limit), |m| m)
                 }
                 Err(err) => {
                     if let SelectedJobStatus::Loaded(selected_job) = &mut self.selected_job_status {
@@ -287,6 +362,16 @@ impl Model {
                 }
             },
             Msg::ClickedCopyJobUuid(uuid) => clipboard::write(uuid),
+            Msg::JobListScrolled(viewport) => {
+                if self.should_load_more_jobs(viewport) {
+                    self.load_more_status = LoadMoreStatus::Loading;
+                    self.jobs_limit = self.jobs_limit.saturating_add(JOB_PAGE_SIZE);
+                    let worker = worker.clone();
+                    Task::perform(get_jobs(worker, self.jobs_limit), |m| m)
+                } else {
+                    Task::none()
+                }
+            }
         }
     }
 
@@ -316,6 +401,15 @@ impl Model {
             }
         };
 
+        let reset_failed_view: Element<Msg> = match &self.reset_failed_status {
+            ResetFailedStatus::Ready => w::text("").into(),
+            ResetFailedStatus::Resetting => w::text("Resetting failed jobs...").into(),
+            ResetFailedStatus::ResetOk => w::text("Reset failed jobs").into(),
+            ResetFailedStatus::ResetErr(err) => {
+                w::text(format!("Failed to reset failed jobs: {}", err)).into()
+            }
+        };
+
         // Disable the button while adding to prevent duplicates
         let add_button = match self.add_ping_status {
             AddPingStatus::AddingPing => w::button("Adding..."),
@@ -325,6 +419,11 @@ impl Model {
         let process_next_button = match self.process_next_status {
             ProcessNextStatus::Processing => w::button("Processing..."),
             _ => w::button("Process Next Job").on_press(Msg::ClickedProcessNext),
+        };
+
+        let reset_failed_button = match self.reset_failed_status {
+            ResetFailedStatus::Resetting => w::button("Resetting failed jobs..."),
+            _ => w::button("Reset failed jobs").on_press(Msg::ClickedResetAllFailedJobs),
         };
 
         let jobs_view: Element<Msg> = match &self.get_jobs_status {
@@ -363,6 +462,8 @@ impl Model {
                         );
                     }
                     w::scrollable(col)
+                        .id(self.jobs_scrollable_id.clone())
+                        .on_scroll(Msg::JobListScrolled)
                         .width(Length::Fill)
                         .height(Length::Fixed(s::LIST_HEIGHT))
                         .into()
@@ -396,12 +497,14 @@ impl Model {
             w::row![
                 process_next_button,
                 add_button,
+                reset_failed_button,
                 w::button("Refresh jobs list").on_press(Msg::ClickedRefresh),
                 w::button(auto_refresh_label).on_press(Msg::ClickedToggleAutoRefresh),
             ]
             .spacing(s::S4),
             status_view,
             process_status_view,
+            reset_failed_view,
         ]
         .spacing(s::S4)
         .width(Length::Fill)
@@ -419,6 +522,31 @@ impl Model {
     pub fn to_storage(&self) -> Storage {
         Storage {}
     }
+
+    fn should_load_more_jobs(&mut self, viewport: scrollable::Viewport) -> bool {
+        let relative_offset = viewport.relative_offset();
+        match &mut self.load_more_status {
+            LoadMoreStatus::Ready { can_load_more } => {
+                if relative_offset.y < LOAD_MORE_THRESHOLD {
+                    *can_load_more = true;
+                    return false;
+                }
+
+                if !*can_load_more {
+                    return false;
+                }
+
+                *can_load_more = false;
+                true
+            }
+            LoadMoreStatus::Loading => false,
+            LoadMoreStatus::Exhausted => false,
+        }
+    }
+}
+
+pub fn initial_jobs_limit() -> usize {
+    JOB_PAGE_SIZE
 }
 
 fn selected_job_view(selected: &SelectedJobStatus) -> Element<'_, Msg> {
@@ -552,9 +680,9 @@ fn format_job_time(label: &str, timestamp: Option<chrono::DateTime<chrono::Utc>>
     }
 }
 
-pub async fn get_jobs(worker: Arc<Worker>) -> Msg {
+pub async fn get_jobs(worker: Arc<Worker>, limit: usize) -> Msg {
     let jobs_result = worker
-        .recent_jobs(100)
+        .recent_jobs(limit as i64)
         .await
         .map(|jobs| jobs.into_iter().collect::<Vec<_>>());
 
@@ -574,6 +702,13 @@ async fn reset_job(worker: Arc<Worker>, job_uuid: JobUuid) -> Result<JobUuid, St
         .await
         .map_err(|err| format!("Error resetting job:\n{}", err))?;
     Ok(job_uuid)
+}
+
+async fn reset_all_failed_jobs(worker: Arc<Worker>) -> Result<(), String> {
+    worker
+        .reset_all_failed_jobs()
+        .await
+        .map_err(|err| format!("Error resetting failed jobs:\n{}", err))
 }
 
 async fn get_job(worker: Arc<Worker>, job_uuid: JobUuid) -> Result<Option<Job>, String> {
