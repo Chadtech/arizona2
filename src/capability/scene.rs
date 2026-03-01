@@ -41,6 +41,7 @@ pub struct CurrentScene {
 #[async_trait]
 pub trait SceneCapability {
     async fn create_scene(&self, new_scene: NewScene) -> Result<SceneUuid, String>;
+    async fn get_scenes(&self) -> Result<Vec<Scene>, String>;
     async fn add_person_to_scene(
         &self,
         scene_uuid: SceneUuid,

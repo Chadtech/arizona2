@@ -49,9 +49,7 @@ impl Event {
             } => {
                 format!(
                     "At {}, {} joined scene {}",
-                    self.timestamp,
-                    person_name,
-                    scene_name
+                    self.timestamp, person_name, scene_name
                 )
             }
             EventType::PersonLeftScene {
@@ -61,9 +59,7 @@ impl Event {
             } => {
                 format!(
                     "At {}, {} left scene {}",
-                    self.timestamp,
-                    person_name,
-                    scene_name
+                    self.timestamp, person_name, scene_name
                 )
             }
         }

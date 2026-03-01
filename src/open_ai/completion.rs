@@ -20,9 +20,17 @@ pub struct Response {
 
 #[derive(Debug, Clone)]
 pub enum MessageError {
-    MissingField { field: String, json: serde_json::Value },
-    NoChoices { json: serde_json::Value },
-    NotString { what: String, json: serde_json::Value },
+    MissingField {
+        field: String,
+        json: serde_json::Value,
+    },
+    NoChoices {
+        json: serde_json::Value,
+    },
+    NotString {
+        what: String,
+        json: serde_json::Value,
+    },
 }
 
 impl Into<CompletionError> for MessageError {
@@ -42,7 +50,10 @@ impl NiceDisplay for MessageError {
                 )
             }
             MessageError::NoChoices { json } => {
-                format!("No choices in response\nResponse JSON:\n{}", format_json(json))
+                format!(
+                    "No choices in response\nResponse JSON:\n{}",
+                    format_json(json)
+                )
             }
             MessageError::NotString { what, json } => {
                 format!(
@@ -61,8 +72,7 @@ impl Response {
     }
 
     pub fn as_pretty_json(&self) -> String {
-        serde_json::to_string_pretty(&self.json)
-            .unwrap_or_else(|_| self.json.to_string())
+        serde_json::to_string_pretty(&self.json).unwrap_or_else(|_| self.json.to_string())
     }
 
     pub fn as_message(&self) -> Result<String, MessageError> {
@@ -118,24 +128,24 @@ impl Response {
                 which: "choices".to_string(),
             })?;
 
-        let message = choices_json
-            .get("message")
-            .ok_or_else(|| tool_call::ToolCallDecodeError::MissingField {
+        let message = choices_json.get("message").ok_or_else(|| {
+            tool_call::ToolCallDecodeError::MissingField {
                 field: "message".to_string(),
                 json: choices_json.clone(),
-            })?;
+            }
+        })?;
 
         let tool_calls_value = message.get("tool_calls");
         match tool_calls_value {
             None => Ok(None),
             Some(value) if value.is_null() => Ok(None),
             Some(value) => {
-                value
-                    .as_array()
-                    .ok_or_else(|| tool_call::ToolCallDecodeError::FieldWasNotArray {
+                value.as_array().ok_or_else(|| {
+                    tool_call::ToolCallDecodeError::FieldWasNotArray {
                         field: "tool_calls".to_string(),
                         json: message.clone(),
-                    })?;
+                    }
+                })?;
                 ToolCall::from_json(&self.json).map(Some)
             }
         }

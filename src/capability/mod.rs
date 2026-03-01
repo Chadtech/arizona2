@@ -1,11 +1,11 @@
 pub mod event;
-pub mod logging;
-pub mod motivation;
-pub mod job_runner_settings;
 pub mod job;
+pub mod job_runner_settings;
 pub mod log_event;
+pub mod logging;
 pub mod memory;
 pub mod message;
+pub mod motivation;
 pub mod person;
 pub mod person_identity;
 pub mod reaction;

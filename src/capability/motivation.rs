@@ -17,8 +17,5 @@ pub trait MotivationCapability {
         &self,
         person_uuid: PersonUuid,
     ) -> Result<Vec<Motivation>, String>;
-    async fn delete_motivation(
-        &self,
-        motivation_uuid: MotivationUuid,
-    ) -> Result<(), String>;
+    async fn delete_motivation(&self, motivation_uuid: MotivationUuid) -> Result<(), String>;
 }

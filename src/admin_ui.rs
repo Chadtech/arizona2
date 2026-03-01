@@ -313,7 +313,7 @@ impl Model {
     fn new(flags: Flags) -> (Self, Task<Msg>) {
         let tab = flags.storage.tab;
 
-        let model = Model {
+        let mut model = Model {
             prompt_field: flags.storage.prompt,
             prompt_status: PromptStatus::Ready,
             new_identity_page: new_identity_page::Model::new(&flags.storage.new_identity),
@@ -340,6 +340,14 @@ impl Model {
         let worker4 = model.worker.clone();
 
         let tab_task = tab.init_task(&model.worker);
+        let messages_tab_task = if tab == Tab::Messages {
+            model
+                .messages_page
+                .on_tab_activated(model.worker.clone())
+                .map(Msg::MessagesPageMsg)
+        } else {
+            Task::none()
+        };
 
         (
             model,
@@ -356,6 +364,7 @@ impl Model {
                     Msg::JobRunnerEnabledLoaded,
                 ),
                 tab_task,
+                messages_tab_task,
             ]),
         )
     }
@@ -402,7 +411,7 @@ impl Model {
                 let tab_task = match self.tab {
                     Tab::Messages => self
                         .messages_page
-                        .on_tab_activated()
+                        .on_tab_activated(self.worker.clone())
                         .map(Msg::MessagesPageMsg),
                     _ => Task::none(),
                 };

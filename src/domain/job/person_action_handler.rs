@@ -1,14 +1,14 @@
 use crate::capability::job::JobCapability;
-use crate::capability::message::MessageCapability;
 use crate::capability::logging::LogCapability;
-use crate::capability::scene::SceneCapability;
+use crate::capability::message::MessageCapability;
 use crate::capability::person::PersonCapability;
 use crate::capability::reaction_history::ReactionHistoryCapability;
+use crate::capability::scene::SceneCapability;
 use crate::domain::job::person_waiting::PersonWaitingJob;
 use crate::domain::job::send_message_to_scene::send_scene_message_and_enqueue_recipients;
 use crate::domain::job::JobKind;
-use crate::domain::message::MessageSender;
 use crate::domain::logger::Level;
+use crate::domain::message::MessageSender;
 use crate::domain::person_uuid::PersonUuid;
 use crate::domain::random_seed::RandomSeed;
 use crate::domain::scene_uuid::SceneUuid;
@@ -99,7 +99,9 @@ pub async fn handle_person_action<
                 .get_persons_current_scene_uuid(person_uuid)
                 .await
                 .map_err(ActionHandleError::SceneMissing)?
-                .ok_or_else(|| ActionHandleError::SceneMissing("Person is not in any scene".to_string()))?;
+                .ok_or_else(|| {
+                    ActionHandleError::SceneMissing("Person is not in any scene".to_string())
+                })?;
 
             send_scene_message_and_enqueue_recipients(
                 worker,
@@ -144,10 +146,7 @@ pub async fn handle_person_action<
                 .map_err(ActionHandleError::MoveToScene)?;
 
             let scene = maybe_scene.ok_or_else(|| {
-                ActionHandleError::MoveToScene(format!(
-                    "Scene named '{}' not found",
-                    scene_name
-                ))
+                ActionHandleError::MoveToScene(format!("Scene named '{}' not found", scene_name))
             })?;
 
             let from_scene_desc = match &from_scene_uuid {
@@ -192,20 +191,15 @@ pub async fn handle_person_action<
     }
 }
 
-async fn enqueue_wait<
-    W: JobCapability,
->(
+async fn enqueue_wait<W: JobCapability>(
     worker: &W,
     person_uuid: &PersonUuid,
     duration_ms: u64,
     current_active_ms: i64,
 ) -> Result<(), ActionHandleError> {
     let duration_i64: i64 = duration_ms.min(i64::MAX as u64) as i64;
-    let person_waiting_job = PersonWaitingJob::new(
-        person_uuid.clone(),
-        duration_i64,
-        current_active_ms,
-    );
+    let person_waiting_job =
+        PersonWaitingJob::new(person_uuid.clone(), duration_i64, current_active_ms);
     let wait_job = JobKind::PersonWaiting(person_waiting_job);
     worker
         .unshift_job(wait_job)

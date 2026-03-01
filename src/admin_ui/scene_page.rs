@@ -365,13 +365,11 @@ fn scene_creation_status_view(status: &NewSceneStatus) -> Element<'_, Msg> {
         NewSceneStatus::Ready => w::text("Ready").into(),
         NewSceneStatus::CreatingScene => w::text("Creating scene...").into(),
         NewSceneStatus::Done => w::text("Done!").into(),
-        NewSceneStatus::ErrorCreatingScene(err) => {
-            w::column![
-                w::text("Error creating scene:").color(s::RED_SOFT),
-                w::text(err),
-            ]
-            .spacing(s::S1)
-            .into()
-        }
+        NewSceneStatus::ErrorCreatingScene(err) => w::column![
+            w::text("Error creating scene:").color(s::RED_SOFT),
+            w::text(err),
+        ]
+        .spacing(s::S1)
+        .into(),
     }
 }

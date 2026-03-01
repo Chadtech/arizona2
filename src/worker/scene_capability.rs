@@ -9,6 +9,7 @@ use crate::domain::scene_participant_uuid::SceneParticipantUuid;
 use crate::domain::scene_uuid::SceneUuid;
 use crate::worker::Worker;
 use async_trait::async_trait;
+use sqlx::Row;
 
 #[async_trait]
 impl SceneCapability for Worker {
@@ -36,6 +37,51 @@ impl SceneCapability for Worker {
         self.create_scene_snapshot(new_snapshot).await?;
 
         Ok(SceneUuid::from_uuid(ret.uuid))
+    }
+
+    async fn get_scenes(&self) -> Result<Vec<Scene>, String> {
+        let rows = sqlx::query(
+            r#"
+                SELECT
+                    scene.uuid,
+                    scene.name,
+                    latest_snapshot.description
+                FROM scene
+                LEFT JOIN LATERAL (
+                    SELECT description
+                    FROM scene_snapshot
+                    WHERE scene_snapshot.scene_uuid = scene.uuid
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                ) AS latest_snapshot ON true
+                ORDER BY scene.name ASC;
+            "#,
+        )
+        .fetch_all(&self.sqlx)
+        .await
+        .map_err(|err| format!("Error fetching scenes: {}", err))?;
+
+        let mut scenes = Vec::with_capacity(rows.len());
+
+        for row in rows {
+            let uuid = row
+                .try_get::<uuid::Uuid, _>("uuid")
+                .map_err(|err| format!("Error reading scene uuid: {}", err))?;
+            let name = row
+                .try_get::<String, _>("name")
+                .map_err(|err| format!("Error reading scene name: {}", err))?;
+            let description = row
+                .try_get::<Option<String>, _>("description")
+                .map_err(|err| format!("Error reading scene description: {}", err))?;
+
+            scenes.push(Scene {
+                uuid: SceneUuid::from_uuid(uuid),
+                name,
+                description,
+            });
+        }
+
+        Ok(scenes)
     }
 
     async fn add_person_to_scene(

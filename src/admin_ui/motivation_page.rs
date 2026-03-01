@@ -21,7 +21,10 @@ pub struct Model {
 enum LoadStatus {
     Ready,
     Loading,
-    Loaded { person_uuid: PersonUuid, motivations: Vec<Motivation> },
+    Loaded {
+        person_uuid: PersonUuid,
+        motivations: Vec<Motivation>,
+    },
     Error(String),
 }
 
@@ -112,8 +115,7 @@ impl Model {
             Msg::ClickedLoadMotivations => {
                 let person_name = self.person_name_input.clone();
                 if person_name.trim().is_empty() {
-                    self.load_status =
-                        LoadStatus::Error("Person name cannot be empty".to_string());
+                    self.load_status = LoadStatus::Error("Person name cannot be empty".to_string());
                     self.create_state = None;
                     return Task::none();
                 }
@@ -141,7 +143,10 @@ impl Model {
                                 .iter()
                                 .any(|motivation| &motivation.uuid == motivation_uuid)
                         });
-                        LoadStatus::Loaded { person_uuid, motivations }
+                        LoadStatus::Loaded {
+                            person_uuid,
+                            motivations,
+                        }
                     }
                     Err(err) => {
                         self.create_state = None;
@@ -163,9 +168,8 @@ impl Model {
                     let priority = match create_state.priority_input.trim().parse::<i32>() {
                         Ok(value) => value,
                         Err(_) => {
-                            create_state.status = CreateStatus::Error(
-                                "Priority must be a number".to_string(),
-                            );
+                            create_state.status =
+                                CreateStatus::Error("Priority must be a number".to_string());
                             return Task::none();
                         }
                     };
@@ -181,15 +185,11 @@ impl Model {
                     let person_uuid = person_uuid.clone();
                     let content = content.to_string();
                     Task::perform(
-                        async move {
-                            create_motivation(&worker, person_uuid, content, priority).await
-                        },
+                        async move { create_motivation(&worker, person_uuid, content, priority).await },
                         Msg::MotivationCreated,
                     )
                 }
-                _ => {
-                    Task::none()
-                }
+                _ => Task::none(),
             },
             Msg::MotivationCreated(result) => match result {
                 Ok(_) => {
@@ -275,9 +275,14 @@ impl Model {
             .into(),
         };
 
-        w::column![w::text("Motivations"), load_section, motivations_list, create_section]
-            .spacing(s::S4)
-            .into()
+        w::column![
+            w::text("Motivations"),
+            load_section,
+            motivations_list,
+            create_section
+        ]
+        .spacing(s::S4)
+        .into()
     }
 }
 
@@ -313,7 +318,10 @@ fn motivations_view<'a>(
 
             let mut col = w::column![];
             for motivation in motivations {
-                let created_at = motivation.created_at.format("%Y-%m-%d %H:%M:%S").to_string();
+                let created_at = motivation
+                    .created_at
+                    .format("%Y-%m-%d %H:%M:%S")
+                    .to_string();
                 let ended_at = match motivation.ended_at {
                     Some(time) => time.format("%Y-%m-%d %H:%M:%S").to_string(),
                     None => "active".to_string(),
@@ -322,18 +330,14 @@ fn motivations_view<'a>(
                 let delete_button = match delete_status.get(&motivation.uuid) {
                     Some(DeleteStatus::Deleting) => w::button("Deleting..."),
                     Some(DeleteStatus::Done) => w::button("Deleted"),
-                    Some(DeleteStatus::Error(_)) => {
-                        w::button("Delete")
-                            .on_press(Msg::ClickedDeleteMotivation(motivation.uuid.clone()))
-                    }
+                    Some(DeleteStatus::Error(_)) => w::button("Delete")
+                        .on_press(Msg::ClickedDeleteMotivation(motivation.uuid.clone())),
                     _ => w::button("Delete")
                         .on_press(Msg::ClickedDeleteMotivation(motivation.uuid.clone())),
                 };
 
                 let delete_error: Element<'_, Msg> = match delete_status.get(&motivation.uuid) {
-                    Some(DeleteStatus::Error(err)) => {
-                        w::text(format!("Error: {}", err)).into()
-                    }
+                    Some(DeleteStatus::Error(err)) => w::text(format!("Error: {}", err)).into(),
                     _ => w::text("").into(),
                 };
 
@@ -366,7 +370,9 @@ async fn load_motivations(
     let person_uuid = worker
         .get_person_uuid_by_name(PersonName::from_string(person_name))
         .await?;
-    let motivations = worker.get_motivations_for_person(person_uuid.clone()).await?;
+    let motivations = worker
+        .get_motivations_for_person(person_uuid.clone())
+        .await?;
     Ok((person_uuid, motivations))
 }
 

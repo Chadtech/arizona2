@@ -19,6 +19,7 @@ pub struct Model {
 
     // For scene-based conversation view
     scene_name_input: String,
+    scene_list_status: SceneListStatus,
     scene_load_status: SceneLoadStatus,
 
     // Message composition
@@ -44,6 +45,13 @@ enum SceneLoadStatus {
     Loading,
     Loaded(LoadedSceneModel),
     NotFound(String), // Scene name that wasn't found
+    Error(String),
+}
+
+enum SceneListStatus {
+    NotLoaded,
+    Loading,
+    Loaded(Vec<String>),
     Error(String),
 }
 
@@ -83,9 +91,9 @@ pub enum Msg {
     ViewModeRadioSelected(ViewMode),
     Person1Selected(String),
     Person2Selected(String),
-    SceneNameInputChanged(String),
-    SceneLoadButtonClicked,
-    SceneNameSubmitted,
+    LoadSceneList,
+    SceneListLoaded(Result<Vec<Scene>, String>),
+    SceneDropdownSelected(String),
     SceneLoaded(Result<Option<Scene>, String>),
     ParticipantsLoaded(Result<Vec<SceneParticipant>, String>),
     TimelineLoaded(Result<scene_timeline::Model, String>),
@@ -128,6 +136,7 @@ impl Model {
             selected_person_1: storage.selected_person_1.clone(),
             selected_person_2: storage.selected_person_2.clone(),
             scene_name_input: storage.scene_name_input.clone(),
+            scene_list_status: SceneListStatus::NotLoaded,
             scene_load_status: SceneLoadStatus::Ready,
             message_input: String::new(),
             send_status: SendStatus::Ready,
@@ -141,7 +150,10 @@ impl Model {
             Msg::ViewModeRadioSelected(mode) => {
                 self.view_mode = mode;
                 self.send_status = SendStatus::Ready;
-                Task::none()
+                match self.view_mode {
+                    ViewMode::Scene => self.load_scene_list(worker),
+                    ViewMode::DirectMessage => Task::none(),
+                }
             }
             Msg::Person1Selected(person) => {
                 self.selected_person_1 = Some(person);
@@ -151,14 +163,21 @@ impl Model {
                 self.selected_person_2 = Some(person);
                 Task::none()
             }
-            Msg::SceneNameInputChanged(name) => {
-                self.scene_name_input = name;
-                self.scene_load_status = SceneLoadStatus::Ready;
-                self.send_status = SendStatus::Ready;
+            Msg::LoadSceneList => self.load_scene_list(worker),
+            Msg::SceneListLoaded(result) => {
+                self.scene_list_status = match result {
+                    Ok(scenes) => SceneListStatus::Loaded(
+                        scenes.into_iter().map(|scene| scene.name).collect(),
+                    ),
+                    Err(err) => SceneListStatus::Error(err),
+                };
                 Task::none()
             }
-            Msg::SceneLoadButtonClicked => self.load_scene(worker),
-            Msg::SceneNameSubmitted => self.load_scene(worker),
+            Msg::SceneDropdownSelected(scene_name) => {
+                self.scene_name_input = scene_name;
+                self.send_status = SendStatus::Ready;
+                self.load_scene(worker)
+            }
             Msg::SceneLoaded(result) => match result {
                 Ok(Some(scene)) => {
                     let scene_uuid = scene.uuid.clone();
@@ -392,29 +411,35 @@ impl Model {
         }
     }
 
-    pub fn on_tab_activated(&mut self) -> Task<Msg> {
-        if self.view_mode != ViewMode::Scene {
-            return Task::none();
-        }
+    pub fn on_tab_activated(&mut self, worker: Arc<Worker>) -> Task<Msg> {
+        let load_scene_list_task = self.load_scene_list(worker);
 
-        match &self.scene_load_status {
-            SceneLoadStatus::Loaded(scene) => match &scene.messages {
-                MessagesStatus::Loaded(model) => model.scroll_to_bottom().map(Msg::GotTimelineMsg),
-                MessagesStatus::Refreshing(model) => {
-                    model.scroll_to_bottom().map(Msg::GotTimelineMsg)
-                }
-                MessagesStatus::Error {
-                    cached: Some(model),
-                    ..
-                } => model.scroll_to_bottom().map(Msg::GotTimelineMsg),
-                MessagesStatus::Loading => Task::none(),
-                MessagesStatus::Error { cached: None, .. } => Task::none(),
-            },
-            SceneLoadStatus::Ready => Task::none(),
-            SceneLoadStatus::Loading => Task::none(),
-            SceneLoadStatus::NotFound(_) => Task::none(),
-            SceneLoadStatus::Error(_) => Task::none(),
-        }
+        let scroll_task = if self.view_mode != ViewMode::Scene {
+            Task::none()
+        } else {
+            match &self.scene_load_status {
+                SceneLoadStatus::Loaded(scene) => match &scene.messages {
+                    MessagesStatus::Loaded(model) => {
+                        model.scroll_to_bottom().map(Msg::GotTimelineMsg)
+                    }
+                    MessagesStatus::Refreshing(model) => {
+                        model.scroll_to_bottom().map(Msg::GotTimelineMsg)
+                    }
+                    MessagesStatus::Error {
+                        cached: Some(model),
+                        ..
+                    } => model.scroll_to_bottom().map(Msg::GotTimelineMsg),
+                    MessagesStatus::Loading => Task::none(),
+                    MessagesStatus::Error { cached: None, .. } => Task::none(),
+                },
+                SceneLoadStatus::Ready => Task::none(),
+                SceneLoadStatus::Loading => Task::none(),
+                SceneLoadStatus::NotFound(_) => Task::none(),
+                SceneLoadStatus::Error(_) => Task::none(),
+            }
+        };
+
+        Task::batch(vec![load_scene_list_task, scroll_task])
     }
 
     pub fn view(&self) -> Element<'_, Msg> {
@@ -476,13 +501,28 @@ impl Model {
     }
 
     fn view_scene(&self) -> Element<'_, Msg> {
-        let scene_input = w::row![
-            w::text_input("Enter scene name", &self.scene_name_input)
-                .on_input(Msg::SceneNameInputChanged)
-                .on_submit(Msg::SceneNameSubmitted),
-            w::button("Load Scene").on_press(Msg::SceneLoadButtonClicked),
-        ]
-        .spacing(s::S1);
+        let scene_picker: Element<'_, Msg> = match &self.scene_list_status {
+            SceneListStatus::NotLoaded => w::button("Load Scene List")
+                .on_press(Msg::LoadSceneList)
+                .into(),
+            SceneListStatus::Loading => w::text("Loading scenes...").into(),
+            SceneListStatus::Loaded(scene_names) => {
+                let selected = scene_names
+                    .iter()
+                    .find(|name| *name == &self.scene_name_input)
+                    .cloned();
+
+                w::pick_list(scene_names.clone(), selected, Msg::SceneDropdownSelected)
+                    .placeholder("Select scene")
+                    .into()
+            }
+            SceneListStatus::Error(err) => w::column![
+                w::text(format!("Error loading scene list: {}", err)),
+                w::button("Retry Scene List").on_press(Msg::LoadSceneList),
+            ]
+            .spacing(s::S1)
+            .into(),
+        };
 
         let scene_status: Element<'_, Msg> = match &self.scene_load_status {
             SceneLoadStatus::Ready => w::text("").into(),
@@ -531,7 +571,7 @@ impl Model {
             SceneLoadStatus::Error(err) => w::text(format!("Error: {}", err)).into(),
         };
 
-        let scene_section = w::column![w::text("Scene"), scene_input, scene_status].spacing(s::S1);
+        let scene_section = w::column![w::text("Scene"), scene_picker, scene_status].spacing(s::S1);
 
         w::column![scene_section]
             .spacing(s::S4)
@@ -636,6 +676,20 @@ impl Model {
             async move { worker.get_scene_from_name(scene_name.clone()).await },
             Msg::SceneLoaded,
         )
+    }
+
+    fn load_scene_list(&mut self, worker: Arc<Worker>) -> Task<Msg> {
+        match self.scene_list_status {
+            SceneListStatus::Loading => Task::none(),
+            SceneListStatus::Loaded(_) => Task::none(),
+            SceneListStatus::NotLoaded | SceneListStatus::Error(_) => {
+                self.scene_list_status = SceneListStatus::Loading;
+                Task::perform(
+                    async move { worker.get_scenes().await },
+                    Msg::SceneListLoaded,
+                )
+            }
+        }
     }
 
     pub fn to_storage(&self) -> Storage {

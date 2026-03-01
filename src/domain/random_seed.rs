@@ -20,8 +20,8 @@ impl RandomSeed {
 
     pub fn split(&self) -> (RandomSeed, RandomSeed) {
         let mut rng = rand::rngs::SmallRng::seed_from_u64(self.0);
-        let seed1 = RandomSeed::from_u64(rng.next_u64());
-        let seed2 = RandomSeed::from_u64(rng.next_u64());
-        (seed1, seed2)
+        let first_seed = RandomSeed::from_u64(rng.next_u64());
+        let second_seed = RandomSeed::from_u64(rng.next_u64());
+        (first_seed, second_seed)
     }
 }

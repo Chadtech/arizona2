@@ -149,9 +149,7 @@ impl Model {
             ReactionStatus::Response(response) => w::Column::with_children(
                 response
                     .iter()
-                    .map(|reaction| {
-                        w::text(format!("Reaction: {:#?}", reaction)).into()
-                    })
+                    .map(|reaction| w::text(format!("Reaction: {:#?}", reaction)).into())
                     .collect::<Vec<_>>(),
             )
             .into(),

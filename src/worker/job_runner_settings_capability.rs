@@ -20,7 +20,9 @@ impl JobRunnerSettingsCapability for Worker {
         let row = match row {
             Some(row) => row,
             None => {
-                return Err("Job runner poll interval is missing from job_runner_setting".to_string());
+                return Err(
+                    "Job runner poll interval is missing from job_runner_setting".to_string(),
+                );
             }
         };
 
