@@ -681,8 +681,9 @@ impl Model {
     fn load_scene_list(&mut self, worker: Arc<Worker>) -> Task<Msg> {
         match self.scene_list_status {
             SceneListStatus::Loading => Task::none(),
-            SceneListStatus::Loaded(_) => Task::none(),
-            SceneListStatus::NotLoaded | SceneListStatus::Error(_) => {
+            SceneListStatus::NotLoaded
+            | SceneListStatus::Loaded(_)
+            | SceneListStatus::Error(_) => {
                 self.scene_list_status = SceneListStatus::Loading;
                 Task::perform(
                     async move { worker.get_scenes().await },

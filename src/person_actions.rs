@@ -5,6 +5,7 @@ use crate::open_ai::tool_call::ToolCall;
 
 pub enum PersonActionKind {
     Wait,
+    Hibernate,
     Idle,
     SayInScene,
     MoveToScene,
@@ -36,6 +37,7 @@ impl PersonActionKind {
     pub fn to_name(&self) -> String {
         match self {
             PersonActionKind::Wait => "wait".to_string(),
+            PersonActionKind::Hibernate => "hibernate".to_string(),
             PersonActionKind::Idle => "idle".to_string(),
             PersonActionKind::SayInScene => "say in scene".to_string(),
             PersonActionKind::MoveToScene => "move to scene".to_string(),
@@ -45,6 +47,7 @@ impl PersonActionKind {
     pub fn all_action_names() -> Vec<String> {
         vec![
             PersonActionKind::Wait.to_name(),
+            PersonActionKind::Hibernate.to_name(),
             PersonActionKind::Idle.to_name(),
             PersonActionKind::SayInScene.to_name(),
             PersonActionKind::MoveToScene.to_name(),
@@ -71,20 +74,30 @@ impl PersonActionKind {
                 required: false,
             },
             ToolFunctionParameter::StringParam {
+                name: "destination_scene_name".to_string(),
+                description:
+                    "Optional destination scene if action is say in scene and the person should leave immediately after speaking."
+                        .to_string(),
+                required: false,
+            },
+            ToolFunctionParameter::StringParam {
                 name: "scene_name".to_string(),
                 description: "Scene name to move to if action is move to scene.".to_string(),
                 required: false,
             },
             ToolFunctionParameter::IntegerParam {
                 name: "duration".to_string(),
-                description: "How long to wait in milliseconds if action is wait.".to_string(),
+                description:
+                    "How long to wait or hibernate in milliseconds if action is wait or hibernate."
+                        .to_string(),
                 required: false,
             },
         ];
 
         Tool::FunctionCall(ToolFunction::new(
             "choose_action".to_string(),
-            "Choose a single action for the person. Only one action is allowed. Use idle when the person decides to do nothing.".to_string(),
+            "Choose a single action for the person. Only one action is allowed. Use idle when the person decides to do nothing. Use hibernate for long, uninterrupted sleep. If action is say in scene, you may also provide destination_scene_name to leave right after speaking."
+                .to_string(),
             parameters,
         ))
     }
@@ -93,8 +106,12 @@ impl PersonActionKind {
 #[derive(Debug, Clone)]
 pub enum PersonAction {
     Wait { duration: u64 },
+    Hibernate { duration: u64 },
     Idle,
-    SayInScene { comment: String },
+    SayInScene {
+        comment: String,
+        destination_scene_name: Option<String>,
+    },
     MoveToScene { scene_name: String },
 }
 
@@ -104,9 +121,18 @@ impl PersonAction {
             PersonAction::Wait { duration } => {
                 format!("Waited for {} seconds.", duration)
             }
+            PersonAction::Hibernate { duration } => {
+                format!("Hibernated for {} seconds.", duration)
+            }
             PersonAction::Idle => "Did nothing.".to_string(),
-            PersonAction::SayInScene { comment } => {
-                format!("Spoke in scene: {}", comment)
+            PersonAction::SayInScene {
+                comment,
+                destination_scene_name,
+            } => match destination_scene_name {
+                Some(scene_name) => {
+                    format!("Spoke in scene then left for {}: {}", scene_name, comment)
+                }
+                None => format!("Spoke in scene: {}", comment),
             }
             PersonAction::MoveToScene { scene_name } => {
                 format!("Moved to scene: {}", scene_name)
@@ -202,6 +228,7 @@ impl PersonReaction {
         let mut maybe_reflection: Option<String> = None;
         let mut maybe_action: Option<String> = None;
         let mut maybe_comment: Option<String> = None;
+        let mut maybe_destination_scene_name: Option<String> = None;
         let mut maybe_scene_name: Option<String> = None;
         let mut maybe_duration: Option<u64> = None;
 
@@ -215,6 +242,9 @@ impl PersonReaction {
                 }
                 "comment" => {
                     maybe_comment = value.as_str().map(|s| s.to_string());
+                }
+                "destination_scene_name" => {
+                    maybe_destination_scene_name = value.as_str().map(|s| s.to_string());
                 }
                 "scene_name" => {
                     maybe_scene_name = value.as_str().map(|s| s.to_string());
@@ -267,7 +297,10 @@ impl PersonReaction {
                     parameter_name: "comment".to_string(),
                     arguments: arguments_json.clone(),
                 })?;
-                PersonAction::SayInScene { comment }
+                PersonAction::SayInScene {
+                    comment,
+                    destination_scene_name: maybe_destination_scene_name,
+                }
             }
             "wait" => {
                 let duration =
@@ -277,6 +310,15 @@ impl PersonReaction {
                         arguments: arguments_json.clone(),
                     })?;
                 PersonAction::Wait { duration }
+            }
+            "hibernate" => {
+                let duration =
+                    maybe_duration.ok_or_else(|| PersonActionError::ParameterMissing {
+                        action_name: tool_call_name.clone(),
+                        parameter_name: "duration".to_string(),
+                        arguments: arguments_json.clone(),
+                    })?;
+                PersonAction::Hibernate { duration }
             }
             "idle" => PersonAction::Idle,
             "move to scene" => {

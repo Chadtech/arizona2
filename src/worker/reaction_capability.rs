@@ -64,7 +64,7 @@ async fn get_reaction_helper(
 ) -> Result<PersonReaction, Error> {
     let mut completion = Completion::new(open_ai::model::Model::DEFAULT);
 
-    completion.add_message(Role::System, "You are simulating a real human. Your goal is to predict what this person would actually do. The information provided is complete; the person has no other knowledge or context beyond what is in the prompt, and their behavior must not assume anything else. Use the memories, motivations, identity, and state of mind to choose the most realistic action. Predict behavior as a realistic person within the capacities of the available tool calls. Prefer ordinary, plausible behavior over dramatic or clever behavior. If the latest message is clearly addressed to someone else and not to this person, prefer waiting unless there is a strong, realistic reason to interject. If the person does speak, they will contribute something novel instead of repeating what has already been said. If nothing new has happened, predict what a human of the following description realistically would do if that period of time elapsed with nothing happening. The person understands they can only do the following actions, and these are the only possible actions: wait, idle, say in scene, move to scene. Respond with exactly one tool call and no extra text.");
+    completion.add_message(Role::System, "You are simulating a real human. Your goal is to predict what this person would actually do. The information provided is complete; the person has no other knowledge or context beyond what is in the prompt, and their behavior must not assume anything else. Use the memories, motivations, identity, and state of mind to choose the most realistic action. Predict behavior as a realistic person within the capacities of the available tool calls. Prefer ordinary, plausible behavior over dramatic or clever behavior. If the latest message is clearly addressed to someone else and not to this person, prefer waiting unless there is a strong, realistic reason to interject. If the person does speak, they will contribute something novel instead of repeating what has already been said. If nothing new has happened, predict what a human of the following description realistically would do if that period of time elapsed with nothing happening. The person understands they can only do the following actions, and these are the only possible actions: wait, hibernate, idle, say in scene, move to scene. For say in scene, they may also include destination_scene_name to leave immediately after speaking. Respond with exactly one tool call and no extra text.");
 
     let memories_list = if memories.is_empty() {
         "None.".to_string()
@@ -157,10 +157,17 @@ async fn get_reaction_helper(
 fn describe_action(action: &PersonAction) -> String {
     match action {
         PersonAction::Wait { duration } => format!("wait for {} ms", duration),
+        PersonAction::Hibernate { duration } => format!("hibernate for {} ms", duration),
         PersonAction::Idle => "idle".to_string(),
-        PersonAction::SayInScene { comment } => {
-            format!("say in scene: {}", comment)
-        }
+        PersonAction::SayInScene {
+            comment,
+            destination_scene_name,
+        } => match destination_scene_name {
+            Some(scene_name) => {
+                format!("say in scene then move to {}: {}", scene_name, comment)
+            }
+            None => format!("say in scene: {}", comment),
+        },
         PersonAction::MoveToScene { scene_name } => {
             format!("move to scene: {}", scene_name)
         }

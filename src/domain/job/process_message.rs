@@ -98,6 +98,10 @@ pub enum Error {
         scene_uuid: SceneUuid,
         details: String,
     },
+    FailedToGetHibernationState {
+        person_uuid: PersonUuid,
+        details: String,
+    },
     FailedToCreateMemory(String),
     FailedToCreateReflectionStateOfMind(String),
     FailedToCreateReflectionMemory(String),
@@ -219,6 +223,16 @@ impl NiceDisplay for Error {
                 format!(
                     "Failed to mark scene messages handled for {}: {}",
                     scene_uuid.to_uuid(),
+                    details
+                )
+            }
+            Error::FailedToGetHibernationState {
+                person_uuid,
+                details,
+            } => {
+                format!(
+                    "Failed to get hibernation state for {}: {}",
+                    person_uuid.to_uuid(),
                     details
                 )
             }
@@ -545,6 +559,45 @@ async fn run_message_in_scene<
             scene_uuid: scene_uuid.clone(),
             details: err,
         })?;
+
+    let is_hibernating = worker
+        .is_person_hibernating(person_uuid)
+        .await
+        .map_err(|err| Error::FailedToGetHibernationState {
+            person_uuid: person_uuid.clone(),
+            details: err,
+        })?;
+    if is_hibernating {
+        if !pending_messages.is_empty() {
+            let handled_ids = pending_messages
+                .into_iter()
+                .map(|msg| msg.uuid)
+                .collect::<Vec<_>>();
+
+            worker
+                .mark_scene_messages_handled_for_person(person_uuid, handled_ids)
+                .await
+                .map_err(|err| Error::FailedToMarkSceneMessagesHandled {
+                    scene_uuid: scene_uuid.clone(),
+                    details: err,
+                })?;
+        }
+        tracing::info!(
+            "Skipping reaction for person {} in scene {}: person is hibernating",
+            person_uuid.to_uuid(),
+            scene_uuid.to_uuid()
+        );
+        worker.log(
+            Level::Info,
+            format!(
+                "Skipping reaction for person {} in scene {}: person is hibernating",
+                person_uuid.to_uuid(),
+                scene_uuid.to_uuid()
+            )
+            .as_str(),
+        );
+        return Ok(());
+    }
 
     if pending_messages.is_empty() {
         tracing::info!(

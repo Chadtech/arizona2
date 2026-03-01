@@ -1,10 +1,12 @@
 pub mod person_action_handler;
+pub mod person_hibernating;
 pub mod person_waiting;
 pub mod process_message;
 pub mod send_message_to_scene;
 
 use super::job_uuid::JobUuid;
 use crate::domain::job::person_waiting::PersonWaitingJob;
+use crate::domain::job::person_hibernating::PersonHibernatingJob;
 use crate::domain::job::send_message_to_scene::SendMessageToSceneJob;
 use crate::nice_display::NiceDisplay;
 use chrono::{DateTime, Utc};
@@ -42,6 +44,7 @@ pub enum JobKind {
     SendMessageToScene(SendMessageToSceneJob),
     ProcessMessage(ProcessMessageJob),
     PersonWaiting(PersonWaitingJob),
+    PersonHibernating(PersonHibernatingJob),
 }
 
 pub enum ParseError {
@@ -77,6 +80,7 @@ impl JobKind {
             JobKind::SendMessageToScene(_) => "send message to scene".to_string(),
             JobKind::ProcessMessage(_) => "process message".to_string(),
             JobKind::PersonWaiting(_) => "person waiting".to_string(),
+            JobKind::PersonHibernating(_) => "person hibernating".to_string(),
         }
     }
 
@@ -96,6 +100,12 @@ impl JobKind {
             JobKind::PersonWaiting(job) => {
                 let data = serde_json::to_value(job)
                     .map_err(|err| format!("Failed to serialize PersonWaitingJob: {}", err))?;
+                Ok(Some(data))
+            }
+            JobKind::PersonHibernating(job) => {
+                let data = serde_json::to_value(job).map_err(|err| {
+                    format!("Failed to serialize PersonHibernatingJob: {}", err)
+                })?;
                 Ok(Some(data))
             }
         }
@@ -251,6 +261,20 @@ impl JobKind {
                     })?;
 
                     Ok(JobKind::PersonWaiting(job))
+                }
+            },
+            "person hibernating" => match maybe_data {
+                None => Err(ParseError::NoJobDataForJobThatReuiresIt { job_name: name }),
+                Some(data) => {
+                    let job: PersonHibernatingJob =
+                        serde_json::from_value(data).map_err(|error| {
+                            ParseError::FailedToParseJobData {
+                                job_name: name.clone(),
+                                details: error.to_string(),
+                            }
+                        })?;
+
+                    Ok(JobKind::PersonHibernating(job))
                 }
             },
             _ => Err(ParseError::UnknownJobName(name)),

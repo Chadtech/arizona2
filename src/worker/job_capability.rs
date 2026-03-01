@@ -13,6 +13,9 @@ impl JobCapability for Worker {
         let job_data = job.to_data()?;
         let run_at_active_ms = match &job {
             JobKind::PersonWaiting(wait_job) => Some(wait_job.run_at_active_ms()),
+            JobKind::PersonHibernating(hibernation_job) => {
+                Some(hibernation_job.run_at_active_ms())
+            }
             _ => None,
         };
 

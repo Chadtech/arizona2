@@ -14,7 +14,7 @@ use crate::capability::reflection::ReflectionCapability;
 use crate::capability::scene::SceneCapability;
 use crate::capability::state_of_mind::StateOfMindCapability;
 use crate::domain::job::{
-    person_waiting, process_message, send_message_to_scene, JobKind, PoppedJob,
+    person_hibernating, person_waiting, process_message, send_message_to_scene, JobKind, PoppedJob,
 };
 use crate::domain::job_uuid::JobUuid;
 use crate::domain::logger::{Level, Logger};
@@ -48,6 +48,7 @@ pub enum RunJobError {
     ProcessMessageError(process_message::Error),
     SendMessageToSceneError(send_message_to_scene::Error),
     PersonWaitingError(person_waiting::Error),
+    PersonHibernatingError(person_hibernating::Error),
 }
 
 enum RunJobOutcome {
@@ -165,6 +166,9 @@ impl NiceDisplay for RunJobError {
             }
             RunJobError::PersonWaitingError(err) => {
                 format!("Error processing person waiting job\n{}", err.message())
+            }
+            RunJobError::PersonHibernatingError(err) => {
+                format!("Error processing person hibernating job\n{}", err.message())
             }
         }
     }
@@ -383,6 +387,23 @@ async fn run_job<
             {
                 person_waiting::WaitOutcome::Ready => Ok(RunJobOutcome::Completed),
                 person_waiting::WaitOutcome::NotReady => {
+                    worker
+                        .reset_job(&job.uuid)
+                        .await
+                        .map_err(RunJobError::FailedToResetJob)?;
+                    Ok(RunJobOutcome::Deferred)
+                }
+            }
+        }
+        JobKind::PersonHibernating(person_hibernating_job) => {
+            tracing::debug!("Executing PersonHibernating job");
+            match person_hibernating_job
+                .run(&worker, current_active_ms)
+                .await
+                .map_err(RunJobError::PersonHibernatingError)?
+            {
+                person_hibernating::HibernateOutcome::Ready => Ok(RunJobOutcome::Completed),
+                person_hibernating::HibernateOutcome::NotReady => {
                     worker
                         .reset_job(&job.uuid)
                         .await

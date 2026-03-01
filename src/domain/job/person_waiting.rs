@@ -35,6 +35,7 @@ pub struct PersonWaitingJob {
 pub enum Error {
     MissingPersonUuid,
     MissingStartedAt,
+    FailedToGetHibernationState(String),
     FailedToGetEvents(String),
     FailedToGetReactionHistory(String),
     FailedToGetStateOfMind(String),
@@ -66,6 +67,9 @@ impl NiceDisplay for Error {
         match self {
             Error::MissingPersonUuid => "Missing person uuid on wait job".to_string(),
             Error::MissingStartedAt => "Missing started_at on wait job".to_string(),
+            Error::FailedToGetHibernationState(err) => {
+                format!("Failed to get hibernation state: {}", err)
+            }
             Error::FailedToGetEvents(err) => {
                 format!("Failed to get events: {}", err)
             }
@@ -151,6 +155,13 @@ impl PersonWaitingJob {
     ) -> Result<WaitOutcome, Error> {
         let person_uuid = self.person_uuid.clone().ok_or(Error::MissingPersonUuid)?;
         let started_at = self.started_at.ok_or(Error::MissingStartedAt)?;
+        let is_hibernating = worker
+            .is_person_hibernating(&person_uuid)
+            .await
+            .map_err(Error::FailedToGetHibernationState)?;
+        if is_hibernating {
+            return Ok(WaitOutcome::Ready);
+        }
 
         let elapsed = current_active_ms.saturating_sub(self.start_active_ms);
         if elapsed >= self.duration_ms {

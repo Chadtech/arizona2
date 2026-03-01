@@ -2,6 +2,7 @@ use crate::capability::person::{NewPerson, PersonCapability};
 use crate::domain::person_name::PersonName;
 use crate::domain::person_uuid::PersonUuid;
 use crate::worker::Worker;
+use sqlx::Row;
 
 impl PersonCapability for Worker {
     async fn create_person(&self, new_person: NewPerson) -> Result<PersonUuid, String> {
@@ -53,5 +54,48 @@ impl PersonCapability for Worker {
         let rec = rec.ok_or_else(|| format!("Person '{}' not found", person_name.as_str()))?;
 
         Ok(PersonUuid::from_uuid(rec.uuid))
+    }
+
+    async fn set_person_hibernating(
+        &self,
+        person_uuid: &PersonUuid,
+        is_hibernating: bool,
+    ) -> Result<(), String> {
+        sqlx::query(
+            r#"
+                UPDATE person
+                SET is_hibernating = $2::BOOLEAN,
+                    updated_at = NOW()
+                WHERE uuid = $1::UUID;
+            "#,
+        )
+        .bind(person_uuid.to_uuid())
+        .bind(is_hibernating)
+        .execute(&self.sqlx)
+        .await
+        .map_err(|err| format!("Error updating hibernation state: {}", err))?;
+
+        Ok(())
+    }
+
+    async fn is_person_hibernating(&self, person_uuid: &PersonUuid) -> Result<bool, String> {
+        let rec = sqlx::query(
+            r#"
+                SELECT is_hibernating
+                FROM person
+                WHERE uuid = $1::UUID;
+            "#,
+        )
+        .bind(person_uuid.to_uuid())
+        .fetch_optional(&self.sqlx)
+        .await
+        .map_err(|err| format!("Error fetching hibernation state: {}", err))?;
+
+        match rec {
+            Some(row) => row
+                .try_get::<bool, _>("is_hibernating")
+                .map_err(|err| format!("Error reading is_hibernating: {}", err)),
+            None => Err(format!("Person {} not found", person_uuid.to_uuid())),
+        }
     }
 }
