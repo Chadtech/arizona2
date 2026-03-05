@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                INSERT INTO person_scene_visit (\n                    person_uuid,\n                    scene_uuid,\n                    first_visited_at,\n                    last_visited_at,\n                    visit_count,\n                    created_at,\n                    updated_at\n                )\n                VALUES ($1::UUID, $2::UUID, NOW(), NOW(), 1, NOW(), NOW())\n                ON CONFLICT (person_uuid, scene_uuid)\n                DO UPDATE\n                SET last_visited_at = NOW(),\n                    visit_count = person_scene_visit.visit_count + 1,\n                    updated_at = NOW();\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "67e9bd7c5f1cca5061a194604c39b833984ebdb18b000f5da17d44f18640ae6d"
+}

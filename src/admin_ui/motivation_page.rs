@@ -36,7 +36,6 @@ enum CreateStatus {
 }
 
 enum DeleteStatus {
-    Ready,
     Deleting,
     Done,
     Error(String),
@@ -58,7 +57,7 @@ pub enum Msg {
     ClickedCreateMotivation,
     MotivationCreated(Result<MotivationUuid, String>),
     ClickedDeleteMotivation(MotivationUuid),
-    MotivationDeleted(Result<MotivationUuid, String>),
+    MotivationDeleted(Result<MotivationUuid, (MotivationUuid, String)>),
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -215,6 +214,7 @@ impl Model {
             Msg::ClickedDeleteMotivation(motivation_uuid) => {
                 self.delete_status
                     .insert(motivation_uuid.clone(), DeleteStatus::Deleting);
+
                 Task::perform(
                     async move { delete_motivation(&worker, motivation_uuid).await },
                     Msg::MotivationDeleted,
@@ -232,8 +232,9 @@ impl Model {
                         Msg::MotivationsLoaded,
                     )
                 }
-                Err(err) => {
-                    self.load_status = LoadStatus::Error(err);
+                Err((motivation_uuid, err)) => {
+                    self.delete_status
+                        .insert(motivation_uuid, DeleteStatus::Error(err));
                     Task::none()
                 }
             },
@@ -394,10 +395,15 @@ async fn create_motivation(
 async fn delete_motivation(
     worker: &Worker,
     motivation_uuid: MotivationUuid,
-) -> Result<MotivationUuid, String> {
+) -> Result<MotivationUuid, (MotivationUuid, String)> {
     worker
         .delete_motivation(motivation_uuid.clone())
         .await
-        .map_err(|err| format!("Error deleting motivation: {}", err))?;
+        .map_err(|err| {
+            (
+                motivation_uuid.clone(),
+                format!("Error deleting motivation: {}", err),
+            )
+        })?;
     Ok(motivation_uuid)
 }

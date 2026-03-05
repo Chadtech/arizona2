@@ -19,7 +19,6 @@ use crate::open_ai::completion::CompletionError;
 use crate::worker;
 use crate::worker::Worker;
 use iced;
-use iced::futures::StreamExt;
 use iced::{widget as w, Element, Length, Subscription, Task, Theme};
 use serde::{Deserialize, Serialize};
 use std::fs::File;

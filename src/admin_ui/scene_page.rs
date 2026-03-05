@@ -29,6 +29,7 @@ struct SceneModel {
     participants: Vec<SceneParticipant>,
     new_participant_field: String,
     new_participant_status: NewParticipantStatus,
+    delete_scene_status: DeleteSceneStatus,
 }
 
 enum NewParticipantStatus {
@@ -38,6 +39,13 @@ enum NewParticipantStatus {
     Done,
     ErrorAddingParticipant(String),
     ErrorRefreshingParticipants(String),
+}
+
+enum DeleteSceneStatus {
+    Ready,
+    DeletingScene,
+    Done,
+    ErrorDeletingScene(String),
 }
 
 enum NewSceneStatus {
@@ -91,6 +99,8 @@ pub enum SceneLookUpMsg {
     ClickedAddParticipant,
     AddedParticipant(Result<SceneParticipantUuid, String>),
     GotRefreshedParticipants(Result<Vec<SceneParticipant>, String>),
+    ClickedDeleteScene,
+    DeletedScene(Result<(), String>),
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -124,6 +134,7 @@ impl SceneModel {
             participants: scene_agg.participants,
             new_participant_field: "".to_string(),
             new_participant_status: NewParticipantStatus::Ready,
+            delete_scene_status: DeleteSceneStatus::Ready,
         }
     }
 
@@ -172,6 +183,30 @@ impl SceneModel {
                 };
                 if let Ok(participants) = result {
                     self.participants = participants;
+                }
+                Task::none()
+            }
+            SceneLookUpMsg::ClickedDeleteScene => match self.delete_scene_status {
+                DeleteSceneStatus::Ready
+                | DeleteSceneStatus::Done
+                | DeleteSceneStatus::ErrorDeletingScene(_) => {
+                    self.delete_scene_status = DeleteSceneStatus::DeletingScene;
+                    let scene_uuid = self.scene_uuid.clone();
+                    Task::perform(
+                        async move { worker.delete_scene(&scene_uuid).await },
+                        SceneLookUpMsg::DeletedScene,
+                    )
+                }
+                DeleteSceneStatus::DeletingScene => Task::none(),
+            },
+            SceneLookUpMsg::DeletedScene(result) => {
+                self.delete_scene_status = match result {
+                    Ok(()) => DeleteSceneStatus::Done,
+                    Err(err) => DeleteSceneStatus::ErrorDeletingScene(err),
+                };
+                if let DeleteSceneStatus::Done = self.delete_scene_status {
+                    self.participants = Vec::new();
+                    self.new_participant_status = NewParticipantStatus::Ready;
                 }
                 Task::none()
             }
@@ -258,7 +293,10 @@ impl Model {
                 Task::none()
             }
             Msg::ClickedLookUpScene => match self.look_up_scene {
-                LookUpScene::Ready => {
+                LookUpScene::LookingUpScene => Task::none(),
+                LookUpScene::Ready
+                | LookUpScene::LoadedScene(_)
+                | LookUpScene::ErrorLookingUpScene(_) => {
                     self.look_up_scene = LookUpScene::LookingUpScene;
                     let scene_name = self.look_up_scene_name.clone();
                     Task::perform(
@@ -266,7 +304,6 @@ impl Model {
                         Msg::LookedUpScene,
                     )
                 }
-                _ => Task::none(),
             },
             Msg::LookedUpScene(result) => {
                 self.look_up_scene = match result {
@@ -328,6 +365,22 @@ fn scene_loaded_view(scene_model: &SceneModel) -> Element<'_, SceneLookUpMsg> {
         }
     };
 
+    let delete_scene_status: Element<SceneLookUpMsg> = match &scene_model.delete_scene_status {
+        DeleteSceneStatus::Ready => w::text("").into(),
+        DeleteSceneStatus::DeletingScene => w::text("Deleting scene...").into(),
+        DeleteSceneStatus::Done => w::text("Scene deleted.").into(),
+        DeleteSceneStatus::ErrorDeletingScene(err) => {
+            w::text(format!("Error deleting scene: {}", err)).into()
+        }
+    };
+
+    let delete_scene_button: Element<SceneLookUpMsg> = match scene_model.delete_scene_status {
+        DeleteSceneStatus::DeletingScene => w::button("Deleting...").into(),
+        _ => w::button("Delete Scene")
+            .on_press(SceneLookUpMsg::ClickedDeleteScene)
+            .into(),
+    };
+
     w::column![
         w::text("Scene Name"),
         w::text(&scene_model.scene_name),
@@ -341,7 +394,9 @@ fn scene_loaded_view(scene_model: &SceneModel) -> Element<'_, SceneLookUpMsg> {
         )
         .on_input(SceneLookUpMsg::NewParticipantFieldChanged),
         w::button("Add Participant").on_press(SceneLookUpMsg::ClickedAddParticipant),
-        new_participant_status
+        new_participant_status,
+        delete_scene_button,
+        delete_scene_status
     ]
     .spacing(s::S4)
     .into()

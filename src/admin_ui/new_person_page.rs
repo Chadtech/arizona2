@@ -32,7 +32,15 @@ enum LookupStatus {
     Loaded {
         person_uuid: PersonUuid,
         identity: Option<String>,
+        is_hibernating: bool,
+        hibernation_status: HibernationStatus,
     },
+    Error(String),
+}
+
+enum HibernationStatus {
+    Ready,
+    Updating,
     Error(String),
 }
 
@@ -66,7 +74,15 @@ pub enum Msg {
     LookupNameChanged(String),
     ClickedLoadIdentity,
     ClickedCopyIdentity(String),
-    LoadedIdentity(Result<(PersonUuid, Option<String>), String>),
+    LoadedIdentity(Result<(PersonUuid, Option<String>, bool), String>),
+    ClickedSetHibernation {
+        person_uuid: PersonUuid,
+        is_hibernating: bool,
+    },
+    SetHibernationUpdated {
+        is_hibernating: bool,
+        result: Result<(), String>,
+    },
 }
 
 impl Model {
@@ -156,12 +172,60 @@ impl Model {
             Msg::ClickedCopyIdentity(identity) => clipboard::write(identity),
             Msg::LoadedIdentity(result) => {
                 self.lookup_status = match result {
-                    Ok((person_uuid, identity)) => LookupStatus::Loaded {
+                    Ok((person_uuid, identity, is_hibernating)) => LookupStatus::Loaded {
                         person_uuid,
                         identity,
+                        is_hibernating,
+                        hibernation_status: HibernationStatus::Ready,
                     },
                     Err(err) => LookupStatus::Error(err),
                 };
+                Task::none()
+            }
+            Msg::ClickedSetHibernation {
+                person_uuid,
+                is_hibernating,
+            } => {
+                if let LookupStatus::Loaded {
+                    hibernation_status,
+                    ..
+                } = &mut self.lookup_status
+                {
+                    *hibernation_status = HibernationStatus::Updating;
+                }
+
+                Task::perform(
+                    async move {
+                        worker
+                            .set_person_hibernating(&person_uuid, is_hibernating)
+                            .await
+                    },
+                    move |result| Msg::SetHibernationUpdated {
+                        is_hibernating,
+                        result,
+                    },
+                )
+            }
+            Msg::SetHibernationUpdated {
+                is_hibernating,
+                result,
+            } => {
+                if let LookupStatus::Loaded {
+                    is_hibernating: current,
+                    hibernation_status,
+                    ..
+                } = &mut self.lookup_status
+                {
+                    match result {
+                        Ok(()) => {
+                            *current = is_hibernating;
+                            *hibernation_status = HibernationStatus::Ready;
+                        }
+                        Err(err) => {
+                            *hibernation_status = HibernationStatus::Error(err);
+                        }
+                    }
+                }
                 Task::none()
             }
         }
@@ -221,6 +285,8 @@ fn lookup_status_view(status: &LookupStatus) -> Element<'_, Msg> {
         LookupStatus::Loaded {
             person_uuid,
             identity,
+            is_hibernating,
+            hibernation_status,
         } => {
             let identity_text = match identity {
                 Some(text) => text.as_str(),
@@ -232,10 +298,54 @@ fn lookup_status_view(status: &LookupStatus) -> Element<'_, Msg> {
                     .into(),
                 None => w::text("").into(),
             };
+            let hibernation_state_text = if *is_hibernating {
+                "Hibernation: On"
+            } else {
+                "Hibernation: Off"
+            };
+
+            let hibernation_status_view: Element<'_, Msg> = match hibernation_status {
+                HibernationStatus::Ready => w::text("").into(),
+                HibernationStatus::Updating => w::text("Updating hibernation...").into(),
+                HibernationStatus::Error(err) => {
+                    w::text(format!("Error updating hibernation: {}", err)).into()
+                }
+            };
+
+            let is_updating = match hibernation_status {
+                HibernationStatus::Updating => true,
+                _ => false,
+            };
+
+            let hibernate_button: Element<'_, Msg> = if *is_hibernating || is_updating {
+                w::button("Put into hibernation").into()
+            } else {
+                w::button("Put into hibernation")
+                    .on_press(Msg::ClickedSetHibernation {
+                        person_uuid: person_uuid.clone(),
+                        is_hibernating: true,
+                    })
+                    .into()
+            };
+
+            let wake_button: Element<'_, Msg> = if !*is_hibernating || is_updating {
+                w::button("Take out of hibernation").into()
+            } else {
+                w::button("Take out of hibernation")
+                    .on_press(Msg::ClickedSetHibernation {
+                        person_uuid: person_uuid.clone(),
+                        is_hibernating: false,
+                    })
+                    .into()
+            };
+
             w::column![
                 w::text(format!("Person UUID: {}", person_uuid.to_uuid())),
                 w::text(identity_text),
                 copy_button,
+                w::text(hibernation_state_text),
+                w::row![hibernate_button, wake_button].spacing(s::S1),
+                hibernation_status_view,
             ]
             .spacing(s::S1)
             .into()
@@ -258,7 +368,7 @@ async fn create_new_identity(
 async fn load_identity(
     worker: &Worker,
     person_name: String,
-) -> Result<(PersonUuid, Option<String>), String> {
+) -> Result<(PersonUuid, Option<String>, bool), String> {
     if person_name.trim().is_empty() {
         return Err("Person name cannot be empty".to_string());
     }
@@ -267,5 +377,6 @@ async fn load_identity(
         .get_person_uuid_by_name(PersonName::from_string(person_name))
         .await?;
     let identity = worker.get_person_identity(&person_uuid).await?;
-    Ok((person_uuid, identity))
+    let is_hibernating = worker.is_person_hibernating(&person_uuid).await?;
+    Ok((person_uuid, identity, is_hibernating))
 }

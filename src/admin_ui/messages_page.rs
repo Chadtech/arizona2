@@ -6,7 +6,7 @@ use crate::domain::random_seed::RandomSeed;
 use crate::domain::scene_uuid::SceneUuid;
 use crate::nice_display::NiceDisplay;
 use crate::worker::Worker;
-use iced::{time, widget as w, Element, Length, Subscription, Task};
+use iced::{keyboard, time, widget as w, Element, Length, Subscription, Task};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -23,7 +23,7 @@ pub struct Model {
     scene_load_status: SceneLoadStatus,
 
     // Message composition
-    message_input: String,
+    message_input: w::text_editor::Content,
     send_status: SendStatus,
 
     // View mode toggle
@@ -99,7 +99,7 @@ pub enum Msg {
     TimelineLoaded(Result<scene_timeline::Model, String>),
     ParticipationHistoryLoaded(Result<Vec<scene_timeline::TimelineItem>, String>),
     OlderMessagesLoaded(Result<scene_timeline::LoadOlderResult, String>),
-    MessageInputChanged(String),
+    MessageInputChanged(w::text_editor::Action),
     SubmitMessage,
     MessageSent(Result<(), String>),
     GotTimelineMsg(scene_timeline::Msg),
@@ -138,7 +138,7 @@ impl Model {
             scene_name_input: storage.scene_name_input.clone(),
             scene_list_status: SceneListStatus::NotLoaded,
             scene_load_status: SceneLoadStatus::Ready,
-            message_input: String::new(),
+            message_input: w::text_editor::Content::new(),
             send_status: SendStatus::Ready,
             view_mode: storage.view_mode,
             auto_refresh: false,
@@ -302,8 +302,8 @@ impl Model {
                 }
                 Task::none()
             }
-            Msg::MessageInputChanged(content) => {
-                self.message_input = content;
+            Msg::MessageInputChanged(action) => {
+                self.message_input.perform(action);
                 self.send_status = SendStatus::Ready;
                 Task::none()
             }
@@ -318,13 +318,13 @@ impl Model {
             Msg::SubmitMessage => {
                 // Only allow sending if we have a loaded scene and message content
                 if let SceneLoadStatus::Loaded(scene) = &self.scene_load_status {
-                    if self.message_input.trim().is_empty() {
+                    let content = self.message_input.text();
+                    if content.trim().is_empty() {
                         return Task::none();
                     }
 
                     let sender = MessageSender::RealWorldUser;
                     let scene_uuid = scene.uuid.clone();
-                    let content = self.message_input.clone();
                     let random_seed = RandomSeed::from_u64(rand::random());
                     self.send_status = SendStatus::Sending;
 
@@ -351,7 +351,7 @@ impl Model {
                 match result {
                     Ok(_) => {
                         self.send_status = SendStatus::Sent;
-                        self.message_input.clear();
+                        self.message_input = w::text_editor::Content::new();
 
                         // Reload messages after a brief moment to show the newly sent message
                         return self.refresh_loaded_scene(worker);
@@ -580,10 +580,21 @@ impl Model {
     }
 
     fn view_message_composer(&self) -> Element<'_, Msg> {
-        let input = w::text_input("Type your message...", &self.message_input)
-            .on_input(Msg::MessageInputChanged)
-            .on_submit(Msg::SubmitMessage)
-            .width(Length::Fill);
+        let input: Element<'_, Msg> = w::container(
+            w::text_editor(&self.message_input)
+                .placeholder("Type your message...")
+                .key_binding(|key_press| match key_press.key.as_ref() {
+                    keyboard::Key::Named(keyboard::key::Named::Enter)
+                        if key_press.modifiers.command() =>
+                    {
+                        Some(w::text_editor::Binding::Custom(Msg::SubmitMessage))
+                    }
+                    _ => w::text_editor::Binding::from_key_press(key_press),
+                })
+                .on_action(Msg::MessageInputChanged),
+        )
+        .width(Length::Fill)
+        .into();
 
         let send_button = match &self.send_status {
             SendStatus::Ready | SendStatus::Sent => w::button("Send").on_press(Msg::SubmitMessage),

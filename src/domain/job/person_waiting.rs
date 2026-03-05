@@ -1,7 +1,7 @@
 use crate::capability::event::EventCapability;
 use crate::capability::job::JobCapability;
 use crate::capability::logging::LogCapability;
-use crate::capability::memory::{MemoryCapability, MemorySearchResult, MessageTypeArgs};
+use crate::capability::memory::{MemoryCapability, MessageTypeArgs};
 use crate::capability::message::MessageCapability;
 use crate::capability::person::PersonCapability;
 use crate::capability::person_identity::PersonIdentityCapability;
@@ -146,7 +146,8 @@ impl PersonWaitingJob {
             + StateOfMindCapability
             + PersonIdentityCapability
             + ReactionHistoryCapability
-            + LogCapability,
+            + LogCapability
+            + Sync,
     >(
         &self,
         worker: &W,
@@ -225,7 +226,7 @@ impl PersonWaitingJob {
 
             let minutes_waiting = (self.duration_ms / 60000).max(0);
             let situation = format!(
-                "{} decided to wait {} minutes, and nothing happened. There were no new messages or events. It is normal to do nothing and keep waiting silently.",
+                "{} decided to wait {} minutes, and nothing happened. There were no new messages or events. It is okay to do nothing and keep waiting silently.",
                 persons_name.as_str(),
                 minutes_waiting
             );

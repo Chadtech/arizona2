@@ -5,7 +5,7 @@ pub struct Memory {
     pub content: String,
 }
 
-const MEMORY_DISTANCE_TIERS: [f64; 3] = [0.25, 0.30, 0.35];
+const MEMORY_DISTANCE_TIERS: [f64; 3] = [0.30, 0.38, 0.45];
 
 impl From<MemorySearchResult> for Memory {
     fn from(value: MemorySearchResult) -> Self {

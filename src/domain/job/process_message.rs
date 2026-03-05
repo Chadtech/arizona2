@@ -4,7 +4,7 @@ use crate::capability::job::JobCapability;
 use crate::capability::log_event::LogEventCapability;
 use crate::capability::logging::LogCapability;
 use crate::capability::memory::NewMemory;
-use crate::capability::memory::{MemoryCapability, MemorySearchResult, MessageTypeArgs};
+use crate::capability::memory::{MemoryCapability, MessageTypeArgs};
 use crate::capability::motivation::MotivationCapability;
 use crate::capability::motivation::NewMotivation;
 use crate::capability::person::PersonCapability;
@@ -31,7 +31,7 @@ use crate::domain::situation;
 use crate::domain::situation::Situation;
 use crate::domain::state_of_mind::StateOfMind;
 use crate::domain::state_of_mind_uuid::StateOfMindUuid;
-use crate::person_actions::{PersonAction, PersonReaction, ReflectionDecision};
+use crate::person_actions::ReflectionDecision;
 use crate::{
     capability::{message::MessageCapability, scene::SceneCapability},
     domain::message_uuid::MessageUuid,
@@ -51,7 +51,6 @@ pub struct ProcessMessageJob {
 pub enum Error {
     FailedToGetMessage(String),
     MessageNotFound,
-    FailedToMarkMessageRead(String),
     GetPersonReactionError(String),
     FailedToGetEvents(String),
     FailedToGetStateOfMind(String),
@@ -118,9 +117,6 @@ impl NiceDisplay for Error {
                 format!("Failed to get message: {}", details)
             }
             Error::MessageNotFound => "Message not found".to_string(),
-            Error::FailedToMarkMessageRead(details) => {
-                format!("Failed to mark message as read: {}", details)
-            }
             Error::GetPersonReactionError(err) => {
                 format!("Failed to get person reaction: {}", err)
             }
@@ -281,7 +277,8 @@ impl ProcessMessageJob {
             + LogCapability
             + LogEventCapability
             + MotivationCapability
-            + JobCapability,
+            + JobCapability
+            + Sync,
     >(
         self,
         worker: &W,
@@ -407,8 +404,6 @@ async fn build_scene_situation<W: SceneCapability + PersonCapability>(
         .await
         .map_err(Error::FailedToGetPersonsName)?;
 
-    let person_name_str = person_name.as_str();
-
     let scene_name = worker
         .get_scene_name(scene_uuid)
         .await
@@ -480,12 +475,6 @@ async fn build_scene_situation<W: SceneCapability + PersonCapability>(
         ));
     }
 
-    let messages_block = if lines.is_empty() {
-        "No new messages.".to_string()
-    } else {
-        lines.join("\n")
-    };
-
     let situation = Situation::new(situation::Input {
         person_name: person_name.to_string(),
         scene_name,
@@ -544,7 +533,8 @@ async fn run_message_in_scene<
         + LogEventCapability
         + MotivationCapability
         + ReactionHistoryCapability
-        + JobCapability,
+        + JobCapability
+        + Sync,
 >(
     worker: &W,
     person_uuid: &PersonUuid,

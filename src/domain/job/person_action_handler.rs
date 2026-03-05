@@ -69,6 +69,7 @@ impl NiceDisplay for ActionHandleError {
 }
 
 const IDLE_DURATION_MS: i64 = 4 * 60 * 1000;
+const POST_MOVE_WAIT_MS: u64 = 30 * 1000;
 
 pub async fn handle_person_action<
     W: SceneCapability
@@ -76,7 +77,8 @@ pub async fn handle_person_action<
         + PersonCapability
         + MessageCapability
         + ReactionHistoryCapability
-        + LogCapability,
+        + LogCapability
+        + Sync,
 >(
     worker: &W,
     action: &PersonAction,
@@ -142,7 +144,13 @@ pub async fn handle_person_action<
             );
 
             if let Some(destination_scene_name) = destination_scene_name {
-                move_person_to_scene(worker, person_uuid, destination_scene_name).await?;
+                move_person_to_scene(
+                    worker,
+                    person_uuid,
+                    destination_scene_name,
+                    current_active_ms,
+                )
+                .await?;
             }
 
             let reaction_kind = match destination_scene_name {
@@ -157,7 +165,7 @@ pub async fn handle_person_action<
             Ok(())
         }
         PersonAction::MoveToScene { scene_name } => {
-            move_person_to_scene(worker, person_uuid, scene_name).await?;
+            move_person_to_scene(worker, person_uuid, scene_name, current_active_ms).await?;
 
             worker
                 .record_reaction(person_uuid, "move_to_scene")
@@ -192,11 +200,13 @@ async fn move_person_to_scene<
         + PersonCapability
         + MessageCapability
         + ReactionHistoryCapability
-        + LogCapability,
+        + LogCapability
+        + Sync,
 >(
     worker: &W,
     person_uuid: &PersonUuid,
     scene_name: &str,
+    current_active_ms: i64,
 ) -> Result<(), ActionHandleError> {
     let person_name = worker
         .get_persons_name(person_uuid.clone())
@@ -213,9 +223,32 @@ async fn move_person_to_scene<
         .await
         .map_err(ActionHandleError::MoveToScene)?;
 
-    let scene = maybe_scene.ok_or_else(|| {
-        ActionHandleError::MoveToScene(format!("Scene named '{}' not found", scene_name))
-    })?;
+    let scene = match maybe_scene {
+        Some(scene) => scene,
+        None => {
+            let basis_scene_uuid = from_scene_uuid.clone().ok_or_else(|| {
+                ActionHandleError::MoveToScene(
+                    "Person is not currently in a scene; cannot derive travel context".to_string(),
+                )
+            })?;
+
+            let created_scene = worker
+                .create_scene_from_travel(scene_name.to_string(), basis_scene_uuid)
+                .await
+                .map_err(ActionHandleError::MoveToScene)?;
+
+            worker.log(
+                Level::Info,
+                format!(
+                    "Created destination scene '{}' on the fly for movement",
+                    scene_name
+                )
+                .as_str(),
+            );
+
+            created_scene
+        }
+    };
 
     let from_scene_desc = match &from_scene_uuid {
         Some(uuid) => uuid.to_uuid().to_string(),
@@ -248,6 +281,8 @@ async fn move_person_to_scene<
         )
         .as_str(),
     );
+
+    enqueue_wait(worker, person_uuid, POST_MOVE_WAIT_MS, current_active_ms).await?;
 
     Ok(())
 }

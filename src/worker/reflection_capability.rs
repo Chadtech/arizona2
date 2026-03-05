@@ -38,7 +38,7 @@ impl ChangeOption {
                 "Update the person's state of mind after reflection.".to_string(),
                 vec![ToolFunctionParameter::StringParam {
                     name: "content".to_string(),
-                    description: "The new state of mind, written in the person's voice."
+                    description: "A neutral, direct statement of internal state only. Use third person. Do not use first person, comparative/relative wording, or references to specific events/people/actions."
                         .to_string(),
                     required: true,
                 }],
@@ -155,7 +155,7 @@ impl ReflectionCapability for Worker {
         let mut completion = Completion::new(open_ai::model::Model::DEFAULT);
         completion.add_message(
             Role::System,
-            "You are a reflection assistant making an objective, third-person assessment of how this person's mind would realistically change after reflecting on the situation. Predict natural, human shifts rather than idealized outcomes. For state of mind updates, write in third person (no \"I\"), focus on internal mental qualities (e.g., confidence, anxiety, clarity, resolve), and avoid concrete references to specific people or events. Memory summaries may include concrete details. If removing a motivation, use the index from the enumerated motivations list. Decide whether to update their state of mind, summarize memories, or adjust motivations. Use a tool call only when there is a meaningful change. If nothing should change, do not call any tools. Respond with tool calls only. Consider whether any motivations should be added or removed based on the situation, especially when feedback suggests a long-term mismatch or feasibility constraint.",
+            "You are a reflection assistant making an objective, third-person assessment of how this person's mind would realistically change after reflecting on the situation. Predict natural, human shifts rather than idealized outcomes. For state of mind updates, output a neutral, direct statement of internal disposition only. Rules for state of mind: third person only; no first-person words (I/me/my/we/us/our); no comparative or relative phrasing (e.g., calmer, steadier, more, less, better, worse, than); no references to specific events, invitations, conversations, or what anyone said/did. Keep it abstract and trait-level (e.g., \"steady and guarded\", \"restless and distracted\", \"cautious but curious\"). Memory summaries may include concrete details. If removing a motivation, use the index from the enumerated motivations list. Decide whether to update their state of mind, summarize memories, or adjust motivations. Use a tool call only when there is a meaningful change. If nothing should change, do not call any tools. Respond with tool calls only. Consider whether any motivations should be added or removed based on the situation, especially when feedback suggests a long-term mismatch or feasibility constraint.",
         );
         completion.add_message(Role::User, user_prompt.as_str());
 

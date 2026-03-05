@@ -306,7 +306,8 @@ async fn run_next_job<
         + LogEventCapability
         + ReflectionCapability
         + MotivationCapability
-        + LogCapability,
+        + LogCapability
+        + Sync,
 >(
     worker: W,
     random_seed: RandomSeed,
@@ -349,7 +350,8 @@ async fn run_job<
         + LogEventCapability
         + ReflectionCapability
         + MotivationCapability
-        + LogCapability,
+        + LogCapability
+        + Sync,
 >(
     worker: W,
     random_seed: RandomSeed,
@@ -628,6 +630,10 @@ mod tests {
     impl SceneCapability for MockWorker {
         async fn create_scene(&self, _new_scene: NewScene) -> Result<SceneUuid, String> {
             Ok(SceneUuid::new())
+        }
+
+        async fn delete_scene(&self, _scene_uuid: &SceneUuid) -> Result<(), String> {
+            Ok(())
         }
 
         async fn get_scenes(&self) -> Result<Vec<Scene>, String> {

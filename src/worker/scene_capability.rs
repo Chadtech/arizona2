@@ -7,6 +7,10 @@ use crate::domain::person_name::PersonName;
 use crate::domain::person_uuid::PersonUuid;
 use crate::domain::scene_participant_uuid::SceneParticipantUuid;
 use crate::domain::scene_uuid::SceneUuid;
+use crate::nice_display::NiceDisplay;
+use crate::open_ai;
+use crate::open_ai::completion::Completion;
+use crate::open_ai::role::Role;
 use crate::worker::Worker;
 use async_trait::async_trait;
 use sqlx::Row;
@@ -39,6 +43,36 @@ impl SceneCapability for Worker {
         Ok(SceneUuid::from_uuid(ret.uuid))
     }
 
+    async fn delete_scene(&self, scene_uuid: &SceneUuid) -> Result<(), String> {
+        sqlx::query!(
+            r#"
+                UPDATE scene
+                SET ended_at = NOW()
+                WHERE uuid = $1::UUID
+                  AND ended_at IS NULL;
+            "#,
+            scene_uuid.to_uuid(),
+        )
+        .execute(&self.sqlx)
+        .await
+        .map_err(|err| format!("Error marking scene as ended: {}", err))?;
+
+        sqlx::query!(
+            r#"
+                UPDATE scene_participant
+                SET left_at = NOW()
+                WHERE scene_uuid = $1::UUID
+                  AND left_at IS NULL;
+            "#,
+            scene_uuid.to_uuid(),
+        )
+        .execute(&self.sqlx)
+        .await
+        .map_err(|err| format!("Error removing active participants from scene: {}", err))?;
+
+        Ok(())
+    }
+
     async fn get_scenes(&self) -> Result<Vec<Scene>, String> {
         let rows = sqlx::query(
             r#"
@@ -54,6 +88,7 @@ impl SceneCapability for Worker {
                     ORDER BY created_at DESC
                     LIMIT 1
                 ) AS latest_snapshot ON true
+                WHERE scene.ended_at IS NULL
                 ORDER BY scene.name ASC;
             "#,
         )
@@ -102,7 +137,7 @@ impl SceneCapability for Worker {
                 SELECT $1::UUID, $2::UUID, person.uuid
                 FROM person
                 WHERE person.name = $3::TEXT
-                RETURNING uuid;
+                RETURNING uuid, person_uuid;
             "#,
             SceneParticipantUuid::new().to_uuid(),
             scene_uuid.to_uuid(),
@@ -111,6 +146,31 @@ impl SceneCapability for Worker {
         .fetch_one(&self.sqlx)
         .await
         .map_err(|err| format!("Error adding person to scene: {}", err))?;
+
+        sqlx::query!(
+            r#"
+                INSERT INTO person_scene_visit (
+                    person_uuid,
+                    scene_uuid,
+                    first_visited_at,
+                    last_visited_at,
+                    visit_count,
+                    created_at,
+                    updated_at
+                )
+                VALUES ($1::UUID, $2::UUID, NOW(), NOW(), 1, NOW(), NOW())
+                ON CONFLICT (person_uuid, scene_uuid)
+                DO UPDATE
+                SET last_visited_at = NOW(),
+                    visit_count = person_scene_visit.visit_count + 1,
+                    updated_at = NOW();
+            "#,
+            rec.person_uuid,
+            scene_uuid.to_uuid(),
+        )
+        .execute(&self.sqlx)
+        .await
+        .map_err(|err| format!("Error recording scene visit: {}", err))?;
 
         let ret = SceneParticipantUuid::from_uuid(rec.uuid);
 
@@ -227,6 +287,7 @@ impl SceneCapability for Worker {
                 FROM scene
                 LEFT JOIN scene_snapshot ON scene.uuid = scene_snapshot.scene_uuid
                 WHERE scene.name = $1::TEXT
+                  AND scene.ended_at IS NULL
                 ORDER BY scene.uuid, scene_snapshot.created_at DESC;
             "#,
             scene_name,
@@ -341,5 +402,65 @@ impl SceneCapability for Worker {
         .map_err(|err| format!("Error fetching scene description: {}", err))?;
 
         Ok(maybe_rec.map(|rec| rec.description))
+    }
+
+    async fn create_scene_from_travel(
+        &self,
+        scene_name: String,
+        basis_scene_uuid: SceneUuid,
+    ) -> Result<Scene, String> {
+        let maybe_basis_scene_name = self.get_scene_name(&basis_scene_uuid).await?;
+
+        let basis_scene_name = if let Some(name) = maybe_basis_scene_name {
+            name
+        } else {
+            Err("Basis scene not found; cannot derive travel context".to_string())?
+        };
+        let basis_description_text = self.get_scene_description(&basis_scene_uuid).await?;
+        let basis_description_text = match basis_description_text {
+            Some(desc) if !desc.trim().is_empty() => desc,
+            _ => Err("Basis scene has no description; cannot derive travel context".to_string())?,
+        };
+
+        let mut completion = Completion::new(open_ai::model::Model::DEFAULT);
+        completion.add_message(
+            Role::System,
+            "You write concise, vivid scene descriptions for roleplay environments. Return exactly two paragraphs. No bullet points or titles. Write in neutral third-person environmental prose only. Do not address the reader (avoid 'you' and imperative phrasing). Do not include specific people, named actors, or what any individual is doing.",
+        );
+        completion.add_message(
+            Role::User,
+            format!(
+                "A person is leaving their current scene and traveling to a new destination scene.\n\nCurrent scene name: {}\nCurrent scene description:\n{}\n\nNew destination scene name: {}\n\nWrite a description for the new destination scene that is plausibly connected to the current scene, but distinct. Output exactly two paragraphs.",
+                basis_scene_name,
+                basis_description_text,
+                scene_name
+            )
+            .as_str(),
+        );
+
+        let response = completion
+            .send_request(&self.open_ai_key, self.reqwest_client.clone())
+            .await
+            .map_err(|err| format!("Failed to generate scene description: {}", err.message()))?;
+
+        let description = response.as_message().map_err(|err| {
+            format!(
+                "Failed to read generated scene description: {}",
+                err.message()
+            )
+        })?;
+
+        let scene_uuid = self
+            .create_scene(NewScene {
+                name: scene_name.clone(),
+                description: description.clone(),
+            })
+            .await?;
+
+        Ok(Scene {
+            uuid: scene_uuid,
+            name: scene_name,
+            description: Some(description),
+        })
     }
 }

@@ -41,6 +41,7 @@ pub struct CurrentScene {
 #[async_trait]
 pub trait SceneCapability {
     async fn create_scene(&self, new_scene: NewScene) -> Result<SceneUuid, String>;
+    async fn delete_scene(&self, scene_uuid: &SceneUuid) -> Result<(), String>;
     async fn get_scenes(&self) -> Result<Vec<Scene>, String>;
     async fn add_person_to_scene(
         &self,
@@ -76,4 +77,49 @@ pub trait SceneCapability {
     async fn get_scene_name(&self, scene_uuid: &SceneUuid) -> Result<Option<String>, String>;
     async fn get_scene_description(&self, scene_uuid: &SceneUuid)
         -> Result<Option<String>, String>;
+
+    async fn create_scene_from_travel(
+        &self,
+        scene_name: String,
+        basis_scene_uuid: SceneUuid,
+    ) -> Result<Scene, String> {
+        let basis_scene_name = self
+            .get_scene_name(&basis_scene_uuid)
+            .await?
+            .unwrap_or_else(|| "Unknown current scene".to_string());
+        let basis_scene_description = self.get_scene_description(&basis_scene_uuid).await?;
+
+        let mut description = match basis_scene_description {
+            Some(desc) => format!(
+                "A new place connected to {}.\n\n{}",
+                basis_scene_name,
+                desc
+            ),
+            None => format!(
+                "A new place connected to {}.\n\nIt feels distinct but nearby.",
+                basis_scene_name
+            ),
+        };
+
+        if !description.contains("\n\n") {
+            description = format!(
+                "{}\n\n{}",
+                description,
+                "It has clear visual details and a practical purpose."
+            );
+        }
+
+        let uuid = self
+            .create_scene(NewScene {
+                name: scene_name.clone(),
+                description: description.clone(),
+            })
+            .await?;
+
+        Ok(Scene {
+            uuid,
+            name: scene_name,
+            description: Some(description),
+        })
+    }
 }

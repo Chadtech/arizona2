@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                UPDATE scene_participant\n                SET left_at = NOW()\n                WHERE scene_uuid = $1::UUID\n                  AND left_at IS NULL;\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "f9ecafad4bafce424e48c9c30a2ae637d9051525305205a5a62e767015d8eb6f"
+}
