@@ -27,7 +27,7 @@ use clap::Parser;
 #[clap(
     author = "Chad Stearns",
     version = "0.1",
-    about = "Commands for Aiaday"
+    about = "Commands for Arizona2"
 )]
 enum Cmd {
     NewMigration { migration_name: String },
