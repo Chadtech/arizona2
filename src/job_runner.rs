@@ -451,7 +451,7 @@ mod tests {
     use crate::capability::memory::{
         MemoryCapability, MemoryQueryPrompt, MemorySearchResult, MessageTypeArgs, NewMemory,
     };
-    use crate::capability::message::{MessageCapability, NewMessage};
+    use crate::capability::message::MessageCapability;
     use crate::capability::motivation::{MotivationCapability, NewMotivation};
     use crate::capability::person::{NewPerson, PersonCapability};
     use crate::capability::person_identity::{NewPersonIdentity, PersonIdentityCapability};
@@ -482,7 +482,6 @@ mod tests {
     use crate::person_actions::{PersonAction, PersonReaction, ReflectionDecision};
     use async_trait::async_trait;
     use chrono::{DateTime, Utc};
-    use serde_json;
     use std::collections::HashSet;
     use std::sync::Arc;
     use tokio::sync::Mutex;
@@ -496,7 +495,6 @@ mod tests {
     struct MockState {
         jobs: Vec<PoppedJob>,
         finished_jobs: HashSet<JobUuid>,
-        sent_messages: Vec<NewMessage>,
     }
 
     impl MockWorker {
@@ -505,7 +503,6 @@ mod tests {
                 state: Arc::new(Mutex::new(MockState {
                     jobs: vec![job],
                     finished_jobs: HashSet::new(),
-                    sent_messages: Vec::new(),
                 })),
             }
         }
@@ -553,10 +550,6 @@ mod tests {
             _message_uuid: &MessageUuid,
         ) -> Result<Option<Message>, String> {
             Ok(None)
-        }
-
-        async fn mark_message_read(&self, _message_uuid: &MessageUuid) -> Result<(), String> {
-            Ok(())
         }
 
         async fn get_unhandled_scene_messages_for_person(
@@ -789,7 +782,7 @@ mod tests {
 
         async fn create_memory_query_prompt(
             &self,
-            _person_recalling: PersonName,
+            _person_recalling: &PersonName,
             _message_type_args: MessageTypeArgs,
             _recent_events: Vec<String>,
             _state_of_mind: &String,
@@ -842,7 +835,6 @@ mod tests {
         }
     }
 
-    #[async_trait]
     impl LogEventCapability for MockWorker {
         async fn log_event(
             &self,

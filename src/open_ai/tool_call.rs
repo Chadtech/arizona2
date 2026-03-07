@@ -30,9 +30,9 @@ pub enum ToolCallDecodeError {
     CouldParseString(String),
 }
 
-impl Into<CompletionError> for ToolCallDecodeError {
-    fn into(self) -> CompletionError {
-        CompletionError::ToolCallDecodeError(self)
+impl From<ToolCallDecodeError> for CompletionError {
+    fn from(val: ToolCallDecodeError) -> Self {
+        CompletionError::ToolCallDecodeError(val)
     }
 }
 

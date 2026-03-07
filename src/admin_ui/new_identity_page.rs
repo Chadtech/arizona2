@@ -31,6 +31,7 @@ enum SaveStatus {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
+#[derive(Default)]
 pub struct Storage {
     #[serde(default)]
     identity_field: String,
@@ -38,14 +39,6 @@ pub struct Storage {
     name_field: String,
 }
 
-impl Default for Storage {
-    fn default() -> Self {
-        Self {
-            identity_field: String::new(),
-            name_field: String::new(),
-        }
-    }
-}
 
 #[derive(Debug, Clone)]
 pub enum Msg {

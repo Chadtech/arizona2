@@ -66,7 +66,7 @@ impl Worker {
 
         let db_info = db::Config::load()
             .await
-            .map_err(|err| InitError::DbConfig(err))?;
+            .map_err(InitError::DbConfig)?;
 
         let sqlx_pool = {
             let postgres_conn_url = format!(

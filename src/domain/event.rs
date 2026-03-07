@@ -1,6 +1,5 @@
 use super::message::MessageSender;
 use crate::domain::message_uuid::MessageUuid;
-use crate::domain::person_uuid::PersonUuid;
 use chrono::{DateTime, Utc};
 
 #[derive(Clone, Debug)]

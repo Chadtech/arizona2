@@ -54,13 +54,15 @@ pub async fn submit_reaction(
         .send_request(&open_ai_key, reqwest::Client::new())
         .await?;
 
-    let tool_calls = response.as_tool_calls().map_err(Into::into)?;
+    let tool_calls = response
+        .as_tool_calls()
+        .map_err(CompletionError::ToolCallDecodeError)?;
 
     let person_actions = tool_calls
         .into_iter()
-        .map(|tool_call| PersonReaction::from_open_ai_tool_call(tool_call))
+        .map(PersonReaction::from_open_ai_tool_call)
         .collect::<Result<Vec<PersonReaction>, PersonActionError>>()
-        .map_err(Into::into)?;
+        .map_err(CompletionError::PersonActionError)?;
 
     Ok(person_actions)
 }

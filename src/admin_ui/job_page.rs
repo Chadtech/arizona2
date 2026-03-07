@@ -117,13 +117,9 @@ pub enum Msg {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
+#[derive(Default)]
 pub struct Storage {}
 
-impl Default for Storage {
-    fn default() -> Self {
-        Self {}
-    }
-}
 
 impl Model {
     pub fn new(_storage: &Storage) -> Self {
@@ -443,7 +439,7 @@ impl Model {
                         };
 
                         let job_label =
-                            format!("{}, uuid: {}", job.kind_label(), job.uuid().to_string());
+                            format!("{}, uuid: {}", job.kind_label(), job.uuid());
 
                         let row = w::row![
                             w::text(job_label),
@@ -621,7 +617,7 @@ fn selected_job_view(selected: &SelectedJobStatus) -> Element<'_, Msg> {
                 .spacing(s::S2),
                 w::text(format!("Kind: {}", selected_job.job.kind_label())),
                 w::row![
-                    w::text(format!("UUID: {}", selected_job.job.uuid().to_string())),
+                    w::text(format!("UUID: {}", selected_job.job.uuid())),
                     w::button(w::text("Copy").size(s::S3))
                         .style(w::button::text)
                         .padding(0)

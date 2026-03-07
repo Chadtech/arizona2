@@ -147,9 +147,9 @@ pub struct PersonReaction {
     pub reflection: ReflectionDecision,
 }
 
-impl Into<CompletionError> for PersonActionError {
-    fn into(self) -> CompletionError {
-        CompletionError::PersonActionError(self)
+impl From<PersonActionError> for CompletionError {
+    fn from(val: PersonActionError) -> Self {
+        CompletionError::PersonActionError(val)
     }
 }
 

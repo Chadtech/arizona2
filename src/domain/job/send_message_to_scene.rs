@@ -44,7 +44,7 @@ impl NiceDisplay for Error {
             } => {
                 format!(
                     "Failed to get participants for scene {}: {}",
-                    scene_uuid.to_uuid().to_string(),
+                    scene_uuid.to_uuid(),
                     details
                 )
             }
@@ -64,7 +64,7 @@ impl NiceDisplay for Error {
             } => {
                 format!(
                     "Failed to unshift process message job for message {}: {}",
-                    message_uuid.to_uuid().to_string(),
+                    message_uuid.to_uuid(),
                     details
                 )
             }

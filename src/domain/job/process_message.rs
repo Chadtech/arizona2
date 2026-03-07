@@ -314,7 +314,7 @@ impl ProcessMessageJob {
                 )
                 .await?;
             }
-            (Some(person_uuid), None) => {
+            (Some(_person_uuid), None) => {
                 // let situation = build_direct_situation(worker, &message).await?;
                 //
                 // let reaction = process_message_for_person(
@@ -902,7 +902,7 @@ async fn build_reflection_input<
         .collect::<Vec<String>>();
 
     let maybe_state_of_mind: Option<StateOfMind> = worker
-        .get_latest_state_of_mind(&person_uuid)
+        .get_latest_state_of_mind(person_uuid)
         .await
         .map_err(Error::FailedToGetStateOfMind)?;
 

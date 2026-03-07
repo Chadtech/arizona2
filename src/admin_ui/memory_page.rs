@@ -64,6 +64,7 @@ pub enum Msg {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
+#[derive(Default)]
 pub struct Storage {
     #[serde(default)]
     name_field: String,
@@ -85,21 +86,6 @@ pub struct Storage {
     query_situation_field: String,
 }
 
-impl Default for Storage {
-    fn default() -> Self {
-        Self {
-            name_field: String::new(),
-            memory_field: String::new(),
-            query_person_recalling_field: String::new(),
-            query_people_field: String::new(),
-            query_scene_name_field: String::new(),
-            query_scene_description_field: String::new(),
-            query_recent_events_field: Vec::new(),
-            query_state_of_mind_field: String::new(),
-            query_situation_field: String::new(),
-        }
-    }
-}
 
 impl Model {
     pub fn new(storage: &Storage) -> Self {

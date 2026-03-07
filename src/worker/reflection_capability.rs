@@ -171,7 +171,7 @@ impl ReflectionCapability for Worker {
 
                 let change_summary = changes
                     .iter()
-                    .map(|change| describe_reflection_change(change))
+                    .map(describe_reflection_change)
                     .collect::<Vec<String>>()
                     .join("\n");
                 self.logger.log(

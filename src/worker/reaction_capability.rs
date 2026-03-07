@@ -342,7 +342,7 @@ fn tool_calls_into_reactions(
 ) -> Result<Vec<PersonReaction>, CompletionError> {
     tool_calls
         .into_iter()
-        .map(|tool_call| PersonReaction::from_open_ai_tool_call(tool_call))
+        .map(PersonReaction::from_open_ai_tool_call)
         .collect::<Result<Vec<PersonReaction>, PersonActionError>>()
         .map_err(Into::into)
 }

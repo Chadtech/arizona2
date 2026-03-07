@@ -154,7 +154,7 @@ impl Model {
             )
             .into(),
             ReactionStatus::Error(err) => {
-                w::text(format!("Error: {}", err.to_nice_error().to_string())).into()
+                w::text(format!("Error: {}", err.to_nice_error())).into()
             }
         };
 

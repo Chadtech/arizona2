@@ -18,7 +18,6 @@ use crate::nice_display::NiceDisplay;
 use crate::open_ai::completion::CompletionError;
 use crate::worker;
 use crate::worker::Worker;
-use iced;
 use iced::{widget as w, Element, Length, Subscription, Task, Theme};
 use serde::{Deserialize, Serialize};
 use std::fs::File;
@@ -64,7 +63,7 @@ impl Model {
             job: self.job_page.to_storage(),
             reaction: self.reaction_page.to_storage(),
             prompt_lab: self.prompt_lab_page.to_storage(),
-            tab: self.tab.clone(),
+            tab: self.tab,
         }
     }
 }
@@ -169,7 +168,9 @@ impl Storage {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, Eq, PartialEq)]
+#[derive(Default)]
 enum Tab {
+    #[default]
     Prompt,
     PromptLab,
     Reaction,
@@ -229,11 +230,6 @@ impl Tab {
     }
 }
 
-impl Default for Tab {
-    fn default() -> Self {
-        Tab::Prompt
-    }
-}
 
 #[derive(Debug)]
 struct Flags {
@@ -400,7 +396,7 @@ impl Model {
                 Task::none()
             }
             Msg::TabSelected(tab) => {
-                self.tab = tab.clone();
+                self.tab = tab;
 
                 if let Err(err) = self.to_storage().save_to_file_system() {
                     self.error = Some(err);
@@ -604,11 +600,11 @@ impl Model {
     fn view(&self) -> Element<'_, Msg> {
         let tabs = Tab::all()
             .iter()
-            .map(|tab: &Tab| {
+            .flat_map(|tab: &Tab| {
                 let radio_tab: Element<Msg> = w::radio(
                     tab.to_label(),
-                    tab.clone(),
-                    Some(self.tab.clone()),
+                    *tab,
+                    Some(self.tab),
                     Msg::TabSelected,
                 )
                 .into();
@@ -619,7 +615,6 @@ impl Model {
                     vec![radio_tab]
                 }
             })
-            .flatten()
             .collect::<Vec<Element<Msg>>>();
 
         let tab_column = w::Column::with_children(tabs)
@@ -648,7 +643,7 @@ impl Model {
                         w::text(format!("Response: {}", response)).into()
                     }
                     PromptStatus::Error(err) => {
-                        w::text(format!("Error: {}", err.to_nice_error().to_string())).into()
+                        w::text(format!("Error: {}", err.to_nice_error())).into()
                     }
                 };
 

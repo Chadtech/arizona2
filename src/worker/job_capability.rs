@@ -86,7 +86,7 @@ impl JobCapability for Worker {
                 let job =
                     PoppedJob::parse(JobUuid::from_uuid(job_uuid), ret_rec.name, ret_rec.data)
                         .map_err(|err| {
-                            format!("Error parsing job\n{}", err.to_nice_error().to_string())
+                            format!("Error parsing job\n{}", err.to_nice_error())
                         })?;
 
                 Ok(Some(job))
@@ -149,7 +149,7 @@ impl JobCapability for Worker {
                 name,
                 job_data,
             )
-            .map_err(|err| format!("Error parsing job\n{}", err.to_nice_error().to_string()))?;
+            .map_err(|err| format!("Error parsing job\n{}", err.to_nice_error()))?;
             jobs.push(job);
         }
 
@@ -184,7 +184,7 @@ impl JobCapability for Worker {
             row.name,
             row.data,
         )
-        .map_err(|err| format!("Error parsing job\n{}", err.to_nice_error().to_string()))?;
+        .map_err(|err| format!("Error parsing job\n{}", err.to_nice_error()))?;
 
         Ok(Some(job))
     }

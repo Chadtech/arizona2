@@ -33,9 +33,9 @@ pub enum MessageError {
     },
 }
 
-impl Into<CompletionError> for MessageError {
-    fn into(self) -> CompletionError {
-        CompletionError::MessageError(self)
+impl From<MessageError> for CompletionError {
+    fn from(val: MessageError) -> Self {
+        CompletionError::MessageError(val)
     }
 }
 

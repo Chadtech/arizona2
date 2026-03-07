@@ -1,3 +1,13 @@
+#![allow(dead_code)]
+#![allow(clippy::enum_variant_names)]
+#![allow(clippy::inherent_to_string)]
+#![allow(clippy::ptr_arg)]
+#![allow(clippy::wrong_self_convention)]
+#![allow(clippy::large_enum_variant)]
+#![allow(clippy::too_many_arguments)]
+#![allow(clippy::field_reassign_with_default)]
+#![allow(clippy::match_like_matches_macro)]
+
 mod admin_ui;
 mod capability;
 mod db;
@@ -11,10 +21,7 @@ mod person_actions;
 mod worker;
 
 use crate::nice_display::NiceDisplay;
-use actix_web::{get, App, HttpResponse, HttpServer, Responder};
 use clap::Parser;
-
-const PORT: u16 = 1754;
 
 #[derive(Debug, Parser, Clone)]
 #[clap(
@@ -23,7 +30,6 @@ const PORT: u16 = 1754;
     about = "Commands for Aiaday"
 )]
 enum Cmd {
-    Run,
     NewMigration { migration_name: String },
     RunMigrations,
     AdminUi,
@@ -31,7 +37,6 @@ enum Cmd {
 }
 
 enum Error {
-    ActixWeb(WebServerError),
     NewMigration(migrations::NewMigrationError),
     RunMigrations(migrations::RunError),
     EnvVars(dotenv::Error),
@@ -42,7 +47,6 @@ enum Error {
 impl NiceDisplay for Error {
     fn message(&self) -> String {
         match self {
-            Error::ActixWeb(err) => err.message(),
             Error::NewMigration(err) => err.message(),
             Error::RunMigrations(err) => err.message(),
             Error::EnvVars(err) => {
@@ -57,7 +61,6 @@ impl NiceDisplay for Error {
 impl Cmd {
     fn log_file_name(&self) -> &str {
         match self {
-            Cmd::Run => "server",
             Cmd::NewMigration { .. } => "migrations",
             Cmd::RunMigrations => "migrations",
             Cmd::AdminUi => "admin-ui",
@@ -117,7 +120,6 @@ async fn nice_main(cmd: Cmd) -> Result<(), Error> {
     dotenv::dotenv().map_err(Error::EnvVars)?;
 
     match cmd {
-        Cmd::Run => run_server().await.map_err(Error::ActixWeb),
         Cmd::NewMigration { migration_name } => migrations::new(migration_name)
             .await
             .map_err(Error::NewMigration),
@@ -125,40 +127,4 @@ async fn nice_main(cmd: Cmd) -> Result<(), Error> {
         Cmd::AdminUi => admin_ui::run().await.map_err(Error::AdminUi),
         Cmd::RunJobRunner => job_runner::run().await.map_err(Error::JobRunner),
     }
-}
-
-#[get("/")]
-async fn html() -> impl Responder {
-    HttpResponse::Ok().body("Wah")
-}
-
-enum WebServerError {
-    Bind(std::io::Error),
-    Run(std::io::Error),
-}
-
-impl NiceDisplay for WebServerError {
-    fn message(&self) -> String {
-        match self {
-            WebServerError::Run(err) => format!("Error running server: {}", err),
-            WebServerError::Bind(err) => {
-                format!("Error binding server: {}", err)
-            }
-        }
-    }
-}
-
-async fn run_server() -> Result<(), WebServerError> {
-    println!("Running server on port {}", PORT);
-    let r = HttpServer::new(|| {
-        App::new().service(html)
-        // .service(html).service(elm_js)
-    })
-    .bind(("127.0.0.1", PORT))
-    .map_err(WebServerError::Bind)?
-    .run()
-    .await
-    .map_err(WebServerError::Run)?;
-
-    Ok(r)
 }

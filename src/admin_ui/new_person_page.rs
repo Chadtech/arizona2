@@ -61,6 +61,7 @@ enum DualLayerStatus {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
+#[derive(Default)]
 pub struct Storage {
     #[serde(default)]
     identity_field: String,
@@ -70,15 +71,6 @@ pub struct Storage {
     lookup_name_field: String,
 }
 
-impl Default for Storage {
-    fn default() -> Self {
-        Self {
-            identity_field: String::new(),
-            name_field: String::new(),
-            lookup_name_field: String::new(),
-        }
-    }
-}
 
 #[derive(Debug, Clone)]
 pub enum Msg {
@@ -344,7 +336,7 @@ impl Model {
 fn status_view(status: &Status) -> Element<'_, Msg> {
     match status {
         Status::Ready => w::text("Ready").into(),
-        Status::CreatingPerson { .. } => w::text("Creating person...").into(),
+        Status::CreatingPerson => w::text("Creating person...").into(),
         Status::CreatingIdentity => w::text("Creating identity...").into(),
         Status::Done => w::text("Done!").into(),
         Status::ErrorCreatingPerson(err) => {

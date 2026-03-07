@@ -56,16 +56,13 @@ enum SceneListStatus {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum ViewMode {
+    #[default]
     DirectMessage,
     Scene,
 }
 
-impl Default for ViewMode {
-    fn default() -> Self {
-        ViewMode::DirectMessage
-    }
-}
 
 #[derive(Debug, Clone)]
 pub enum MessagesStatus {
@@ -108,6 +105,7 @@ pub enum Msg {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
+#[derive(Default)]
 pub struct Storage {
     #[serde(default)]
     selected_person_1: Option<String>,
@@ -119,16 +117,6 @@ pub struct Storage {
     view_mode: ViewMode,
 }
 
-impl Default for Storage {
-    fn default() -> Self {
-        Self {
-            selected_person_1: None,
-            selected_person_2: None,
-            scene_name_input: String::new(),
-            view_mode: ViewMode::default(),
-        }
-    }
-}
 
 impl Model {
     pub fn new(storage: &Storage) -> Self {

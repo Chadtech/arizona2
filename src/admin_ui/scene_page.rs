@@ -104,6 +104,7 @@ pub enum SceneLookUpMsg {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
+#[derive(Default)]
 pub struct Storage {
     #[serde(default)]
     new_scene_name: String,
@@ -113,15 +114,6 @@ pub struct Storage {
     look_up_scene_name: String,
 }
 
-impl Default for Storage {
-    fn default() -> Self {
-        Self {
-            new_scene_name: String::new(),
-            new_scene_description: String::new(),
-            look_up_scene_name: String::new(),
-        }
-    }
-}
 
 impl SceneModel {
     fn init(scene_agg: SceneAggregate) -> Self {
@@ -234,7 +226,7 @@ impl Model {
 
     pub fn view(&self) -> Element<'_, Msg> {
         w::column![
-            new_scene_view(&self),
+            new_scene_view(self),
             w::text("Look Up Scene"),
             w::row![
                 w::text_input("Scene Name", self.look_up_scene_name.as_str())

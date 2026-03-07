@@ -31,6 +31,7 @@ pub enum Msg {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
+#[derive(Default)]
 pub struct Storage {
     #[serde(default)]
     name_field: String,
@@ -38,14 +39,6 @@ pub struct Storage {
     state_of_mind_field: String,
 }
 
-impl Default for Storage {
-    fn default() -> Self {
-        Self {
-            name_field: String::new(),
-            state_of_mind_field: String::new(),
-        }
-    }
-}
 
 impl Model {
     pub fn new(storage: &Storage) -> Self {

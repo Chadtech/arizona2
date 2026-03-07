@@ -65,9 +65,9 @@ impl ToolFunctionParameter {
 pub enum ArrayParamItemType {
     String,
 }
-impl Into<Tool> for ToolFunction {
-    fn into(self) -> Tool {
-        Tool::FunctionCall(self)
+impl From<ToolFunction> for Tool {
+    fn from(val: ToolFunction) -> Self {
+        Tool::FunctionCall(val)
     }
 }
 

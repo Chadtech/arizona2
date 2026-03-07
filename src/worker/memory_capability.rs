@@ -183,7 +183,7 @@ impl MemoryCapability for Worker {
             } => {
                 add_scene_to_prompt(
                     &mut prompt,
-                    &person_recalling,
+                    person_recalling,
                     scene_name,
                     scene_description,
                 );
@@ -208,13 +208,13 @@ impl MemoryCapability for Worker {
                     Some(description) => description,
                     None => Err(format!(
                         "Scene description for UUID {} not found",
-                        scene_uuid.to_string()
+                        scene_uuid
                     ))?,
                 };
 
                 add_scene_to_prompt(
                     &mut prompt,
-                    &person_recalling,
+                    person_recalling,
                     &scene_name,
                     &scene_description,
                 );
@@ -318,14 +318,14 @@ impl MemoryCapability for Worker {
             .map_err(|err| {
                 format!(
                     "Error generating memory query prompt:\n{}",
-                    err.to_nice_error().to_string()
+                    err.to_nice_error()
                 )
             })?;
 
         let memory_prompt = response.as_message().map_err(|err| {
             format!(
                 "Error extracting memory prompt from completion response: {}",
-                err.to_nice_error().to_string()
+                err.to_nice_error()
             )
         })?;
 

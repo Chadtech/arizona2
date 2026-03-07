@@ -61,18 +61,12 @@ pub enum Msg {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
+#[derive(Default)]
 pub struct Storage {
     #[serde(default)]
     person_name_input: String,
 }
 
-impl Default for Storage {
-    fn default() -> Self {
-        Self {
-            person_name_input: String::new(),
-        }
-    }
-}
 
 impl Model {
     pub fn new(storage: &Storage) -> Self {
