@@ -98,16 +98,6 @@ impl ReflectionCapability for Worker {
             .await
             .map_err(|err| format!("Failed to get person name: {}", err))?;
 
-        let memories_list = if memories.is_empty() {
-            "None.".to_string()
-        } else {
-            memories
-                .iter()
-                .map(|memory| format!("- {}", memory.content))
-                .collect::<Vec<String>>()
-                .join("\n")
-        };
-
         let motivations = self
             .get_motivations_for_person(person_uuid.clone())
             .await
@@ -142,7 +132,7 @@ impl ReflectionCapability for Worker {
             person_name.as_str(),
             person_identity,
             state_of_mind,
-            memories_list,
+            Memory::to_list_text(&memories),
             motivations_list,
             situation
         );

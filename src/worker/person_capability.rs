@@ -98,4 +98,47 @@ impl PersonCapability for Worker {
             None => Err(format!("Person {} not found", person_uuid.to_uuid())),
         }
     }
+
+    async fn set_reaction_dual_layer(
+        &self,
+        person_uuid: &PersonUuid,
+        reaction_dual_layer: bool,
+    ) -> Result<(), String> {
+        sqlx::query(
+            r#"
+                UPDATE person
+                SET reaction_dual_layer = $2::BOOLEAN,
+                    updated_at = NOW()
+                WHERE uuid = $1::UUID;
+            "#,
+        )
+        .bind(person_uuid.to_uuid())
+        .bind(reaction_dual_layer)
+        .execute(&self.sqlx)
+        .await
+        .map_err(|err| format!("Error updating reaction_dual_layer: {}", err))?;
+
+        Ok(())
+    }
+
+    async fn is_reaction_dual_layer(&self, person_uuid: &PersonUuid) -> Result<bool, String> {
+        let rec = sqlx::query(
+            r#"
+                SELECT reaction_dual_layer
+                FROM person
+                WHERE uuid = $1::UUID;
+            "#,
+        )
+        .bind(person_uuid.to_uuid())
+        .fetch_optional(&self.sqlx)
+        .await
+        .map_err(|err| format!("Error fetching reaction_dual_layer: {}", err))?;
+
+        match rec {
+            Some(row) => row
+                .try_get::<bool, _>("reaction_dual_layer")
+                .map_err(|err| format!("Error reading reaction_dual_layer: {}", err)),
+            None => Err(format!("Person {} not found", person_uuid.to_uuid())),
+        }
+    }
 }

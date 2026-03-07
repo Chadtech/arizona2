@@ -34,11 +34,27 @@ enum LookupStatus {
         identity: Option<String>,
         is_hibernating: bool,
         hibernation_status: HibernationStatus,
+        reaction_dual_layer: bool,
+        dual_layer_status: DualLayerStatus,
     },
     Error(String),
 }
 
+#[derive(Debug, Clone)]
+pub struct LoadedPersonLookupData {
+    person_uuid: PersonUuid,
+    identity: Option<String>,
+    is_hibernating: bool,
+    reaction_dual_layer: bool,
+}
+
 enum HibernationStatus {
+    Ready,
+    Updating,
+    Error(String),
+}
+
+enum DualLayerStatus {
     Ready,
     Updating,
     Error(String),
@@ -74,13 +90,21 @@ pub enum Msg {
     LookupNameChanged(String),
     ClickedLoadIdentity,
     ClickedCopyIdentity(String),
-    LoadedIdentity(Result<(PersonUuid, Option<String>, bool), String>),
+    LoadedPersonLookupData(Result<LoadedPersonLookupData, String>),
     ClickedSetHibernation {
         person_uuid: PersonUuid,
         is_hibernating: bool,
     },
     SetHibernationUpdated {
         is_hibernating: bool,
+        result: Result<(), String>,
+    },
+    ClickedSetReactionDualLayer {
+        person_uuid: PersonUuid,
+        reaction_dual_layer: bool,
+    },
+    SetReactionDualLayerUpdated {
+        reaction_dual_layer: bool,
         result: Result<(), String>,
     },
 }
@@ -165,19 +189,28 @@ impl Model {
                 self.lookup_status = LookupStatus::Loading;
                 let person_name = self.lookup_name_field.clone();
                 Task::perform(
-                    async move { load_identity(&worker, person_name).await },
-                    Msg::LoadedIdentity,
+                    async move { load_person_lookup_data(&worker, person_name).await },
+                    Msg::LoadedPersonLookupData,
                 )
             }
             Msg::ClickedCopyIdentity(identity) => clipboard::write(identity),
-            Msg::LoadedIdentity(result) => {
+            Msg::LoadedPersonLookupData(result) => {
                 self.lookup_status = match result {
-                    Ok((person_uuid, identity, is_hibernating)) => LookupStatus::Loaded {
+                    Ok(LoadedPersonLookupData {
                         person_uuid,
                         identity,
                         is_hibernating,
-                        hibernation_status: HibernationStatus::Ready,
-                    },
+                        reaction_dual_layer,
+                    }) => {
+                        LookupStatus::Loaded {
+                            person_uuid,
+                            identity,
+                            is_hibernating,
+                            hibernation_status: HibernationStatus::Ready,
+                            reaction_dual_layer,
+                            dual_layer_status: DualLayerStatus::Ready,
+                        }
+                    }
                     Err(err) => LookupStatus::Error(err),
                 };
                 Task::none()
@@ -223,6 +256,51 @@ impl Model {
                         }
                         Err(err) => {
                             *hibernation_status = HibernationStatus::Error(err);
+                        }
+                    }
+                }
+                Task::none()
+            }
+            Msg::ClickedSetReactionDualLayer {
+                person_uuid,
+                reaction_dual_layer,
+            } => {
+                if let LookupStatus::Loaded {
+                    dual_layer_status, ..
+                } = &mut self.lookup_status
+                {
+                    *dual_layer_status = DualLayerStatus::Updating;
+                }
+
+                Task::perform(
+                    async move {
+                        worker
+                            .set_reaction_dual_layer(&person_uuid, reaction_dual_layer)
+                            .await
+                    },
+                    move |result| Msg::SetReactionDualLayerUpdated {
+                        reaction_dual_layer,
+                        result,
+                    },
+                )
+            }
+            Msg::SetReactionDualLayerUpdated {
+                reaction_dual_layer,
+                result,
+            } => {
+                if let LookupStatus::Loaded {
+                    reaction_dual_layer: current,
+                    dual_layer_status,
+                    ..
+                } = &mut self.lookup_status
+                {
+                    match result {
+                        Ok(()) => {
+                            *current = reaction_dual_layer;
+                            *dual_layer_status = DualLayerStatus::Ready;
+                        }
+                        Err(err) => {
+                            *dual_layer_status = DualLayerStatus::Error(err);
                         }
                     }
                 }
@@ -287,6 +365,8 @@ fn lookup_status_view(status: &LookupStatus) -> Element<'_, Msg> {
             identity,
             is_hibernating,
             hibernation_status,
+            reaction_dual_layer,
+            dual_layer_status,
         } => {
             let identity_text = match identity {
                 Some(text) => text.as_str(),
@@ -311,9 +391,26 @@ fn lookup_status_view(status: &LookupStatus) -> Element<'_, Msg> {
                     w::text(format!("Error updating hibernation: {}", err)).into()
                 }
             };
+            let dual_layer_state_text = if *reaction_dual_layer {
+                "Dual layer: On"
+            } else {
+                "Dual layer: Off"
+            };
+
+            let dual_layer_status_view: Element<'_, Msg> = match dual_layer_status {
+                DualLayerStatus::Ready => w::text("").into(),
+                DualLayerStatus::Updating => w::text("Updating dual layer mode...").into(),
+                DualLayerStatus::Error(err) => {
+                    w::text(format!("Error updating dual layer mode: {}", err)).into()
+                }
+            };
 
             let is_updating = match hibernation_status {
                 HibernationStatus::Updating => true,
+                _ => false,
+            };
+            let is_dual_layer_updating = match dual_layer_status {
+                DualLayerStatus::Updating => true,
                 _ => false,
             };
 
@@ -339,6 +436,30 @@ fn lookup_status_view(status: &LookupStatus) -> Element<'_, Msg> {
                     .into()
             };
 
+            let enable_dual_layer_button: Element<'_, Msg> =
+                if *reaction_dual_layer || is_dual_layer_updating {
+                    w::button("Enable dual layer").into()
+                } else {
+                    w::button("Enable dual layer")
+                        .on_press(Msg::ClickedSetReactionDualLayer {
+                            person_uuid: person_uuid.clone(),
+                            reaction_dual_layer: true,
+                        })
+                        .into()
+                };
+
+            let disable_dual_layer_button: Element<'_, Msg> =
+                if !*reaction_dual_layer || is_dual_layer_updating {
+                    w::button("Disable dual layer").into()
+                } else {
+                    w::button("Disable dual layer")
+                        .on_press(Msg::ClickedSetReactionDualLayer {
+                            person_uuid: person_uuid.clone(),
+                            reaction_dual_layer: false,
+                        })
+                        .into()
+                };
+
             w::column![
                 w::text(format!("Person UUID: {}", person_uuid.to_uuid())),
                 w::text(identity_text),
@@ -346,6 +467,9 @@ fn lookup_status_view(status: &LookupStatus) -> Element<'_, Msg> {
                 w::text(hibernation_state_text),
                 w::row![hibernate_button, wake_button].spacing(s::S1),
                 hibernation_status_view,
+                w::text(dual_layer_state_text),
+                w::row![enable_dual_layer_button, disable_dual_layer_button].spacing(s::S1),
+                dual_layer_status_view,
             ]
             .spacing(s::S1)
             .into()
@@ -365,10 +489,10 @@ async fn create_new_identity(
     worker.create_person_identity(new_identity).await
 }
 
-async fn load_identity(
+async fn load_person_lookup_data(
     worker: &Worker,
     person_name: String,
-) -> Result<(PersonUuid, Option<String>, bool), String> {
+) -> Result<LoadedPersonLookupData, String> {
     if person_name.trim().is_empty() {
         return Err("Person name cannot be empty".to_string());
     }
@@ -378,5 +502,11 @@ async fn load_identity(
         .await?;
     let identity = worker.get_person_identity(&person_uuid).await?;
     let is_hibernating = worker.is_person_hibernating(&person_uuid).await?;
-    Ok((person_uuid, identity, is_hibernating))
+    let reaction_dual_layer = worker.is_reaction_dual_layer(&person_uuid).await?;
+    Ok(LoadedPersonLookupData {
+        person_uuid,
+        identity,
+        is_hibernating,
+        reaction_dual_layer,
+    })
 }

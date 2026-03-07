@@ -22,4 +22,17 @@ pub trait PersonCapability {
         let _ = person_uuid;
         Ok(false)
     }
+    async fn set_reaction_dual_layer(
+        &self,
+        person_uuid: &PersonUuid,
+        reaction_dual_layer: bool,
+    ) -> Result<(), String> {
+        let _ = person_uuid;
+        let _ = reaction_dual_layer;
+        Err("set_reaction_dual_layer is not implemented".to_string())
+    }
+    async fn is_reaction_dual_layer(&self, person_uuid: &PersonUuid) -> Result<bool, String> {
+        let _ = person_uuid;
+        Ok(false)
+    }
 }

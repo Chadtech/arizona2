@@ -1,13 +1,10 @@
-use crate::domain::event::Event;
-
 #[derive(Clone, Debug)]
 pub struct Situation {
     person_name: String,
     scene_name: String,
     scene_description: String,
-    particpants: Vec<String>,
+    participants: Vec<String>,
     messages: Vec<String>,
-    events: Option<Vec<Event>>,
 }
 
 pub struct Input {
@@ -24,23 +21,16 @@ impl Situation {
             person_name: input.person_name,
             scene_name: input.scene_name,
             scene_description: input.scene_description,
-            particpants: input.particpants,
+            participants: input.particpants,
             messages: input.messages,
-            events: None,
         }
     }
 
-    pub fn with_events(self, events: Vec<Event>) -> Self {
-        let mut ret = self.clone();
-        ret.events = Some(events);
-        ret
-    }
-
     pub fn to_string(&self) -> String {
-        let participant_list = if self.particpants.is_empty() {
+        let participant_list = if self.participants.is_empty() {
             "none".to_string()
         } else {
-            self.particpants.join(", ")
+            self.participants.join(", ")
         };
 
         let messages_block = if self.messages.is_empty() {

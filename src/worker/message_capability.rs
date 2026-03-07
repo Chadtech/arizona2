@@ -64,7 +64,7 @@ impl MessageCapability for Worker {
     async fn get_messages_in_scene(&self, scene_uuid: &SceneUuid) -> Result<Vec<Message>, String> {
         let rows = sqlx::query!(
             r#"
-                SELECT uuid, sender_person_uuid, receiver_person_uuid, scene_uuid, content, sent_at, read_at
+                SELECT uuid, sender_person_uuid, receiver_person_uuid, scene_uuid, content, sent_at
                 FROM message
                 WHERE scene_uuid = $1::UUID
                 ORDER BY sent_at ASC
@@ -95,7 +95,6 @@ impl MessageCapability for Worker {
                     scene_uuid,
                     content: row.content,
                     sent_at: row.sent_at,
-                    read_at: row.read_at,
                 }
             })
             .collect();
@@ -111,7 +110,7 @@ impl MessageCapability for Worker {
     ) -> Result<Vec<Message>, String> {
         let rows = sqlx::query(
             r#"
-                SELECT uuid, sender_person_uuid, receiver_person_uuid, scene_uuid, content, sent_at, read_at
+                SELECT uuid, sender_person_uuid, receiver_person_uuid, scene_uuid, content, sent_at
                 FROM message
                 WHERE scene_uuid = $1::UUID
                   AND ($2::timestamptz IS NULL OR sent_at < $2)
@@ -161,9 +160,6 @@ impl MessageCapability for Worker {
                 sent_at: row
                     .try_get::<DateTime<Utc>, _>("sent_at")
                     .map_err(|err| format!("Error reading sent_at: {}", err))?,
-                read_at: row
-                    .try_get::<Option<DateTime<Utc>>, _>("read_at")
-                    .map_err(|err| format!("Error reading read_at: {}", err))?,
             });
         }
 
@@ -176,7 +172,7 @@ impl MessageCapability for Worker {
     ) -> Result<Option<Message>, String> {
         let row = sqlx::query!(
             r#"
-                SELECT uuid, sender_person_uuid, receiver_person_uuid, scene_uuid, content, sent_at, read_at
+                SELECT uuid, sender_person_uuid, receiver_person_uuid, scene_uuid, content, sent_at
                 FROM message
                 WHERE uuid = $1::UUID
             "#,
@@ -205,27 +201,10 @@ impl MessageCapability for Worker {
                     recipient,
                     content: row.content,
                     sent_at: row.sent_at,
-                    read_at: row.read_at,
                 }))
             }
             None => Ok(None),
         }
-    }
-
-    async fn mark_message_read(&self, message_uuid: &MessageUuid) -> Result<(), String> {
-        sqlx::query!(
-            r#"
-                UPDATE message
-                SET read_at = NOW()
-                WHERE uuid = $1::UUID
-            "#,
-            message_uuid.to_uuid()
-        )
-        .execute(&self.sqlx)
-        .await
-        .map_err(|err| format!("Error marking message as read: {}", err))?;
-
-        Ok(())
     }
 
     async fn get_unhandled_scene_messages_for_person(
@@ -235,7 +214,7 @@ impl MessageCapability for Worker {
     ) -> Result<Vec<Message>, String> {
         let rows = sqlx::query!(
             r#"
-                SELECT m.uuid, m.sender_person_uuid, m.scene_uuid, m.content, m.sent_at, m.read_at
+                SELECT m.uuid, m.sender_person_uuid, m.scene_uuid, m.content, m.sent_at
                 FROM message m
                 JOIN scene_message_recipient smr ON smr.message_uuid = m.uuid
                 WHERE smr.person_uuid = $1::UUID
@@ -262,7 +241,6 @@ impl MessageCapability for Worker {
                 scene_uuid: row.scene_uuid.map(SceneUuid::from_uuid),
                 content: row.content,
                 sent_at: row.sent_at,
-                read_at: row.read_at,
             })
             .collect();
 

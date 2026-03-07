@@ -31,3 +31,17 @@ pub fn filter_memory_results(results: Vec<MemorySearchResult>) -> Vec<Memory> {
 
     Vec::new()
 }
+
+impl Memory {
+    pub fn to_list_text(memories: &Vec<Memory>) -> String {
+        if memories.is_empty() {
+            "None.".to_string()
+        } else {
+            memories
+                .iter()
+                .map(|memory| format!("- {}", memory.content))
+                .collect::<Vec<String>>()
+                .join("\n")
+        }
+    }
+}

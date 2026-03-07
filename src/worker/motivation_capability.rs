@@ -3,8 +3,6 @@ use crate::domain::motivation::Motivation;
 use crate::domain::motivation_uuid::MotivationUuid;
 use crate::domain::person_uuid::PersonUuid;
 use crate::worker::Worker;
-use chrono::{DateTime, Utc};
-use sqlx::Row;
 
 impl MotivationCapability for Worker {
     async fn create_motivation(
@@ -33,50 +31,30 @@ impl MotivationCapability for Worker {
         &self,
         person_uuid: PersonUuid,
     ) -> Result<Vec<Motivation>, String> {
-        let rows = sqlx::query(
+        let rows = sqlx::query!(
             r#"
-                SELECT uuid, person_uuid, content, priority, created_at, ended_at, deleted_at
+                SELECT uuid, content, priority, created_at, ended_at
                 FROM motivation
                 WHERE person_uuid = $1::UUID
                   AND deleted_at IS NULL
                 ORDER BY priority DESC, created_at DESC
             "#,
+            person_uuid.to_uuid()
         )
-        .bind(person_uuid.to_uuid())
         .fetch_all(&self.sqlx)
         .await
         .map_err(|err| format!("Error fetching motivations: {}", err))?;
 
-        let mut motivations = Vec::with_capacity(rows.len());
-        for row in rows {
-            motivations.push(Motivation {
-                uuid: MotivationUuid::from_uuid(
-                    row.try_get::<uuid::Uuid, _>("uuid")
-                        .map_err(|err| format!("Error reading motivation uuid: {}", err))?,
-                ),
-                person_uuid: PersonUuid::from_uuid(
-                    row.try_get::<uuid::Uuid, _>("person_uuid")
-                        .map_err(|err| format!("Error reading person uuid: {}", err))?,
-                ),
-                content: row
-                    .try_get::<String, _>("content")
-                    .map_err(|err| format!("Error reading motivation content: {}", err))?,
-                priority: row
-                    .try_get::<i32, _>("priority")
-                    .map_err(|err| format!("Error reading motivation priority: {}", err))?,
-                created_at: row
-                    .try_get::<DateTime<Utc>, _>("created_at")
-                    .map_err(|err| format!("Error reading motivation created_at: {}", err))?,
-                ended_at: row
-                    .try_get::<Option<DateTime<Utc>>, _>("ended_at")
-                    .map_err(|err| format!("Error reading motivation ended_at: {}", err))?,
-                deleted_at: row
-                    .try_get::<Option<DateTime<Utc>>, _>("deleted_at")
-                    .map_err(|err| format!("Error reading motivation deleted_at: {}", err))?,
-            });
-        }
-
-        Ok(motivations)
+        Ok(rows
+            .into_iter()
+            .map(|row| Motivation {
+                uuid: MotivationUuid::from_uuid(row.uuid),
+                content: row.content,
+                priority: row.priority,
+                created_at: row.created_at,
+                ended_at: row.ended_at,
+            })
+            .collect())
     }
 
     async fn delete_motivation(&self, motivation_uuid: MotivationUuid) -> Result<(), String> {

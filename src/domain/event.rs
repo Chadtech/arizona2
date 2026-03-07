@@ -43,7 +43,6 @@ impl Event {
                 )
             }
             EventType::PersonJoinedScene {
-                person_uuid: _,
                 person_name,
                 scene_name,
             } => {
@@ -53,7 +52,6 @@ impl Event {
                 )
             }
             EventType::PersonLeftScene {
-                person_uuid: _,
                 person_name,
                 scene_name,
             } => {
@@ -97,12 +95,10 @@ pub enum EventType {
         message_uuid: MessageUuid,
     },
     PersonJoinedScene {
-        person_uuid: PersonUuid,
         person_name: String,
         scene_name: String,
     },
     PersonLeftScene {
-        person_uuid: PersonUuid,
         person_name: String,
         scene_name: String,
     },

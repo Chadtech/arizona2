@@ -519,6 +519,42 @@ fn filter_reaction_events(events: Vec<Event>, messages: &[Message]) -> Vec<Event
         .collect()
 }
 
+async fn pending_messages_to_event_lines<W: PersonCapability + Sync>(
+    worker: &W,
+    pending_messages: &[Message],
+    person_uuid: &PersonUuid,
+) -> Result<Vec<String>, Error> {
+    let mut lines = Vec::new();
+
+    for message in pending_messages {
+        let sender_label = match &message.sender {
+            MessageSender::AiPerson(sender_person_uuid) => {
+                if sender_person_uuid.to_uuid() == person_uuid.to_uuid() {
+                    continue;
+                }
+                worker
+                    .get_persons_name(sender_person_uuid.clone())
+                    .await
+                    .map_err(|err| Error::FailedToGetSendersName {
+                        person_uuid: sender_person_uuid.clone(),
+                        details: err,
+                    })?
+                    .to_string()
+            }
+            MessageSender::RealWorldUser => "Chadtech".to_string(),
+        };
+
+        lines.push(format!(
+            "At {}, in the current scene, {} said: \"{}\" [NEW MESSAGE EVENT]",
+            message.sent_at,
+            sender_label,
+            normalize_message_content(&message.content)
+        ));
+    }
+
+    Ok(lines)
+}
+
 async fn run_message_in_scene<
     W: MessageCapability
         + SceneCapability
@@ -630,10 +666,21 @@ async fn run_message_in_scene<
     .await?;
 
     let reaction_events = filter_reaction_events(reaction_recent_events, &pending_messages);
+    let new_message_event_lines =
+        pending_messages_to_event_lines(worker, &pending_messages, person_uuid).await?;
+
+    let recent_events_text = Event::many_to_prompt_list(reaction_events);
+    let new_message_events_text = if new_message_event_lines.is_empty() {
+        "None.".to_string()
+    } else {
+        new_message_event_lines.join("\n")
+    };
+
     let reaction_situation = format!(
-        "{}\n\nRecent events:\n{}",
-        situation.to_string(),
-        Event::many_to_prompt_list(reaction_events)
+        "React to the newest activity first. Prioritize the NEW MESSAGE EVENT lines below when deciding what to do now.\n\nRecent events (older context):\n{}\n\nNew message events (newest; primary reaction target):\n{}\n\n{}",
+        recent_events_text,
+        new_message_events_text,
+        situation.to_string()
     );
 
     let reaction = worker
