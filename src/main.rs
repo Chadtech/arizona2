@@ -1,11 +1,3 @@
-#![allow(dead_code)]
-#![allow(clippy::enum_variant_names)]
-#![allow(clippy::inherent_to_string)]
-#![allow(clippy::ptr_arg)]
-#![allow(clippy::wrong_self_convention)]
-#![allow(clippy::large_enum_variant)]
-#![allow(clippy::too_many_arguments)]
-#![allow(clippy::field_reassign_with_default)]
 #![allow(clippy::match_like_matches_macro)]
 
 mod admin_ui;

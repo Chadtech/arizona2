@@ -119,15 +119,15 @@ impl Storage {
     pub fn save_to_file_system(&self) -> Result<(), Error> {
         // Serialize the Storage struct to JSON
         let json = serde_json::to_string_pretty(self)
-            .map_err(|e| Error::StorageSerializationError(e.to_string()))?;
+            .map_err(|e| Error::StorageSerialization(e.to_string()))?;
 
         // Create a file to save the JSON
         let path = Path::new(STORAGE_FILE_PATH);
-        let mut file = File::create(path).map_err(Error::StorageFileCreationError)?;
+        let mut file = File::create(path).map_err(Error::StorageFileCreation)?;
 
         // Write the JSON to the file
         file.write_all(json.as_bytes())
-            .map_err(Error::StorageFileWriteError)?;
+            .map_err(Error::StorageFileWrite)?;
 
         Ok(())
     }
@@ -140,11 +140,11 @@ impl Storage {
         }
 
         // Open the file
-        let file = File::open(path).map_err(Error::StorageFileReadError)?;
+        let file = File::open(path).map_err(Error::StorageFileRead)?;
 
         // Deserialize the JSON into a Storage struct
         let storage: Storage = serde_json::from_reader(file)
-            .map_err(|e| Error::StorageDeserializationError(e.to_string()))?;
+            .map_err(|e| Error::StorageDeserialization(e.to_string()))?;
 
         Ok(storage)
     }
@@ -167,8 +167,7 @@ impl Storage {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, Eq, PartialEq)]
-#[derive(Default)]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, Eq, PartialEq, Default)]
 enum Tab {
     #[default]
     Prompt,
@@ -186,7 +185,7 @@ enum Tab {
 }
 
 impl Tab {
-    pub fn to_label(&self) -> String {
+    pub fn to_label(self) -> String {
         match self {
             Tab::Prompt => "Prompt".to_string(),
             Tab::PromptLab => "Prompt Lab".to_string(),
@@ -222,14 +221,13 @@ impl Tab {
         if self == Tab::Job {
             Task::perform(
                 job_page::get_jobs(worker.clone(), job_page::initial_jobs_limit()),
-                Msg::JobPageMsg,
+                Msg::JobPage,
             )
         } else {
             Task::none()
         }
     }
 }
-
 
 #[derive(Debug)]
 struct Flags {
@@ -241,7 +239,7 @@ impl Flags {
     async fn get() -> Result<Self, Error> {
         let logger = Logger::init(Level::Warning);
 
-        let worker = Worker::new(logger).await.map_err(Error::WorkerInitError)?;
+        let worker = Worker::new(logger).await.map_err(Error::WorkerInit)?;
 
         let storage = Storage::read_from_file_system()?;
 
@@ -255,16 +253,16 @@ enum Msg {
     ClickedSubmitPrompt,
     SubmissionResult(Result<String, CompletionError>),
     TabSelected(Tab),
-    NewIdentityPageMsg(new_identity_page::Msg),
-    NewPersonPageMsg(new_person_page::Msg),
-    MemoryPageMsg(memory_page::Msg),
-    MotivationPageMsg(motivation_page::Msg),
-    MessagesPageMsg(messages_page::Msg),
-    StateOfMindPageMsg(state_of_mind_page::Msg),
-    SceneMsg(scene_page::Msg),
-    JobPageMsg(job_page::Msg),
-    ReactionPageMsg(reaction_page::Msg),
-    PromptLabMsg(prompt_lab_page::Msg),
+    NewIdentityPage(new_identity_page::Msg),
+    NewPersonPage(new_person_page::Msg),
+    MemoryPage(memory_page::Msg),
+    MotivationPage(motivation_page::Msg),
+    MessagesPage(messages_page::Msg),
+    StateOfMindPage(state_of_mind_page::Msg),
+    ScenePage(scene_page::Msg),
+    JobPage(job_page::Msg),
+    ReactionPage(reaction_page::Msg),
+    PromptLab(prompt_lab_page::Msg),
     WarmedUpDb,
     JobRunnerPollIntervalLoaded(Result<u64, String>),
     JobRunnerPollIntervalInputChanged(String),
@@ -277,27 +275,27 @@ enum Msg {
 
 #[derive(Debug)]
 pub enum Error {
-    IcedRunError(iced::Error),
-    WorkerInitError(worker::InitError),
-    StorageFileCreationError(std::io::Error),
-    StorageFileWriteError(std::io::Error),
-    StorageSerializationError(String),
-    StorageFileReadError(std::io::Error),
-    StorageDeserializationError(String),
+    IcedRun(iced::Error),
+    WorkerInit(worker::InitError),
+    StorageFileCreation(std::io::Error),
+    StorageFileWrite(std::io::Error),
+    StorageSerialization(String),
+    StorageFileRead(std::io::Error),
+    StorageDeserialization(String),
 }
 
 impl NiceDisplay for Error {
     fn message(&self) -> String {
         match self {
-            Error::IcedRunError(err) => format!("Iced run error: {}", err),
-            Error::WorkerInitError(err) => err.message(),
-            Error::StorageFileCreationError(err) => format!("Storage file creation error: {}", err),
-            Error::StorageFileWriteError(err) => format!("Storage file write error: {}", err),
-            Error::StorageSerializationError(msg) => {
+            Error::IcedRun(err) => format!("Iced run error: {}", err),
+            Error::WorkerInit(err) => err.message(),
+            Error::StorageFileCreation(err) => format!("Storage file creation error: {}", err),
+            Error::StorageFileWrite(err) => format!("Storage file write error: {}", err),
+            Error::StorageSerialization(msg) => {
                 format!("Storage serialization error: {}", msg)
             }
-            Error::StorageFileReadError(err) => format!("Storage file read error: {}", err),
-            Error::StorageDeserializationError(msg) => {
+            Error::StorageFileRead(err) => format!("Storage file read error: {}", err),
+            Error::StorageDeserialization(msg) => {
                 format!("Storage deserialization error: {}", msg)
             }
         }
@@ -339,7 +337,7 @@ impl Model {
             model
                 .messages_page
                 .on_tab_activated(model.worker.clone())
-                .map(Msg::MessagesPageMsg)
+                .map(Msg::MessagesPage)
         } else {
             Task::none()
         };
@@ -407,55 +405,55 @@ impl Model {
                     Tab::Messages => self
                         .messages_page
                         .on_tab_activated(self.worker.clone())
-                        .map(Msg::MessagesPageMsg),
+                        .map(Msg::MessagesPage),
                     _ => Task::none(),
                 };
                 Task::batch(vec![init_task, tab_task])
             }
-            Msg::NewIdentityPageMsg(sub_msg) => {
+            Msg::NewIdentityPage(sub_msg) => {
                 let task = self.new_identity_page.update(self.worker.clone(), sub_msg);
 
                 if let Err(err) = self.to_storage().save_to_file_system() {
                     self.error = Some(err);
                 }
 
-                task.map(Msg::NewIdentityPageMsg)
+                task.map(Msg::NewIdentityPage)
             }
-            Msg::NewPersonPageMsg(sub_msg) => {
+            Msg::NewPersonPage(sub_msg) => {
                 let task = self.new_person_page.update(self.worker.clone(), sub_msg);
 
                 if let Err(err) = self.to_storage().save_to_file_system() {
                     self.error = Some(err);
                 }
 
-                task.map(Msg::NewPersonPageMsg)
+                task.map(Msg::NewPersonPage)
             }
-            Msg::MemoryPageMsg(sub_msg) => {
+            Msg::MemoryPage(sub_msg) => {
                 let task = self.memory_page.update(self.worker.clone(), sub_msg);
 
                 if let Err(err) = self.to_storage().save_to_file_system() {
                     self.error = Some(err);
                 }
 
-                task.map(Msg::MemoryPageMsg)
+                task.map(Msg::MemoryPage)
             }
-            Msg::MotivationPageMsg(sub_msg) => {
+            Msg::MotivationPage(sub_msg) => {
                 let task = self.motivation_page.update(self.worker.clone(), sub_msg);
 
                 if let Err(err) = self.to_storage().save_to_file_system() {
                     self.error = Some(err);
                 }
 
-                task.map(Msg::MotivationPageMsg)
+                task.map(Msg::MotivationPage)
             }
-            Msg::MessagesPageMsg(sub_msg) => {
+            Msg::MessagesPage(sub_msg) => {
                 let task = self.messages_page.update(self.worker.clone(), sub_msg);
 
                 if let Err(err) = self.to_storage().save_to_file_system() {
                     self.error = Some(err);
                 }
 
-                task.map(Msg::MessagesPageMsg)
+                task.map(Msg::MessagesPage)
             }
             Msg::WarmedUpDb => Task::none(),
             Msg::JobRunnerPollIntervalLoaded(result) => {
@@ -549,50 +547,50 @@ impl Model {
                 }
                 Task::none()
             }
-            Msg::StateOfMindPageMsg(msg) => {
+            Msg::StateOfMindPage(msg) => {
                 let task = self.state_of_mind_page.update(self.worker.clone(), msg);
 
                 if let Err(err) = self.to_storage().save_to_file_system() {
                     self.error = Some(err);
                 }
 
-                task.map(Msg::StateOfMindPageMsg)
+                task.map(Msg::StateOfMindPage)
             }
-            Msg::SceneMsg(sub_msg) => {
+            Msg::ScenePage(sub_msg) => {
                 let task = self.scene_page.update(self.worker.clone(), sub_msg);
 
                 if let Err(err) = self.to_storage().save_to_file_system() {
                     self.error = Some(err);
                 }
 
-                task.map(Msg::SceneMsg)
+                task.map(Msg::ScenePage)
             }
-            Msg::JobPageMsg(sub_msg) => {
+            Msg::JobPage(sub_msg) => {
                 let task = self.job_page.update(self.worker.clone(), sub_msg);
 
                 if let Err(err) = self.to_storage().save_to_file_system() {
                     self.error = Some(err);
                 }
 
-                task.map(Msg::JobPageMsg)
+                task.map(Msg::JobPage)
             }
-            Msg::ReactionPageMsg(sub_msg) => {
+            Msg::ReactionPage(sub_msg) => {
                 let task = self.reaction_page.update(self.worker.clone(), sub_msg);
 
                 if let Err(err) = self.to_storage().save_to_file_system() {
                     self.error = Some(err);
                 }
 
-                task.map(Msg::ReactionPageMsg)
+                task.map(Msg::ReactionPage)
             }
-            Msg::PromptLabMsg(sub_msg) => {
+            Msg::PromptLab(sub_msg) => {
                 let task = self.prompt_lab_page.update(self.worker.clone(), sub_msg);
 
                 if let Err(err) = self.to_storage().save_to_file_system() {
                     self.error = Some(err);
                 }
 
-                task.map(Msg::PromptLabMsg)
+                task.map(Msg::PromptLab)
             }
         }
     }
@@ -601,13 +599,8 @@ impl Model {
         let tabs = Tab::all()
             .iter()
             .flat_map(|tab: &Tab| {
-                let radio_tab: Element<Msg> = w::radio(
-                    tab.to_label(),
-                    *tab,
-                    Some(self.tab),
-                    Msg::TabSelected,
-                )
-                .into();
+                let radio_tab: Element<Msg> =
+                    w::radio(tab.to_label(), *tab, Some(self.tab), Msg::TabSelected).into();
 
                 if *tab == Tab::Job {
                     vec![radio_tab, w::horizontal_rule(1).into()]
@@ -654,16 +647,16 @@ impl Model {
                 ]
                 .into()
             }
-            Tab::PromptLab => self.prompt_lab_page.view().map(Msg::PromptLabMsg),
-            Tab::Reaction => self.reaction_page.view().map(Msg::ReactionPageMsg),
-            Tab::Identity => self.new_identity_page.view().map(Msg::NewIdentityPageMsg),
-            Tab::Person => self.new_person_page.view().map(Msg::NewPersonPageMsg),
-            Tab::Memory => self.memory_page.view().map(Msg::MemoryPageMsg),
-            Tab::Motivation => self.motivation_page.view().map(Msg::MotivationPageMsg),
-            Tab::Messages => self.messages_page.view().map(Msg::MessagesPageMsg),
-            Tab::StateOfMind => self.state_of_mind_page.view().map(Msg::StateOfMindPageMsg),
-            Tab::Scene => self.scene_page.view().map(Msg::SceneMsg),
-            Tab::Job => self.job_page.view().map(Msg::JobPageMsg),
+            Tab::PromptLab => self.prompt_lab_page.view().map(Msg::PromptLab),
+            Tab::Reaction => self.reaction_page.view().map(Msg::ReactionPage),
+            Tab::Identity => self.new_identity_page.view().map(Msg::NewIdentityPage),
+            Tab::Person => self.new_person_page.view().map(Msg::NewPersonPage),
+            Tab::Memory => self.memory_page.view().map(Msg::MemoryPage),
+            Tab::Motivation => self.motivation_page.view().map(Msg::MotivationPage),
+            Tab::Messages => self.messages_page.view().map(Msg::MessagesPage),
+            Tab::StateOfMind => self.state_of_mind_page.view().map(Msg::StateOfMindPage),
+            Tab::Scene => self.scene_page.view().map(Msg::ScenePage),
+            Tab::Job => self.job_page.view().map(Msg::JobPage),
         };
 
         let scrollable_content = w::scrollable(tab_content);
@@ -678,11 +671,11 @@ impl Model {
         let mut subs = Vec::new();
 
         if self.tab == Tab::Job {
-            subs.push(self.job_page.subscription().map(Msg::JobPageMsg));
+            subs.push(self.job_page.subscription().map(Msg::JobPage));
         }
 
         if self.tab == Tab::Messages {
-            subs.push(self.messages_page.subscription().map(Msg::MessagesPageMsg));
+            subs.push(self.messages_page.subscription().map(Msg::MessagesPage));
         }
 
         Subscription::batch(subs)
@@ -736,5 +729,5 @@ pub async fn run() -> Result<(), Error> {
         .subscription(Model::subscription)
         .run_with(move || Model::new(flags));
 
-    iced_result.map_err(Error::IcedRunError)
+    iced_result.map_err(Error::IcedRun)
 }

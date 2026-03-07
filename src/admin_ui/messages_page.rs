@@ -43,7 +43,7 @@ pub struct LoadedSceneModel {
 enum SceneLoadStatus {
     Ready,
     Loading,
-    Loaded(LoadedSceneModel),
+    Loaded(Box<LoadedSceneModel>),
     NotFound(String), // Scene name that wasn't found
     Error(String),
 }
@@ -55,14 +55,12 @@ enum SceneListStatus {
     Error(String),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum ViewMode {
     #[default]
     DirectMessage,
     Scene,
 }
-
 
 #[derive(Debug, Clone)]
 pub enum MessagesStatus {
@@ -99,13 +97,12 @@ pub enum Msg {
     MessageInputChanged(w::text_editor::Action),
     SubmitMessage,
     MessageSent(Result<(), String>),
-    GotTimelineMsg(scene_timeline::Msg),
+    Timeline(scene_timeline::Msg),
     ClickedToggleAutoRefresh,
     AutoRefreshTick,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
-#[derive(Default)]
+#[derive(Serialize, Deserialize, Debug, Default)]
 pub struct Storage {
     #[serde(default)]
     selected_person_1: Option<String>,
@@ -116,7 +113,6 @@ pub struct Storage {
     #[serde(default)]
     view_mode: ViewMode,
 }
-
 
 impl Model {
     pub fn new(storage: &Storage) -> Self {
@@ -179,7 +175,7 @@ impl Model {
                         participants: Vec::new(),
                     };
 
-                    self.scene_load_status = SceneLoadStatus::Loaded(loaded_scene);
+                    self.scene_load_status = SceneLoadStatus::Loaded(Box::new(loaded_scene));
                     self.send_status = SendStatus::Ready;
 
                     let scene_timeline_worker = worker.clone();
@@ -245,7 +241,7 @@ impl Model {
                             loaded_scene.messages = MessagesStatus::Loaded(timeline_model);
                             if should_scroll_to_bottom {
                                 if let MessagesStatus::Loaded(model) = &loaded_scene.messages {
-                                    return model.scroll_to_bottom().map(Msg::GotTimelineMsg);
+                                    return model.scroll_to_bottom().map(Msg::Timeline);
                                 }
                             }
                         }
@@ -350,20 +346,18 @@ impl Model {
                 }
                 Task::none()
             }
-            Msg::GotTimelineMsg(sub_msg) => {
+            Msg::Timeline(sub_msg) => {
                 if let SceneLoadStatus::Loaded(loaded_scene) = &mut self.scene_load_status {
                     if let Some(timeline_model) = timeline_model_mut(&mut loaded_scene.messages) {
                         match sub_msg {
                             scene_timeline::Msg::Copy(_) => {
-                                return timeline_model.update(sub_msg).map(Msg::GotTimelineMsg);
+                                return timeline_model.update(sub_msg).map(Msg::Timeline);
                             }
                             scene_timeline::Msg::Scrolled(viewport) => {
                                 match timeline_model.handle_scroll(viewport) {
                                     scene_timeline::ScrollDecision::None => {}
                                     scene_timeline::ScrollDecision::AdjustScroll(delta) => {
-                                        return timeline_model
-                                            .scroll_by(delta)
-                                            .map(Msg::GotTimelineMsg);
+                                        return timeline_model.scroll_by(delta).map(Msg::Timeline);
                                     }
                                     scene_timeline::ScrollDecision::LoadOlder => {
                                         let before = timeline_model.oldest_message_at();
@@ -407,16 +401,14 @@ impl Model {
         } else {
             match &self.scene_load_status {
                 SceneLoadStatus::Loaded(scene) => match &scene.messages {
-                    MessagesStatus::Loaded(model) => {
-                        model.scroll_to_bottom().map(Msg::GotTimelineMsg)
-                    }
+                    MessagesStatus::Loaded(model) => model.scroll_to_bottom().map(Msg::Timeline),
                     MessagesStatus::Refreshing(model) => {
-                        model.scroll_to_bottom().map(Msg::GotTimelineMsg)
+                        model.scroll_to_bottom().map(Msg::Timeline)
                     }
                     MessagesStatus::Error {
                         cached: Some(model),
                         ..
-                    } => model.scroll_to_bottom().map(Msg::GotTimelineMsg),
+                    } => model.scroll_to_bottom().map(Msg::Timeline),
                     MessagesStatus::Loading => Task::none(),
                     MessagesStatus::Error { cached: None, .. } => Task::none(),
                 },
@@ -680,9 +672,7 @@ impl Model {
     fn load_scene_list(&mut self, worker: Arc<Worker>) -> Task<Msg> {
         match self.scene_list_status {
             SceneListStatus::Loading => Task::none(),
-            SceneListStatus::NotLoaded
-            | SceneListStatus::Loaded(_)
-            | SceneListStatus::Error(_) => {
+            SceneListStatus::NotLoaded | SceneListStatus::Loaded(_) | SceneListStatus::Error(_) => {
                 self.scene_list_status = SceneListStatus::Loading;
                 Task::perform(
                     async move { worker.get_scenes().await },
@@ -713,12 +703,10 @@ impl Model {
 fn view_messages(messages_status: &MessagesStatus) -> Element<'_, Msg> {
     match &messages_status {
         MessagesStatus::Loading => w::text("Loading messages...").into(),
-        MessagesStatus::Loaded(timeline_model) => timeline_model.view().map(Msg::GotTimelineMsg),
-        MessagesStatus::Refreshing(timeline_model) => {
-            timeline_model.view().map(Msg::GotTimelineMsg)
-        }
+        MessagesStatus::Loaded(timeline_model) => timeline_model.view().map(Msg::Timeline),
+        MessagesStatus::Refreshing(timeline_model) => timeline_model.view().map(Msg::Timeline),
         MessagesStatus::Error { message, cached } => match cached {
-            Some(timeline_model) => timeline_model.view().map(Msg::GotTimelineMsg),
+            Some(timeline_model) => timeline_model.view().map(Msg::Timeline),
             None => w::text(format!("Error: {}", message)).into(),
         },
     }

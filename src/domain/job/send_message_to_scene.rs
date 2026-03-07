@@ -21,15 +21,15 @@ pub struct SendMessageToSceneJob {
 }
 
 pub enum Error {
-    FailedToGetSceneParticipants {
+    GetSceneParticipants {
         scene_uuid: SceneUuid,
         details: String,
     },
-    FailedToSendMessage {
+    SendMessage {
         participant: ActorUuid,
         details: String,
     },
-    FailedToUnshiftJob {
+    UnshiftJob {
         message_uuid: MessageUuid,
         details: String,
     },
@@ -38,7 +38,7 @@ pub enum Error {
 impl NiceDisplay for Error {
     fn message(&self) -> String {
         match self {
-            Error::FailedToGetSceneParticipants {
+            Error::GetSceneParticipants {
                 scene_uuid,
                 details,
             } => {
@@ -48,7 +48,7 @@ impl NiceDisplay for Error {
                     details
                 )
             }
-            Error::FailedToSendMessage {
+            Error::SendMessage {
                 participant,
                 details,
             } => {
@@ -58,7 +58,7 @@ impl NiceDisplay for Error {
                     details
                 )
             }
-            Error::FailedToUnshiftJob {
+            Error::UnshiftJob {
                 message_uuid,
                 details,
             } => {
@@ -102,7 +102,7 @@ pub async fn send_scene_message_and_enqueue_recipients<
     let mut participants = worker
         .get_scene_current_participants(&scene_uuid)
         .await
-        .map_err(|err| Error::FailedToGetSceneParticipants {
+        .map_err(|err| Error::GetSceneParticipants {
             scene_uuid: scene_uuid.clone(),
             details: err,
         })?;
@@ -114,7 +114,7 @@ pub async fn send_scene_message_and_enqueue_recipients<
     let message_uuid = worker
         .send_scene_message(sender.clone(), scene_uuid.clone(), content)
         .await
-        .map_err(|err| Error::FailedToSendMessage {
+        .map_err(|err| Error::SendMessage {
             participant: ActorUuid::RealWorldUser,
             details: err,
         })?;
@@ -144,28 +144,30 @@ pub async fn send_scene_message_and_enqueue_recipients<
     worker
         .add_scene_message_recipients(&message_uuid, recipient_uuids)
         .await
-        .map_err(|err| Error::FailedToSendMessage {
+        .map_err(|err| Error::SendMessage {
             participant: ActorUuid::RealWorldUser,
             details: err,
         })?;
 
     for participant in recipient_participants {
-        let message_uuid = message_uuid.clone();
-        let process_message_job = ProcessMessageJob {
-            message_uuid: message_uuid.clone(),
-            recipient_person_uuid: match participant.actor_uuid {
-                ActorUuid::AiPerson(person_uuid) => Some(person_uuid),
-                ActorUuid::RealWorldUser => None,
-            },
-        };
+        match participant.actor_uuid {
+            ActorUuid::AiPerson(person_uuid) => {
+                let message_uuid = message_uuid.clone();
+                let process_message_job = ProcessMessageJob {
+                    message_uuid: message_uuid.clone(),
+                    recipient_person_uuid: person_uuid,
+                };
 
-        worker
-            .unshift_job(JobKind::ProcessMessage(process_message_job))
-            .await
-            .map_err(|err| Error::FailedToUnshiftJob {
-                message_uuid,
-                details: err,
-            })?;
+                worker
+                    .unshift_job(JobKind::ProcessMessage(process_message_job))
+                    .await
+                    .map_err(|err| Error::UnshiftJob {
+                        message_uuid,
+                        details: err,
+                    })?;
+            }
+            ActorUuid::RealWorldUser => {}
+        }
     }
 
     Ok(message_uuid)

@@ -1,10 +1,12 @@
 use uuid::Uuid;
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[allow(dead_code)]
 pub enum JobUuid {
     Real(Uuid),
     Test(u64),
 }
 
+#[allow(dead_code)]
 impl JobUuid {
     pub fn new() -> Self {
         JobUuid::Real(Uuid::now_v7())

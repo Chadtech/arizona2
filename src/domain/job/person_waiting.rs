@@ -49,12 +49,12 @@ pub enum Error {
     FailedToGetPersonsName(String),
     CouldNotCreateMemoriesPrompt(String),
     FailedToSearchMemories(String),
-    GetPersonReactionError(String),
+    GetPersonReaction(String),
     CouldNotGetPersonsScene {
         person_uuid: PersonUuid,
         details: String,
     },
-    ActionError(ActionHandleError),
+    Action(ActionHandleError),
 }
 
 pub enum WaitOutcome {
@@ -103,7 +103,7 @@ impl NiceDisplay for Error {
             Error::FailedToSearchMemories(err) => {
                 format!("Failed to search memories: {}", err)
             }
-            Error::GetPersonReactionError(err) => {
+            Error::GetPersonReaction(err) => {
                 format!("Failed to get person reaction: {}", err)
             }
             Error::CouldNotGetPersonsScene {
@@ -116,7 +116,7 @@ impl NiceDisplay for Error {
                     details
                 )
             }
-            Error::ActionError(err) => err.to_nice_error().to_string(),
+            Error::Action(err) => err.to_nice_error().to_string(),
         }
     }
 }
@@ -270,7 +270,7 @@ impl PersonWaitingJob {
                     situation,
                 )
                 .await
-                .map_err(Error::GetPersonReactionError)?;
+                .map_err(Error::GetPersonReaction)?;
 
             let action = reaction.action;
 
@@ -282,7 +282,7 @@ impl PersonWaitingJob {
                 current_active_ms,
             )
             .await
-            .map_err(Error::ActionError)?;
+            .map_err(Error::Action)?;
 
             Ok(WaitOutcome::Ready)
         } else {

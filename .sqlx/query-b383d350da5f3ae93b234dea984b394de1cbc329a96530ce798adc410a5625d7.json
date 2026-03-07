@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n                SELECT m.uuid, m.sender_person_uuid, m.scene_uuid, m.content, m.sent_at\n                FROM message m\n                JOIN scene_message_recipient smr ON smr.message_uuid = m.uuid\n                WHERE smr.person_uuid = $1::UUID\n                  AND smr.handled_at IS NULL\n                  AND m.scene_uuid = $2::UUID\n                ORDER BY m.sent_at ASC\n            ",
+  "query": "\n                SELECT uuid, sender_person_uuid,  scene_uuid, content, sent_at\n                FROM message\n                WHERE scene_uuid = $1::UUID\n                  AND ($2::timestamptz IS NULL OR sent_at < $2::timestamptz)\n                ORDER BY sent_at DESC\n                LIMIT $3\n            ",
   "describe": {
     "columns": [
       {
@@ -32,7 +32,8 @@
     "parameters": {
       "Left": [
         "Uuid",
-        "Uuid"
+        "Timestamptz",
+        "Int8"
       ]
     },
     "nullable": [
@@ -43,5 +44,5 @@
       false
     ]
   },
-  "hash": "e8a085fd0a7e0d42a703d9ff644ff15dd68e446d945c36050d5bda0c4f087dfe"
+  "hash": "b383d350da5f3ae93b234dea984b394de1cbc329a96530ce798adc410a5625d7"
 }

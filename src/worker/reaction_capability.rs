@@ -114,7 +114,7 @@ async fn get_reaction_dual_layer(
     let thinking_system_prompt = "You are an expert in understanding and predicting real human behavior and psychology. Think through the person's internal state and immediate intent and predict what they will do and think next. The person only has awareness of the information explicitly provided in this prompt and nothing else. The person is only capable of actions that are represented by the available tool calls; do not assume any other capabilities. Respond with plain text only. Your response must describe: (1) what the person wants to do next, and (2) what they are thinking right now.";
     completion.add_message(Role::System, thinking_system_prompt);
 
-    let memories_list_text = Memory::to_list_text(&memories);
+    let memories_list_text = Memory::many_to_list_text(&memories);
 
     let motivations = worker
         .get_motivations_for_person(person_uuid.clone())
@@ -123,7 +123,7 @@ async fn get_reaction_dual_layer(
 
     let thinking_user_prompt = format!(
         "Describe this person's immediate intention and current thinking in plain text.\n\nName: \n{}\n\nMemories:\n{}\n\nBackground drives:\n{}\n\nPerson identity:\n{}\n\nState of mind:\n{}\n\nSituation:\n{}",
-        person_name.to_string(), memories_list_text, Motivation::to_list_text(&motivations), person_identity, state_of_mind, situation
+        person_name, memories_list_text, Motivation::many_to_list_text(&motivations), person_identity, state_of_mind, situation
 		);
     worker.logger.log(
         Level::Info,
@@ -170,7 +170,7 @@ async fn get_reaction_dual_layer(
 
     let action_system_prompt = format!(
 		"You ARE {}.\n\nPerson identity:\n{}\n\nYou only have awareness of information explicitly provided in this prompt and nothing else. You are only capable of actions represented by the available tool calls. Execute the intention determined previously within those constraints. Use exactly one tool call and no extra text.",
-		person_name.to_string(),
+		person_name,
 		person_identity,
 	);
 
@@ -257,7 +257,7 @@ async fn get_reaction_single_layer(
 
     let user_prompt = format!(
         "Predict the most realistic, human behavior for this person in the situation below, then choose exactly one action tool call that best matches that behavior. Do not explain. The background drives should influence behavior implicitly; avoid stating them directly in dialogue.\n\nMemories:\n{}\n\nBackground drives:\n{}\n\nPerson identity:\n{}\n\nState of mind:\n{}\n\nSituation:\n{}",
-        Memory::to_list_text(&memories), Motivation::to_list_text(&motivations), person_identity, state_of_mind, situation
+        Memory::many_to_list_text(&memories), Motivation::many_to_list_text(&motivations), person_identity, state_of_mind, situation
 	);
 
     worker.logger.log(

@@ -1,3 +1,5 @@
+use std::fmt::Display;
+
 #[derive(Clone, Debug)]
 pub struct Situation {
     person_name: String,
@@ -25,8 +27,10 @@ impl Situation {
             messages: input.messages,
         }
     }
+}
 
-    pub fn to_string(&self) -> String {
+impl Display for Situation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let participant_list = if self.participants.is_empty() {
             "none".to_string()
         } else {
@@ -39,13 +43,15 @@ impl Situation {
             self.messages.join("\n")
         };
 
-        format!(
+        let s = format!(
             "{} is in the scene \"{}\". {}\n\nPeople present (complete list): {}\n\nNew messages received (oldest to newest):\n{}",
             self.person_name,
             self.scene_name,
             self.scene_description,
             participant_list,
             messages_block
-        )
+        );
+
+        write!(f, "{}", s)
     }
 }

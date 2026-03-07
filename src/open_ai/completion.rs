@@ -35,7 +35,7 @@ pub enum MessageError {
 
 impl From<MessageError> for CompletionError {
     fn from(val: MessageError) -> Self {
-        CompletionError::MessageError(val)
+        CompletionError::Message(val)
     }
 }
 
@@ -154,39 +154,39 @@ impl Response {
 
 #[derive(Debug, Clone)]
 pub enum CompletionError {
-    RequestError(String),
-    ResponseError(String),
-    ResponseJsonDecodeError(String),
-    MessageError(MessageError),
-    ToolCallDecodeError(tool_call::ToolCallDecodeError),
-    PersonActionError(PersonActionError),
+    Request(String),
+    Response(String),
+    ResponseJsonDecode(String),
+    Message(MessageError),
+    ToolCallDecode(tool_call::ToolCallDecodeError),
+    PersonAction(PersonActionError),
 }
 
 impl NiceDisplay for CompletionError {
     fn message(&self) -> String {
         match self {
-            CompletionError::RequestError(err) => {
+            CompletionError::Request(err) => {
                 format!("I had trouble making a request to open ai: {}", err)
             }
-            CompletionError::ResponseError(err) => {
+            CompletionError::Response(err) => {
                 format!("I had trouble with the response from open ai: {}", err)
             }
-            CompletionError::ResponseJsonDecodeError(err) => {
+            CompletionError::ResponseJsonDecode(err) => {
                 format!("I had trouble decoding the response from open ai: {}", err)
             }
-            CompletionError::MessageError(err) => {
+            CompletionError::Message(err) => {
                 format!(
                     "I had trouble extracting the message from the response:\n{:?}",
                     err.message()
                 )
             }
-            CompletionError::ToolCallDecodeError(err) => {
+            CompletionError::ToolCallDecode(err) => {
                 format!(
                     "I had trouble decoding the tool calls from the response:\n{}",
                     err.message()
                 )
             }
-            CompletionError::PersonActionError(err) => {
+            CompletionError::PersonAction(err) => {
                 format!("I had trouble interpreting the action: {}", err.message())
             }
         }
@@ -252,13 +252,13 @@ impl Completion {
             .json(&body)
             .send()
             .await
-            .map_err(|err| CompletionError::RequestError(err.to_string()))?
+            .map_err(|err| CompletionError::Request(err.to_string()))?
             .text()
             .await
-            .map_err(|err| CompletionError::ResponseError(err.to_string()))?;
+            .map_err(|err| CompletionError::Response(err.to_string()))?;
 
         let res_json: serde_json::Value = serde_json::from_str(&res)
-            .map_err(|err| CompletionError::ResponseJsonDecodeError(err.to_string()))?;
+            .map_err(|err| CompletionError::ResponseJsonDecode(err.to_string()))?;
 
         Ok(Response::new(res_json))
     }

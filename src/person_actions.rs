@@ -56,36 +56,36 @@ impl PersonActionKind {
 
     pub fn to_choice_tool() -> Tool {
         let parameters = vec![
-            ToolFunctionParameter::StringEnumParam {
+            ToolFunctionParameter::StringEnum {
                 name: "reflection".to_string(),
                 description: "Whether the person should reflect after acting.".to_string(),
                 required: true,
                 values: ReflectionDecision::all_names(),
             },
-            ToolFunctionParameter::StringEnumParam {
+            ToolFunctionParameter::StringEnum {
                 name: "action".to_string(),
                 description: "The single action to take.".to_string(),
                 required: true,
                 values: PersonActionKind::all_action_names(),
             },
-            ToolFunctionParameter::StringParam {
+            ToolFunctionParameter::String {
                 name: "comment".to_string(),
                 description: "What to say if action is say in scene.".to_string(),
                 required: false,
             },
-            ToolFunctionParameter::StringParam {
+            ToolFunctionParameter::String {
                 name: "destination_scene_name".to_string(),
                 description:
                     "Optional destination scene if action is say in scene and the person should leave immediately after speaking."
                         .to_string(),
                 required: false,
             },
-            ToolFunctionParameter::StringParam {
+            ToolFunctionParameter::String {
                 name: "scene_name".to_string(),
                 description: "Scene name to move to if action is move to scene.".to_string(),
                 required: false,
             },
-            ToolFunctionParameter::IntegerParam {
+            ToolFunctionParameter::Integer {
                 name: "duration".to_string(),
                 description:
                     "How long to wait or hibernate in milliseconds if action is wait or hibernate."
@@ -105,14 +105,20 @@ impl PersonActionKind {
 
 #[derive(Debug, Clone)]
 pub enum PersonAction {
-    Wait { duration: u64 },
-    Hibernate { duration: u64 },
+    Wait {
+        duration: u64,
+    },
+    Hibernate {
+        duration: u64,
+    },
     Idle,
     SayInScene {
         comment: String,
         destination_scene_name: Option<String>,
     },
-    MoveToScene { scene_name: String },
+    MoveToScene {
+        scene_name: String,
+    },
 }
 
 impl PersonAction {
@@ -133,7 +139,7 @@ impl PersonAction {
                     format!("Spoke in scene then left for {}: {}", scene_name, comment)
                 }
                 None => format!("Spoke in scene: {}", comment),
-            }
+            },
             PersonAction::MoveToScene { scene_name } => {
                 format!("Moved to scene: {}", scene_name)
             }
@@ -149,7 +155,7 @@ pub struct PersonReaction {
 
 impl From<PersonActionError> for CompletionError {
     fn from(val: PersonActionError) -> Self {
-        CompletionError::PersonActionError(val)
+        CompletionError::PersonAction(val)
     }
 }
 

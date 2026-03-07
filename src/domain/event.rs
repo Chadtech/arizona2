@@ -1,4 +1,3 @@
-use super::message::MessageSender;
 use crate::domain::message_uuid::MessageUuid;
 use chrono::{DateTime, Utc};
 
@@ -18,7 +17,7 @@ impl Event {
 
     pub fn to_text(&self) -> String {
         match &self.event_type {
-            EventType::PersonSaidInScene {
+            EventType::Said {
                 scene_name,
                 speaker_name,
                 comment,
@@ -29,28 +28,16 @@ impl Event {
                     self.timestamp, scene_name, speaker_name, comment
                 )
             }
-            EventType::PersonDirectMessaged {
-                sender,
-                comment,
-                message_uuid: _,
-            } => {
-                format!(
-                    "At {}, {} sent a direct message: {}",
-                    self.timestamp,
-                    sender.to_string(),
-                    comment
-                )
-            }
-            EventType::PersonJoinedScene {
+            EventType::Entered {
                 person_name,
                 scene_name,
             } => {
                 format!(
-                    "At {}, {} joined scene {}",
+                    "At {}, {} entered scene {}",
                     self.timestamp, person_name, scene_name
                 )
             }
-            EventType::PersonLeftScene {
+            EventType::Left {
                 person_name,
                 scene_name,
             } => {
@@ -82,22 +69,17 @@ impl Event {
 
 #[derive(Clone, Debug)]
 pub enum EventType {
-    PersonSaidInScene {
+    Said {
         scene_name: String,
         speaker_name: String,
         comment: String,
         message_uuid: MessageUuid,
     },
-    PersonDirectMessaged {
-        sender: MessageSender,
-        comment: String,
-        message_uuid: MessageUuid,
-    },
-    PersonJoinedScene {
+    Entered {
         person_name: String,
         scene_name: String,
     },
-    PersonLeftScene {
+    Left {
         person_name: String,
         scene_name: String,
     },

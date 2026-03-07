@@ -19,24 +19,18 @@ impl ToolFunction {
 }
 
 pub enum ToolFunctionParameter {
-    StringParam {
+    String {
         name: String,
         description: String,
         required: bool,
     },
-    StringEnumParam {
+    StringEnum {
         name: String,
         description: String,
         required: bool,
         values: Vec<String>,
     },
-    ArrayParam {
-        name: String,
-        description: String,
-        item_type: ArrayParamItemType,
-        required: bool,
-    },
-    IntegerParam {
+    Integer {
         name: String,
         description: String,
         required: bool,
@@ -46,25 +40,20 @@ pub enum ToolFunctionParameter {
 impl ToolFunctionParameter {
     pub fn required(&self) -> bool {
         match *self {
-            ToolFunctionParameter::StringParam { required, .. } => required,
-            ToolFunctionParameter::StringEnumParam { required, .. } => required,
-            ToolFunctionParameter::ArrayParam { required, .. } => required,
-            ToolFunctionParameter::IntegerParam { required, .. } => required,
+            ToolFunctionParameter::String { required, .. } => required,
+            ToolFunctionParameter::StringEnum { required, .. } => required,
+            ToolFunctionParameter::Integer { required, .. } => required,
         }
     }
     pub fn name(&self) -> &str {
         match self {
-            ToolFunctionParameter::StringParam { name, .. } => name,
-            ToolFunctionParameter::StringEnumParam { name, .. } => name,
-            ToolFunctionParameter::ArrayParam { name, .. } => name,
-            ToolFunctionParameter::IntegerParam { name, .. } => name,
+            ToolFunctionParameter::String { name, .. } => name,
+            ToolFunctionParameter::StringEnum { name, .. } => name,
+            ToolFunctionParameter::Integer { name, .. } => name,
         }
     }
 }
 
-pub enum ArrayParamItemType {
-    String,
-}
 impl From<ToolFunction> for Tool {
     fn from(val: ToolFunction) -> Self {
         Tool::FunctionCall(val)
@@ -79,7 +68,7 @@ impl Tool {
 
                 for param in &func.parameters {
                     match param {
-                        ToolFunctionParameter::StringParam {
+                        ToolFunctionParameter::String {
                             name,
                             description,
                             required: _,
@@ -89,7 +78,7 @@ impl Tool {
                                 "description": description,
                             });
                         }
-                        ToolFunctionParameter::StringEnumParam {
+                        ToolFunctionParameter::StringEnum {
                             name,
                             description,
                             values,
@@ -101,22 +90,7 @@ impl Tool {
                                 "enum": values,
                             });
                         }
-                        ToolFunctionParameter::ArrayParam {
-                            name,
-                            description,
-                            item_type,
-                            required: _,
-                        } => {
-                            let item_type_str = match item_type {
-                                ArrayParamItemType::String => "string",
-                            };
-                            properties[name] = serde_json::json!({
-                                "type": "array",
-                                "items": { "type": item_type_str },
-                                "description": description,
-                            });
-                        }
-                        ToolFunctionParameter::IntegerParam {
+                        ToolFunctionParameter::Integer {
                             name,
                             description,
                             required: _,

@@ -22,7 +22,7 @@ use crate::domain::job::person_action_handler::{self, ActionHandleError};
 use crate::domain::logger::Level;
 use crate::domain::memory::Memory;
 use crate::domain::memory_uuid::MemoryUuid;
-use crate::domain::message::{Message, MessageRecipient, MessageSender};
+use crate::domain::message::{Message, MessageSender};
 use crate::domain::person_name::PersonName;
 use crate::domain::person_uuid::PersonUuid;
 use crate::domain::random_seed::RandomSeed;
@@ -44,14 +44,13 @@ use std::collections::HashSet;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProcessMessageJob {
     pub message_uuid: MessageUuid,
-    #[serde(default)]
-    pub recipient_person_uuid: Option<PersonUuid>,
+    pub recipient_person_uuid: PersonUuid,
 }
 
 pub enum Error {
     FailedToGetMessage(String),
     MessageNotFound,
-    GetPersonReactionError(String),
+    GetPersonReaction(String),
     FailedToGetEvents(String),
     FailedToGetStateOfMind(String),
     NoStateOfMindFound {
@@ -68,9 +67,6 @@ pub enum Error {
         details: String,
     },
     FailedToGetPersonsName(String),
-    SceneMessageRecipientMissing {
-        message_uuid: MessageUuid,
-    },
     FailedToGetSceneName {
         scene_uuid: SceneUuid,
         details: String,
@@ -106,8 +102,8 @@ pub enum Error {
     FailedToCreateReflectionMemory(String),
     FailedToCreateReflectionMotivation(String),
     FailedToDeleteReflectionMotivation(String),
-    ActionError(ActionHandleError),
-    ReflectionError(String),
+    Action(ActionHandleError),
+    Reflection(String),
 }
 
 impl NiceDisplay for Error {
@@ -117,7 +113,7 @@ impl NiceDisplay for Error {
                 format!("Failed to get message: {}", details)
             }
             Error::MessageNotFound => "Message not found".to_string(),
-            Error::GetPersonReactionError(err) => {
+            Error::GetPersonReaction(err) => {
                 format!("Failed to get person reaction: {}", err)
             }
             Error::FailedToGetEvents(err) => {
@@ -159,12 +155,6 @@ impl NiceDisplay for Error {
             }
             Error::FailedToGetPersonsName(err) => {
                 format!("Failed to get person's name: {}", err)
-            }
-            Error::SceneMessageRecipientMissing { message_uuid } => {
-                format!(
-                    "Scene message {} is missing a recipient",
-                    message_uuid.to_uuid()
-                )
             }
             Error::FailedToGetSceneName {
                 scene_uuid,
@@ -247,8 +237,8 @@ impl NiceDisplay for Error {
             Error::FailedToDeleteReflectionMotivation(err) => {
                 format!("Failed to delete reflection motivation:\n{}", err)
             }
-            Error::ActionError(err) => err.to_nice_error().to_string(),
-            Error::ReflectionError(err) => {
+            Error::Action(err) => err.to_nice_error().to_string(),
+            Error::Reflection(err) => {
                 format!("Reflection error:\n{}", err)
             }
         }
@@ -295,103 +285,16 @@ impl ProcessMessageJob {
             None => Err(Error::MessageNotFound)?,
         };
 
-        let person_uuid = if let Some(ref person_uuid) = self.recipient_person_uuid {
-            Some(person_uuid)
-        } else if let Some(MessageRecipient::Person(ref person_uuid)) = message.recipient {
-            Some(person_uuid)
-        } else {
-            None
-        };
-
-        match (person_uuid, &message.scene_uuid) {
-            (Some(person_uuid), Some(scene_uuid)) => {
-                run_message_in_scene(
-                    worker,
-                    person_uuid,
-                    scene_uuid,
-                    random_seed.clone(),
-                    current_active_ms,
-                )
-                .await?;
-            }
-            (Some(_person_uuid), None) => {
-                // let situation = build_direct_situation(worker, &message).await?;
-                //
-                // let reaction = process_message_for_person(
-                //     worker,
-                //     MessageTypeArgs::Direct {
-                //         from: message.sender.clone(),
-                //     },
-                //     &situation,
-                //     person_uuid,
-                // )
-                // .await?;
-                //
-                // let action = reaction.action;
-                //
-                // person_action_handler::handle_person_action(
-                //     worker,
-                //     &action,
-                //     person_uuid,
-                //     random_seed.clone(),
-                //     current_active_ms,
-                // )
-                // .await
-                // .map_err(Error::ActionError)?;
-                //
-                // let action_summary = summarize_action(action);
-                // let description = if action_summary.is_empty() {
-                //     situation
-                // } else {
-                //     format!("{}\n\nResponse:\n{}", situation, action_summary)
-                // };
-                //
-                // worker
-                //     .maybe_create_memories_from_description(person_uuid.clone(), description)
-                //     .await
-                //     .map_err(Error::FailedToCreateMemory)?;
-                //
-                // worker
-                //     .mark_message_read(&self.message_uuid)
-                //     .await
-                //     .map_err(Error::FailedToMarkMessageRead)?;
-                todo!("This is basically DMs, which have not been implemented yet")
-            }
-            (None, Some(_)) => {
-                return Err(Error::SceneMessageRecipientMissing {
-                    message_uuid: self.message_uuid.clone(),
-                });
-            }
-            (None, None) => {
-                //
-            }
-        }
-
-        Ok(())
+        run_message_in_scene(
+            worker,
+            &self.recipient_person_uuid,
+            &message.scene_uuid,
+            random_seed.clone(),
+            current_active_ms,
+        )
+        .await
     }
 }
-
-// async fn build_direct_situation<W: PersonCapability>(
-//     worker: &W,
-//     message: &Message,
-// ) -> Result<String, Error> {
-//     let sender_name = match &message.sender {
-//         MessageSender::AiPerson(sender_person_uuid) => worker
-//             .get_persons_name(sender_person_uuid.clone())
-//             .await
-//             .map_err(|err| Error::FailedToGetSendersName {
-//                 person_uuid: sender_person_uuid.clone(),
-//                 details: err,
-//             })?,
-//         MessageSender::RealWorldUser => PersonName::from_string("Chadtech".to_string()),
-//     };
-//
-//     Ok(format!(
-//         "You received a direct message from {}:\n\n\"{}\"",
-//         sender_name.as_str(),
-//         normalize_message_content(&message.content)
-//     ))
-// }
 
 async fn build_scene_situation<W: SceneCapability + PersonCapability>(
     worker: &W,
@@ -508,12 +411,7 @@ fn filter_reaction_events(events: Vec<Event>, messages: &[Message]) -> Vec<Event
     events
         .into_iter()
         .filter(|event| match &event.event_type {
-            EventType::PersonSaidInScene { message_uuid, .. } => {
-                !message_ids.contains(message_uuid)
-            }
-            EventType::PersonDirectMessaged { message_uuid, .. } => {
-                !message_ids.contains(message_uuid)
-            }
+            EventType::Said { message_uuid, .. } => !message_ids.contains(message_uuid),
             _ => true,
         })
         .collect()
@@ -680,7 +578,7 @@ async fn run_message_in_scene<
         "React to the newest activity first. Prioritize the NEW MESSAGE EVENT lines below when deciding what to do now.\n\nRecent events (older context):\n{}\n\nNew message events (newest; primary reaction target):\n{}\n\n{}",
         recent_events_text,
         new_message_events_text,
-        situation.to_string()
+        situation
     );
 
     let reaction = worker
@@ -692,7 +590,7 @@ async fn run_message_in_scene<
             reaction_situation,
         )
         .await
-        .map_err(Error::GetPersonReactionError)?;
+        .map_err(Error::GetPersonReaction)?;
 
     let action = reaction.action;
 
@@ -704,7 +602,7 @@ async fn run_message_in_scene<
         current_active_ms,
     )
     .await
-    .map_err(Error::ActionError)?;
+    .map_err(Error::Action)?;
 
     match reaction.reflection {
         ReflectionDecision::Reflection => {
@@ -719,7 +617,7 @@ async fn run_message_in_scene<
 
             let reflection_situation = format!(
                 "{}\n\nRecent events:\n{}",
-                situation.to_string(),
+                situation,
                 Event::many_to_prompt_list(reflection_recent_events)
             );
             let changes = worker
@@ -731,18 +629,14 @@ async fn run_message_in_scene<
                     reflection_situation,
                 )
                 .await
-                .map_err(Error::ReflectionError)?;
+                .map_err(Error::Reflection)?;
 
             apply_reflection_changes(worker, person_uuid, &reflection_input, changes).await?;
         }
         ReflectionDecision::NoReflection => {}
     }
 
-    let description = format!(
-        "{}\n\nResponse:\n{}",
-        situation.to_string(),
-        action.summarize()
-    );
+    let description = format!("{}\n\nResponse:\n{}", situation, action.summarize());
 
     worker
         .maybe_create_memories_from_description(person_uuid.clone(), description)

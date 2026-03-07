@@ -16,7 +16,6 @@ pub trait MessageCapability {
         message_uuid: &MessageUuid,
         recipients: Vec<PersonUuid>,
     ) -> Result<(), String>;
-    async fn get_messages_in_scene(&self, scene_uuid: &SceneUuid) -> Result<Vec<Message>, String>;
     async fn get_messages_in_scene_page(
         &self,
         scene_uuid: &SceneUuid,

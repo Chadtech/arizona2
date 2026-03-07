@@ -1,7 +1,9 @@
+use std::fmt::Display;
 use std::io::Write;
 use std::path::Path;
 
 #[derive(Clone, Debug)]
+#[allow(dead_code)]
 pub enum Level {
     Debug,
     Info,
@@ -18,14 +20,17 @@ impl Level {
             Level::Error => 3,
         }
     }
+}
 
-    pub fn to_string(&self) -> String {
-        match self {
+impl Display for Level {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
             Level::Debug => "DEBUG".to_string(),
             Level::Info => "INFO".to_string(),
             Level::Warning => "WARNING".to_string(),
             Level::Error => "ERROR".to_string(),
-        }
+        };
+        write!(f, "{}", s)
     }
 }
 
@@ -56,15 +61,14 @@ impl Logger {
     fn log_helper(&self, level: Level, message: &str) -> Result<(), String> {
         match self.log_to {
             LogTo::Console => {
-                let log_message = format!("[{}] {}\n", level.to_string(), message);
+                let log_message = format!("[{}] {}\n", level, message);
                 print!("{}", log_message);
                 Ok(())
             }
             LogTo::File => {
                 let log_message = format!(
                     "[{}] {}\n\n\n========================================\n",
-                    level.to_string(),
-                    message
+                    level, message
                 );
                 if !Path::new("logs").is_dir() {
                     std::fs::create_dir("logs")

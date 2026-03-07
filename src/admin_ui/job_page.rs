@@ -116,10 +116,8 @@ pub enum Msg {
     JobListScrolled(scrollable::Viewport),
 }
 
-#[derive(Serialize, Deserialize, Debug)]
-#[derive(Default)]
+#[derive(Serialize, Deserialize, Debug, Default)]
 pub struct Storage {}
-
 
 impl Model {
     pub fn new(_storage: &Storage) -> Self {
@@ -438,8 +436,7 @@ impl Model {
                             JobStatus::NotStarted => s::GRAY_MID,
                         };
 
-                        let job_label =
-                            format!("{}, uuid: {}", job.kind_label(), job.uuid());
+                        let job_label = format!("{}, uuid: {}", job.kind_label(), job.uuid());
 
                         let row = w::row![
                             w::text(job_label),
@@ -656,8 +653,10 @@ fn selected_job_view(selected: &SelectedJobStatus) -> Element<'_, Msg> {
 }
 
 fn job_row_style(_theme: &iced::Theme, status: w::button::Status) -> w::button::Style {
-    let mut style = w::button::Style::default();
-    style.text_color = s::GRAY_VERY_SOFT;
+    let mut style = w::button::Style {
+        text_color: s::GRAY_VERY_SOFT,
+        ..Default::default()
+    };
 
     match status {
         w::button::Status::Hovered | w::button::Status::Pressed => {

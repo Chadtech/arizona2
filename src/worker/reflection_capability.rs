@@ -36,7 +36,7 @@ impl ChangeOption {
             ChangeOption::StateOfMind => ToolFunction::new(
                 "update_state_of_mind".to_string(),
                 "Update the person's state of mind after reflection.".to_string(),
-                vec![ToolFunctionParameter::StringParam {
+                vec![ToolFunctionParameter::String {
                     name: "content".to_string(),
                     description: "A neutral, direct statement of internal state only. Use third person. Do not use first person, comparative/relative wording, or references to specific events/people/actions."
                         .to_string(),
@@ -46,7 +46,7 @@ impl ChangeOption {
             ChangeOption::MemorySummary => ToolFunction::new(
                 "summarize_memories".to_string(),
                 "Summarize relevant memories into a concise reflection.".to_string(),
-                vec![ToolFunctionParameter::StringParam {
+                vec![ToolFunctionParameter::String {
                     name: "summary".to_string(),
                     description: "A concise, first-person summary that combines related memories."
                         .to_string(),
@@ -57,12 +57,12 @@ impl ChangeOption {
                 "add_motivation".to_string(),
                 "Add a new motivation for the person.".to_string(),
                 vec![
-                    ToolFunctionParameter::StringParam {
+                    ToolFunctionParameter::String {
                         name: "content".to_string(),
                         description: "The motivation content.".to_string(),
                         required: true,
                     },
-                    ToolFunctionParameter::IntegerParam {
+                    ToolFunctionParameter::Integer {
                         name: "priority".to_string(),
                         description: "Priority for the motivation (higher = more important)."
                             .to_string(),
@@ -74,7 +74,7 @@ impl ChangeOption {
                 "remove_motivation".to_string(),
                 "Remove a motivation using the index from the enumerated motivations list."
                     .to_string(),
-                vec![ToolFunctionParameter::IntegerParam {
+                vec![ToolFunctionParameter::Integer {
                     name: "index".to_string(),
                     description: "The index from the motivations list to remove.".to_string(),
                     required: true,
@@ -132,7 +132,7 @@ impl ReflectionCapability for Worker {
             person_name.as_str(),
             person_identity,
             state_of_mind,
-            Memory::to_list_text(&memories),
+            Memory::many_to_list_text(&memories),
             motivations_list,
             situation
         );

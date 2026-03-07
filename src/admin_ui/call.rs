@@ -56,13 +56,13 @@ pub async fn submit_reaction(
 
     let tool_calls = response
         .as_tool_calls()
-        .map_err(CompletionError::ToolCallDecodeError)?;
+        .map_err(CompletionError::ToolCallDecode)?;
 
     let person_actions = tool_calls
         .into_iter()
         .map(PersonReaction::from_open_ai_tool_call)
         .collect::<Result<Vec<PersonReaction>, PersonActionError>>()
-        .map_err(CompletionError::PersonActionError)?;
+        .map_err(CompletionError::PersonAction)?;
 
     Ok(person_actions)
 }

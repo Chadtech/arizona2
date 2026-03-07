@@ -250,21 +250,18 @@ impl Model {
                 let recent_events = self.query_recent_events_field.clone();
                 let state_of_mind = self.query_state_of_mind_field.clone();
                 let situation = self.query_situation_field.clone();
+                let input = GeneratePromptAndSearchMemoriesInput {
+                    person_recalling,
+                    people,
+                    scene_name,
+                    scene_description,
+                    recent_events,
+                    state_of_mind,
+                    situation,
+                };
 
                 Task::perform(
-                    async move {
-                        generate_prompt_and_search_memories(
-                            &worker,
-                            person_recalling,
-                            people,
-                            scene_name,
-                            scene_description,
-                            recent_events,
-                            state_of_mind,
-                            situation,
-                        )
-                        .await
-                    },
+                    async move { generate_prompt_and_search_memories(&worker, input).await },
                     Msg::GeneratedPromptAndSearched,
                 )
             }
@@ -305,6 +302,16 @@ async fn create_new_memory(
     worker.create_memory(new_memory).await
 }
 
+struct GeneratePromptAndSearchMemoriesInput {
+    person_recalling: PersonName,
+    people: Vec<String>,
+    scene_name: String,
+    scene_description: String,
+    recent_events: Vec<String>,
+    state_of_mind: String,
+    situation: String,
+}
+
 fn query_status_view(status: &QueryStatus) -> Element<'_, Msg> {
     match status {
         QueryStatus::Ready => w::text("Ready to generate prompt").into(),
@@ -341,14 +348,18 @@ fn query_status_view(status: &QueryStatus) -> Element<'_, Msg> {
 
 async fn generate_prompt_and_search_memories(
     worker: &Worker,
-    person_recalling: PersonName,
-    people: Vec<String>,
-    scene_name: String,
-    scene_description: String,
-    recent_events: Vec<String>,
-    state_of_mind: String,
-    situation: String,
+    input: GeneratePromptAndSearchMemoriesInput,
 ) -> Result<MemoryQueryResult, String> {
+    let GeneratePromptAndSearchMemoriesInput {
+        person_recalling,
+        people,
+        scene_name,
+        scene_description,
+        recent_events,
+        state_of_mind,
+        situation,
+    } = input;
+
     let message_type_args = capability::memory::MessageTypeArgs::Scene {
         scene_name: scene_name.clone(),
         scene_description: scene_description.clone(),

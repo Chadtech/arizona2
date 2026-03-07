@@ -249,7 +249,7 @@ impl SceneCapability for Worker {
         .map_err(|err| {
             format!(
                 "Error fetching person {}'s current scene UUID: {}",
-                person_uuid.clone().to_string(),
+                person_uuid.clone(),
                 err
             )
         })?;

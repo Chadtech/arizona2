@@ -1,15 +1,15 @@
+use super::message_uuid::MessageUuid;
 use super::person_uuid::PersonUuid;
 use super::scene_uuid::SceneUuid;
-use super::{actor_uuid::ActorUuid, message_uuid::MessageUuid};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use std::fmt::Display;
 
 #[derive(Debug, Clone)]
 pub struct Message {
     pub uuid: MessageUuid,
     pub sender: MessageSender,
-    pub recipient: Option<MessageRecipient>,
-    pub scene_uuid: Option<SceneUuid>,
+    pub scene_uuid: SceneUuid,
     pub content: String,
     pub sent_at: DateTime<Utc>,
 }
@@ -20,26 +20,12 @@ pub enum MessageSender {
     RealWorldUser, // Represents Chad or other real users
 }
 
-impl MessageSender {
-    pub fn to_string(&self) -> String {
-        match self {
+impl Display for MessageSender {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
             MessageSender::AiPerson(person_uuid) => format!("AI Person {}", person_uuid.to_uuid()),
             MessageSender::RealWorldUser => "Real World User".to_string(),
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub enum MessageRecipient {
-    Person(PersonUuid),
-    RealWorldUser, // Message to the actual user (Chad)
-}
-
-impl From<&ActorUuid> for MessageRecipient {
-    fn from(actor_uuid: &ActorUuid) -> Self {
-        match actor_uuid {
-            ActorUuid::AiPerson(person_uuid) => MessageRecipient::Person(person_uuid.clone()),
-            ActorUuid::RealWorldUser => MessageRecipient::RealWorldUser,
-        }
+        };
+        write!(f, "{}", s)
     }
 }

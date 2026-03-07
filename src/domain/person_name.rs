@@ -1,3 +1,5 @@
+use std::fmt::Display;
+
 #[derive(Debug, Clone)]
 pub struct PersonName(String);
 
@@ -9,14 +11,16 @@ impl PersonName {
     pub fn as_str(&self) -> &str {
         &self.0
     }
-
-    pub fn to_string(&self) -> String {
-        self.0.clone()
-    }
 }
 
 impl From<String> for PersonName {
     fn from(value: String) -> Self {
         PersonName(value)
+    }
+}
+
+impl Display for PersonName {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
     }
 }

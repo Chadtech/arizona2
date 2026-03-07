@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n                SELECT uuid, sender_person_uuid, receiver_person_uuid, scene_uuid, content, sent_at\n                FROM message\n                WHERE uuid = $1::UUID\n            ",
+  "query": "\n                SELECT uuid, sender_person_uuid, scene_uuid, content, sent_at\n                FROM message\n                WHERE scene_uuid = $1::UUID\n                ORDER BY sent_at ASC\n            ",
   "describe": {
     "columns": [
       {
@@ -15,21 +15,16 @@
       },
       {
         "ordinal": 2,
-        "name": "receiver_person_uuid",
-        "type_info": "Uuid"
-      },
-      {
-        "ordinal": 3,
         "name": "scene_uuid",
         "type_info": "Uuid"
       },
       {
-        "ordinal": 4,
+        "ordinal": 3,
         "name": "content",
         "type_info": "Text"
       },
       {
-        "ordinal": 5,
+        "ordinal": 4,
         "name": "sent_at",
         "type_info": "Timestamptz"
       }
@@ -42,11 +37,10 @@
     "nullable": [
       false,
       true,
-      true,
-      true,
+      false,
       false,
       false
     ]
   },
-  "hash": "f8a916b20f0e95e874779382f3e24f415257b8313fa6ad6b8c1d00737a5ff28b"
+  "hash": "a84259ebf2a7cd8e8154b413c2932b04f64daec94945b1195773900592b9b96c"
 }

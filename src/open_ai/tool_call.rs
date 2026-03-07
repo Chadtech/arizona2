@@ -32,7 +32,7 @@ pub enum ToolCallDecodeError {
 
 impl From<ToolCallDecodeError> for CompletionError {
     fn from(val: ToolCallDecodeError) -> Self {
-        CompletionError::ToolCallDecodeError(val)
+        CompletionError::ToolCallDecode(val)
     }
 }
 

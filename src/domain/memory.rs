@@ -33,15 +33,19 @@ pub fn filter_memory_results(results: Vec<MemorySearchResult>) -> Vec<Memory> {
 }
 
 impl Memory {
-    pub fn to_list_text(memories: &Vec<Memory>) -> String {
+    pub fn many_to_list_text(memories: &[Memory]) -> String {
         if memories.is_empty() {
             "None.".to_string()
         } else {
             memories
                 .iter()
-                .map(|memory| format!("- {}", memory.content))
+                .map(|memory| memory.to_list_text())
                 .collect::<Vec<String>>()
                 .join("\n")
         }
+    }
+
+    fn to_list_text(&self) -> String {
+        format!("- {}", self.content)
     }
 }

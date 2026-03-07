@@ -2,7 +2,6 @@ use crate::capability::event::{EventCapability, GetArgs};
 use crate::capability::person::PersonCapability;
 use crate::capability::scene::SceneCapability;
 use crate::domain::event::{Event, EventType};
-use crate::domain::message::MessageSender;
 use crate::domain::message_uuid::MessageUuid;
 use crate::domain::person_uuid::PersonUuid;
 use crate::worker::Worker;
@@ -21,36 +20,6 @@ impl EventCapability for Worker {
                         return Err(format!("Error fetching scene name: {}", err));
                     }
                 };
-
-                // Get direct messages to this person
-                let direct_messages = sqlx::query!(
-                    r#"
-                    SELECT uuid, sender_person_uuid, content, sent_at
-                    FROM message
-                    WHERE receiver_person_uuid = $1
-                      AND scene_uuid IS NULL
-                    ORDER BY sent_at
-                    "#,
-                    person_uuid.to_uuid()
-                )
-                .fetch_all(&self.sqlx)
-                .await
-                .map_err(|err| format!("Error fetching direct messages: {}", err))?;
-
-                for msg in direct_messages {
-                    events.push(Event::new(
-                        msg.sent_at,
-                        EventType::PersonDirectMessaged {
-                            sender: MessageSender::AiPerson(
-                                crate::domain::person_uuid::PersonUuid::from_uuid(
-                                    msg.sender_person_uuid.ok_or("Missing sender_person_uuid")?,
-                                ),
-                            ),
-                            comment: msg.content,
-                            message_uuid: MessageUuid::from_uuid(msg.uuid),
-                        },
-                    ));
-                }
 
                 // Find when the person last joined this scene
                 let participant_record = sqlx::query!(
@@ -104,7 +73,7 @@ impl EventCapability for Worker {
 
                         events.push(Event::new(
                             msg.sent_at,
-                            EventType::PersonSaidInScene {
+                            EventType::Said {
                                 scene_name: scene_name.clone(),
                                 speaker_name,
                                 comment: msg.content,
@@ -142,7 +111,7 @@ impl EventCapability for Worker {
                         // Add join event
                         events.push(Event::new(
                             participant.joined_at,
-                            EventType::PersonJoinedScene {
+                            EventType::Entered {
                                 person_name: participant_name.clone(),
                                 scene_name: scene_name.clone(),
                             },
@@ -152,7 +121,7 @@ impl EventCapability for Worker {
                         if let Some(left_at) = participant.left_at {
                             events.push(Event::new(
                                 left_at,
-                                EventType::PersonLeftScene {
+                                EventType::Left {
                                     person_name: participant_name.clone(),
                                     scene_name: scene_name.clone(),
                                 },
@@ -163,36 +132,7 @@ impl EventCapability for Worker {
             }
 
             // Case 2: Only person specified (direct messages only)
-            (Some(person_uuid), None) => {
-                let direct_messages = sqlx::query!(
-                    r#"
-                    SELECT uuid, sender_person_uuid, content, sent_at
-                    FROM message
-                    WHERE receiver_person_uuid = $1
-                      AND scene_uuid IS NULL
-                    ORDER BY sent_at
-                    "#,
-                    person_uuid.to_uuid()
-                )
-                .fetch_all(&self.sqlx)
-                .await
-                .map_err(|err| format!("Error fetching direct messages: {}", err))?;
-
-                for msg in direct_messages {
-                    events.push(Event::new(
-                        msg.sent_at,
-                        EventType::PersonDirectMessaged {
-                            sender: MessageSender::AiPerson(
-                                crate::domain::person_uuid::PersonUuid::from_uuid(
-                                    msg.sender_person_uuid.ok_or("Missing sender_person_uuid")?,
-                                ),
-                            ),
-                            comment: msg.content,
-                            message_uuid: MessageUuid::from_uuid(msg.uuid),
-                        },
-                    ));
-                }
-            }
+            (Some(_person_uuid), None) => {}
 
             // Case 3: Only scene specified (all scene events)
             (None, Some(scene_uuid)) => {
@@ -233,7 +173,7 @@ impl EventCapability for Worker {
 
                     events.push(Event::new(
                         msg.sent_at,
-                        EventType::PersonSaidInScene {
+                        EventType::Said {
                             scene_name: scene_name.clone(),
                             speaker_name,
                             comment: msg.content,
@@ -268,7 +208,7 @@ impl EventCapability for Worker {
                     // Add join event
                     events.push(Event::new(
                         participant.joined_at,
-                        EventType::PersonJoinedScene {
+                        EventType::Entered {
                             person_name: participant_name.clone(),
                             scene_name: scene_name.clone(),
                         },
@@ -278,7 +218,7 @@ impl EventCapability for Worker {
                     if let Some(left_at) = participant.left_at {
                         events.push(Event::new(
                             left_at,
-                            EventType::PersonLeftScene {
+                            EventType::Left {
                                 person_name: participant_name.clone(),
                                 scene_name: scene_name.clone(),
                             },

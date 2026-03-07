@@ -28,10 +28,10 @@ use std::time::Instant;
 const DEFAULT_JOB_RUNNER_POLL_INTERVAL_SECS: u64 = 45;
 
 pub enum Error {
-    WorkerInitError(worker::InitError),
-    ActiveClockError(String),
-    PopJobError(String),
-    RunJobError((JobUuid, RunJobError)),
+    WorkerInit(worker::InitError),
+    ActiveClock(String),
+    PopJob(String),
+    RunJob((JobUuid, RunJobError)),
 }
 
 #[derive(Debug, Clone)]
@@ -59,14 +59,14 @@ enum RunJobOutcome {
 impl NiceDisplay for Error {
     fn message(&self) -> String {
         match self {
-            Error::WorkerInitError(err) => {
+            Error::WorkerInit(err) => {
                 format!("Worker initialization error\n{}", err.message())
             }
-            Error::ActiveClockError(err) => {
+            Error::ActiveClock(err) => {
                 format!("Active clock error\n{}", err)
             }
-            Error::RunJobError(err) => err.message(),
-            Error::PopJobError(err) => {
+            Error::RunJob(err) => err.message(),
+            Error::PopJob(err) => {
                 format!("Failed to pop next job\n{}", err)
             }
         }
@@ -176,10 +176,10 @@ impl NiceDisplay for RunJobError {
 pub async fn run() -> Result<(), Error> {
     let logger = Logger::init(Level::Info).log_to_file();
 
-    let worker = Worker::new(logger).await.map_err(Error::WorkerInitError)?;
+    let worker = Worker::new(logger).await.map_err(Error::WorkerInit)?;
     let active_clock = ActiveClock::load(&worker)
         .await
-        .map_err(Error::ActiveClockError)?;
+        .map_err(Error::ActiveClock)?;
     tracing::info!("Job runner started, polling for jobs");
     let shutdown = tokio::signal::ctrl_c();
     tokio::pin!(shutdown);
@@ -252,13 +252,13 @@ pub async fn run_one_job(
 ) -> Result<RunNextJobResult, Error> {
     let active_clock = ActiveClock::load(&worker)
         .await
-        .map_err(Error::ActiveClockError)?;
+        .map_err(Error::ActiveClock)?;
     let current_active_ms = active_clock.current_ms();
 
     let job = match worker
         .pop_next_job(current_active_ms)
         .await
-        .map_err(Error::PopJobError)?
+        .map_err(Error::PopJob)?
     {
         Some(j) => j,
         None => {
@@ -277,14 +277,14 @@ pub async fn run_one_job(
             worker
                 .logger
                 .log(Level::Error, &format!("Job runner error: {}", err_message));
-            return Err(Error::RunJobError((job_uuid.clone(), err)));
+            return Err(Error::RunJob((job_uuid.clone(), err)));
         }
     };
 
     active_clock
         .persist(&worker)
         .await
-        .map_err(Error::ActiveClockError)?;
+        .map_err(Error::ActiveClock)?;
 
     match outcome {
         RunJobOutcome::Completed => Ok(RunNextJobResult::RanJob { job_uuid, job_kind }),
@@ -316,7 +316,7 @@ async fn run_next_job<
     let job = match worker
         .pop_next_job(current_active_ms)
         .await
-        .map_err(Error::PopJobError)?
+        .map_err(Error::PopJob)?
     {
         Some(j) => j,
         None => {
@@ -329,7 +329,7 @@ async fn run_next_job<
 
     match run_job(worker, random_seed, current_active_ms, job)
         .await
-        .map_err(|err| Error::RunJobError((job_uuid, err)))?
+        .map_err(|err| Error::RunJob((job_uuid, err)))?
     {
         RunJobOutcome::Completed => Ok(()),
         RunJobOutcome::Deferred => Ok(()),

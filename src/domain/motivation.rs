@@ -11,20 +11,19 @@ pub struct Motivation {
 }
 
 impl Motivation {
-    pub fn to_list_text(motivations: &Vec<Motivation>) -> String {
+    pub fn many_to_list_text(motivations: &[Motivation]) -> String {
         if motivations.is_empty() {
             "None.".to_string()
         } else {
             motivations
                 .iter()
-                .map(|motivation| {
-                    format!(
-                        "- (priority {}) {}",
-                        motivation.priority, motivation.content
-                    )
-                })
+                .map(|motivation| motivation.to_list_text())
                 .collect::<Vec<String>>()
                 .join("\n")
         }
+    }
+
+    fn to_list_text(&self) -> String {
+        format!("- (priority {}) {}", self.priority, self.content)
     }
 }

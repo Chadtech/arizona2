@@ -71,14 +71,14 @@ impl MemoryCapability for Worker {
             "create_memory".to_string(),
             "Store a memory if the event is worth remembering.".to_string(),
             vec![
-                ToolFunctionParameter::StringParam {
+                ToolFunctionParameter::String {
                     name: "content".to_string(),
                     description:
                         "The memory to store, written in standardized first-person language."
                             .to_string(),
                     required: true,
                 },
-                ToolFunctionParameter::IntegerParam {
+                ToolFunctionParameter::Integer {
                     name: "memorable_score".to_string(),
                     description: "A 0-100 score for how memorable this is.".to_string(),
                     required: true,
@@ -153,8 +153,8 @@ impl MemoryCapability for Worker {
         person_recalling: &PersonName,
         message_type_args: MessageTypeArgs,
         recent_events: Vec<String>,
-        state_of_mind: &String,
-        situation: &String,
+        state_of_mind: &str,
+        situation: &str,
     ) -> Result<MemoryQueryPrompt, String> {
         let mut prompt = String::new();
 
@@ -181,12 +181,7 @@ impl MemoryCapability for Worker {
                 scene_description,
                 ..
             } => {
-                add_scene_to_prompt(
-                    &mut prompt,
-                    person_recalling,
-                    scene_name,
-                    scene_description,
-                );
+                add_scene_to_prompt(&mut prompt, person_recalling, scene_name, scene_description);
             }
             MessageTypeArgs::SceneByUuid { scene_uuid } => {
                 let maybe_scene_name = self

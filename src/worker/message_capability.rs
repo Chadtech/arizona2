@@ -1,11 +1,10 @@
 use crate::capability::message::MessageCapability;
-use crate::domain::message::{Message, MessageRecipient, MessageSender};
+use crate::domain::message::{Message, MessageSender};
 use crate::domain::message_uuid::MessageUuid;
 use crate::domain::person_uuid::PersonUuid;
 use crate::domain::scene_uuid::SceneUuid;
 use crate::worker::Worker;
 use chrono::{DateTime, Utc};
-use sqlx::Row;
 
 impl MessageCapability for Worker {
     async fn send_scene_message(
@@ -23,8 +22,8 @@ impl MessageCapability for Worker {
 
         sqlx::query!(
             r#"
-                INSERT INTO message (uuid, sender_person_uuid, receiver_person_uuid, scene_uuid, content)
-                VALUES ($1::UUID, $2::UUID, NULL, $3::UUID, $4::TEXT)
+                INSERT INTO message (uuid, sender_person_uuid, scene_uuid, content)
+                VALUES ($1::UUID, $2::UUID, $3::UUID, $4::TEXT)
             "#,
             message_uuid.to_uuid(),
             sender_uuid,
@@ -61,109 +60,42 @@ impl MessageCapability for Worker {
         Ok(())
     }
 
-    async fn get_messages_in_scene(&self, scene_uuid: &SceneUuid) -> Result<Vec<Message>, String> {
-        let rows = sqlx::query!(
-            r#"
-                SELECT uuid, sender_person_uuid, receiver_person_uuid, scene_uuid, content, sent_at
-                FROM message
-                WHERE scene_uuid = $1::UUID
-                ORDER BY sent_at ASC
-            "#,
-            scene_uuid.to_uuid()
-        )
-        .fetch_all(&self.sqlx)
-        .await
-        .map_err(|err| format!("Error fetching messages in scene: {}", err))?;
-
-        let messages = rows
-            .into_iter()
-            .map(|row| {
-                let scene_uuid = row.scene_uuid.map(SceneUuid::from_uuid);
-                let recipient = match (row.receiver_person_uuid, &scene_uuid) {
-                    (Some(uuid), _) => Some(MessageRecipient::Person(PersonUuid::from_uuid(uuid))),
-                    (None, None) => Some(MessageRecipient::RealWorldUser),
-                    (None, Some(_)) => None,
-                };
-
-                Message {
-                    uuid: MessageUuid::from_uuid(row.uuid),
-                    sender: match row.sender_person_uuid {
-                        Some(uuid) => MessageSender::AiPerson(PersonUuid::from_uuid(uuid)),
-                        None => MessageSender::RealWorldUser,
-                    },
-                    recipient,
-                    scene_uuid,
-                    content: row.content,
-                    sent_at: row.sent_at,
-                }
-            })
-            .collect();
-
-        Ok(messages)
-    }
-
     async fn get_messages_in_scene_page(
         &self,
         scene_uuid: &SceneUuid,
         limit: i64,
         before_sent_at: Option<DateTime<Utc>>,
     ) -> Result<Vec<Message>, String> {
-        let rows = sqlx::query(
+        let rows = sqlx::query!(
             r#"
-                SELECT uuid, sender_person_uuid, receiver_person_uuid, scene_uuid, content, sent_at
+                SELECT uuid, sender_person_uuid,  scene_uuid, content, sent_at
                 FROM message
                 WHERE scene_uuid = $1::UUID
-                  AND ($2::timestamptz IS NULL OR sent_at < $2)
+                  AND ($2::timestamptz IS NULL OR sent_at < $2::timestamptz)
                 ORDER BY sent_at DESC
                 LIMIT $3
             "#,
+            scene_uuid.to_uuid(),
+            before_sent_at,
+            limit
         )
-        .bind(scene_uuid.to_uuid())
-        .bind(before_sent_at)
-        .bind(limit)
         .fetch_all(&self.sqlx)
         .await
         .map_err(|err| format!("Error fetching paged messages in scene: {}", err))?;
 
-        let mut messages = Vec::with_capacity(rows.len());
-        for row in rows {
-            let scene_uuid = row
-                .try_get::<Option<uuid::Uuid>, _>("scene_uuid")
-                .map_err(|err| format!("Error reading scene uuid: {}", err))?
-                .map(SceneUuid::from_uuid);
-            let receiver_uuid = row
-                .try_get::<Option<uuid::Uuid>, _>("receiver_person_uuid")
-                .map_err(|err| format!("Error reading receiver uuid: {}", err))?;
-            let sender_uuid = row
-                .try_get::<Option<uuid::Uuid>, _>("sender_person_uuid")
-                .map_err(|err| format!("Error reading sender uuid: {}", err))?;
-            let recipient = match (receiver_uuid, &scene_uuid) {
-                (Some(uuid), _) => Some(MessageRecipient::Person(PersonUuid::from_uuid(uuid))),
-                (None, None) => Some(MessageRecipient::RealWorldUser),
-                (None, Some(_)) => None,
-            };
-
-            messages.push(Message {
-                uuid: MessageUuid::from_uuid(
-                    row.try_get::<uuid::Uuid, _>("uuid")
-                        .map_err(|err| format!("Error reading message uuid: {}", err))?,
-                ),
-                sender: match sender_uuid {
+        Ok(rows
+            .into_iter()
+            .map(|row| Message {
+                uuid: MessageUuid::from_uuid(row.uuid),
+                sender: match row.sender_person_uuid {
                     Some(uuid) => MessageSender::AiPerson(PersonUuid::from_uuid(uuid)),
                     None => MessageSender::RealWorldUser,
                 },
-                recipient,
-                scene_uuid,
-                content: row
-                    .try_get::<String, _>("content")
-                    .map_err(|err| format!("Error reading message content: {}", err))?,
-                sent_at: row
-                    .try_get::<DateTime<Utc>, _>("sent_at")
-                    .map_err(|err| format!("Error reading sent_at: {}", err))?,
-            });
-        }
-
-        Ok(messages)
+                scene_uuid: SceneUuid::from_uuid(row.scene_uuid),
+                content: row.content,
+                sent_at: row.sent_at,
+            })
+            .collect())
     }
 
     async fn get_message_by_uuid(
@@ -172,7 +104,7 @@ impl MessageCapability for Worker {
     ) -> Result<Option<Message>, String> {
         let row = sqlx::query!(
             r#"
-                SELECT uuid, sender_person_uuid, receiver_person_uuid, scene_uuid, content, sent_at
+                SELECT uuid, sender_person_uuid, scene_uuid, content, sent_at
                 FROM message
                 WHERE uuid = $1::UUID
             "#,
@@ -184,12 +116,7 @@ impl MessageCapability for Worker {
 
         match row {
             Some(row) => {
-                let scene_uuid = row.scene_uuid.map(SceneUuid::from_uuid);
-                let recipient = match (row.receiver_person_uuid, &scene_uuid) {
-                    (Some(uuid), _) => Some(MessageRecipient::Person(PersonUuid::from_uuid(uuid))),
-                    (None, None) => Some(MessageRecipient::RealWorldUser),
-                    (None, Some(_)) => None,
-                };
+                let scene_uuid = SceneUuid::from_uuid(row.scene_uuid);
 
                 Ok(Some(Message {
                     uuid: MessageUuid::from_uuid(row.uuid),
@@ -198,7 +125,6 @@ impl MessageCapability for Worker {
                         None => MessageSender::RealWorldUser,
                     },
                     scene_uuid,
-                    recipient,
                     content: row.content,
                     sent_at: row.sent_at,
                 }))
@@ -237,8 +163,7 @@ impl MessageCapability for Worker {
                     Some(uuid) => MessageSender::AiPerson(PersonUuid::from_uuid(uuid)),
                     None => MessageSender::RealWorldUser,
                 },
-                recipient: None,
-                scene_uuid: row.scene_uuid.map(SceneUuid::from_uuid),
+                scene_uuid: SceneUuid::from_uuid(row.scene_uuid),
                 content: row.content,
                 sent_at: row.sent_at,
             })

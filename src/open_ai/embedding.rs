@@ -6,21 +6,21 @@ pub struct EmbeddingRequest {
 }
 
 pub enum EmbeddingError {
-    RequestError(String),
-    ResponseError(String),
-    ResponseJsonDecodeError(String),
+    Request(String),
+    Response(String),
+    ResponseJsonDecode(String),
 }
 
 impl NiceDisplay for EmbeddingError {
     fn message(&self) -> String {
         match self {
-            EmbeddingError::RequestError(err) => {
+            EmbeddingError::Request(err) => {
                 format!("I had trouble making a request to open ai\n{}", err)
             }
-            EmbeddingError::ResponseError(err) => {
+            EmbeddingError::Response(err) => {
                 format!("I had trouble with the response from open ai\n{}", err)
             }
-            EmbeddingError::ResponseJsonDecodeError(err) => {
+            EmbeddingError::ResponseJsonDecode(err) => {
                 format!("I had trouble decoding the response from open ai\n{}", err)
             }
         }
@@ -49,36 +49,32 @@ impl EmbeddingRequest {
             .json(&json_body)
             .send()
             .await
-            .map_err(|err| EmbeddingError::RequestError(err.to_string()))?
+            .map_err(|err| EmbeddingError::Request(err.to_string()))?
             .text()
             .await
-            .map_err(|err| EmbeddingError::ResponseError(err.to_string()))?;
+            .map_err(|err| EmbeddingError::Response(err.to_string()))?;
 
         let res_json: serde_json::Value = serde_json::from_str(&res)
-            .map_err(|err| EmbeddingError::ResponseJsonDecodeError(err.to_string()))?;
+            .map_err(|err| EmbeddingError::ResponseJsonDecode(err.to_string()))?;
 
         let vector = res_json
             .get("data")
-            .ok_or_else(|| {
-                EmbeddingError::ResponseJsonDecodeError("Missing data field".to_string())
-            })?
+            .ok_or_else(|| EmbeddingError::ResponseJsonDecode("Missing data field".to_string()))?
             .get(0)
             .ok_or_else(|| {
-                EmbeddingError::ResponseJsonDecodeError("Missing first data element".to_string())
+                EmbeddingError::ResponseJsonDecode("Missing first data element".to_string())
             })?
             .get("embedding")
             .ok_or_else(|| {
-                EmbeddingError::ResponseJsonDecodeError("Missing embedding field".to_string())
+                EmbeddingError::ResponseJsonDecode("Missing embedding field".to_string())
             })?
             .as_array()
-            .ok_or_else(|| {
-                EmbeddingError::ResponseJsonDecodeError("Embedding not array".to_string())
-            })?
+            .ok_or_else(|| EmbeddingError::ResponseJsonDecode("Embedding not array".to_string()))?
             .iter()
             .map(|v| {
                 v.as_f64()
                     .ok_or_else(|| {
-                        EmbeddingError::ResponseJsonDecodeError(
+                        EmbeddingError::ResponseJsonDecode(
                             "Embedding value not a number".to_string(),
                         )
                     })
