@@ -128,7 +128,7 @@ async fn get_reaction_dual_layer(
     worker.logger.log(
         Level::Info,
         format!(
-            "Dual-layer first call prompts\nSystem:\n{}\n\nUser:\n{}",
+            "Dual-layer first call prompts\nSystem Prompt ========\n{}\n\nUser Prompt =======\n{}",
             thinking_system_prompt, thinking_user_prompt
         )
         .as_str(),

@@ -378,7 +378,7 @@ impl MemoryCapability for Worker {
 }
 
 const MIN_MEMORY_DISTANCE: f64 = 0.15;
-const MIN_MEMORABLE_SCORE: i64 = 60;
+const MIN_MEMORABLE_SCORE: i64 = 75;
 
 async fn log_memory_decision(
     worker: &Worker,

@@ -851,9 +851,12 @@ async fn get_recent_events_text<W: EventCapability>(
     person_uuid: &PersonUuid,
 ) -> Result<Vec<Event>, Error> {
     let get_args: capability::event::GetArgs = match &message_type_args {
-        MessageTypeArgs::SceneByUuid { scene_uuid } => capability::event::GetArgs::new()
-            .with_person_uuid(person_uuid.clone())
-            .with_scene_uuid(scene_uuid.clone()),
+        MessageTypeArgs::SceneByUuid { .. } => {
+            // For reaction/reflection context while processing scene messages, include
+            // person-scoped recent events across scenes so a just-completed transition
+            // does not drop context from the previous scene.
+            capability::event::GetArgs::new().with_person_uuid(person_uuid.clone())
+        }
         MessageTypeArgs::Scene { .. } => {
             capability::event::GetArgs::new().with_person_uuid(person_uuid.clone())
         }
