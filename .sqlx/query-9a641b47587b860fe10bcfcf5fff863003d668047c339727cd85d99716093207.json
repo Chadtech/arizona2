@@ -1,0 +1,36 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                        SELECT person_uuid, joined_at, left_at\n                        FROM scene_participant\n                        WHERE scene_uuid = $1::UUID\n                          AND joined_at >= $2\n                          AND ($3::timestamptz IS NULL OR joined_at <= $3::timestamptz)\n                        ORDER BY joined_at\n                        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "person_uuid",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "joined_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 2,
+        "name": "left_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Timestamptz",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "9a641b47587b860fe10bcfcf5fff863003d668047c339727cd85d99716093207"
+}
