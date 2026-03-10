@@ -4,8 +4,10 @@ use crate::capability::message::MessageCapability;
 use crate::capability::person::PersonCapability;
 use crate::capability::reaction_history::ReactionHistoryCapability;
 use crate::capability::scene::SceneCapability;
+use crate::domain::actor_uuid::ActorUuid;
 use crate::domain::job::person_hibernating::PersonHibernatingJob;
 use crate::domain::job::person_waiting::PersonWaitingJob;
+use crate::domain::job::process_person_join::ProcessPersonJoinJob;
 use crate::domain::job::send_message_to_scene::send_scene_message_and_enqueue_recipients;
 use crate::domain::job::JobKind;
 use crate::domain::logger::Level;
@@ -283,6 +285,38 @@ async fn move_person_to_scene<
     );
 
     enqueue_wait(worker, person_uuid, POST_MOVE_WAIT_MS, current_active_ms).await?;
+    enqueue_person_join_jobs(worker, &scene.uuid, person_uuid).await?;
+
+    Ok(())
+}
+
+async fn enqueue_person_join_jobs<W: SceneCapability + JobCapability>(
+    worker: &W,
+    scene_uuid: &SceneUuid,
+    joined_person_uuid: &PersonUuid,
+) -> Result<(), ActionHandleError> {
+    let participants = worker
+        .get_scene_current_participants(scene_uuid)
+        .await
+        .map_err(ActionHandleError::MoveToScene)?;
+
+    for participant in participants {
+        match participant.actor_uuid {
+            ActorUuid::AiPerson(recipient_person_uuid) => {
+                let job = ProcessPersonJoinJob {
+                    scene_uuid: scene_uuid.clone(),
+                    joined_person_uuid: joined_person_uuid.clone(),
+                    recipient_person_uuid,
+                };
+
+                worker
+                    .unshift_job(JobKind::ProcessPersonJoin(job))
+                    .await
+                    .map_err(ActionHandleError::MoveToScene)?;
+            }
+            ActorUuid::RealWorldUser => {}
+        }
+    }
 
     Ok(())
 }

@@ -60,9 +60,13 @@ $$;
 DO
 $$
     BEGIN
-        IF NOT EXISTS (SELECT 1
-                       FROM pg_constraint
-                       WHERE conname = 'message_fk_receiver_person') THEN
+        IF EXISTS (SELECT 1
+                   FROM information_schema.columns
+                   WHERE table_name = 'message'
+                     AND column_name = 'receiver_person_uuid')
+            AND NOT EXISTS (SELECT 1
+                            FROM pg_constraint
+                            WHERE conname = 'message_fk_receiver_person') THEN
             ALTER TABLE message
                 ADD CONSTRAINT message_fk_receiver_person
                     FOREIGN KEY (receiver_person_uuid)
@@ -90,7 +94,18 @@ $$;
 
 -- Basic indexes for foreign keys (important for JOINs and CASCADE DELETE performance)
 CREATE INDEX IF NOT EXISTS idx_message_sender ON message (sender_person_uuid);
-CREATE INDEX IF NOT EXISTS idx_message_receiver ON message (receiver_person_uuid);
 CREATE INDEX IF NOT EXISTS idx_message_scene ON message (scene_uuid);
+
+DO
+$$
+    BEGIN
+        IF EXISTS (SELECT 1
+                   FROM information_schema.columns
+                   WHERE table_name = 'message'
+                     AND column_name = 'receiver_person_uuid') THEN
+            CREATE INDEX IF NOT EXISTS idx_message_receiver ON message (receiver_person_uuid);
+        END IF;
+    END
+$$;
 
 COMMIT;

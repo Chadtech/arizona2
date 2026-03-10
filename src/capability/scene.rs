@@ -74,6 +74,12 @@ pub trait SceneCapability {
         &self,
         scene_uuid: &SceneUuid,
     ) -> Result<Vec<SceneParticipation>, String>;
+    async fn set_real_world_user_in_scene(
+        &self,
+        scene_uuid: &SceneUuid,
+        is_in_scene: bool,
+    ) -> Result<(), String>;
+    async fn is_real_world_user_in_scene(&self, scene_uuid: &SceneUuid) -> Result<bool, String>;
     async fn get_scene_name(&self, scene_uuid: &SceneUuid) -> Result<Option<String>, String>;
     async fn get_scene_description(&self, scene_uuid: &SceneUuid)
         -> Result<Option<String>, String>;

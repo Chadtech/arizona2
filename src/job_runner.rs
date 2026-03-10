@@ -14,7 +14,8 @@ use crate::capability::reflection::ReflectionCapability;
 use crate::capability::scene::SceneCapability;
 use crate::capability::state_of_mind::StateOfMindCapability;
 use crate::domain::job::{
-    person_hibernating, person_waiting, process_message, send_message_to_scene, JobKind, PoppedJob,
+    person_hibernating, person_waiting, process_message, process_person_join,
+    send_message_to_scene, JobKind, PoppedJob,
 };
 use crate::domain::job_uuid::JobUuid;
 use crate::domain::logger::{Level, Logger};
@@ -46,6 +47,7 @@ pub enum RunJobError {
     FailedToMarkJobFailed(String),
     FailedToResetJob(String),
     ProcessMessageError(process_message::Error),
+    ProcessPersonJoinError(process_person_join::Error),
     SendMessageToSceneError(send_message_to_scene::Error),
     PersonWaitingError(person_waiting::Error),
     PersonHibernatingError(person_hibernating::Error),
@@ -148,6 +150,9 @@ impl NiceDisplay for RunJobError {
             }
             RunJobError::ProcessMessageError(err) => {
                 format!("Error processing message job\n{}", err.message())
+            }
+            RunJobError::ProcessPersonJoinError(err) => {
+                format!("Error processing person join job\n{}", err.message())
             }
             RunJobError::SendMessageToSceneError(err) => {
                 format!("Error sending message to scene job\n{}", err.message())
@@ -378,6 +383,14 @@ async fn run_job<
                 .run(&worker, random_seed, current_active_ms)
                 .await
                 .map_err(RunJobError::ProcessMessageError)
+                .map(|_| RunJobOutcome::Completed)
+        }
+        JobKind::ProcessPersonJoin(process_person_join_job) => {
+            tracing::debug!("Executing ProcessPersonJoin job");
+            process_person_join_job
+                .run(&worker, random_seed, current_active_ms)
+                .await
+                .map_err(RunJobError::ProcessPersonJoinError)
                 .map(|_| RunJobOutcome::Completed)
         }
         JobKind::PersonWaiting(person_waiting_job) => {
@@ -686,6 +699,21 @@ mod tests {
             _scene_uuid: &SceneUuid,
         ) -> Result<Vec<SceneParticipation>, String> {
             Ok(vec![])
+        }
+
+        async fn set_real_world_user_in_scene(
+            &self,
+            _scene_uuid: &SceneUuid,
+            _is_in_scene: bool,
+        ) -> Result<(), String> {
+            Ok(())
+        }
+
+        async fn is_real_world_user_in_scene(
+            &self,
+            _scene_uuid: &SceneUuid,
+        ) -> Result<bool, String> {
+            Ok(false)
         }
 
         async fn get_scene_name(&self, _scene_uuid: &SceneUuid) -> Result<Option<String>, String> {

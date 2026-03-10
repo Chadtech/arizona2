@@ -1,12 +1,15 @@
 pub mod person_action_handler;
 pub mod person_hibernating;
 pub mod person_waiting;
+pub mod process_person_join;
 pub mod process_message;
+pub mod process_reaction_common;
 pub mod send_message_to_scene;
 
 use super::job_uuid::JobUuid;
 use crate::domain::job::person_waiting::PersonWaitingJob;
 use crate::domain::job::person_hibernating::PersonHibernatingJob;
+use process_person_join::ProcessPersonJoinJob;
 use crate::domain::job::send_message_to_scene::SendMessageToSceneJob;
 use crate::nice_display::NiceDisplay;
 use chrono::{DateTime, Utc};
@@ -42,6 +45,7 @@ pub enum JobStatus {
 pub enum JobKind {
     Ping,
     SendMessageToScene(SendMessageToSceneJob),
+    ProcessPersonJoin(ProcessPersonJoinJob),
     ProcessMessage(ProcessMessageJob),
     PersonWaiting(PersonWaitingJob),
     PersonHibernating(PersonHibernatingJob),
@@ -78,6 +82,7 @@ impl JobKind {
         match self {
             JobKind::Ping => "ping".to_string(),
             JobKind::SendMessageToScene(_) => "send message to scene".to_string(),
+            JobKind::ProcessPersonJoin(_) => "process person join".to_string(),
             JobKind::ProcessMessage(_) => "process message".to_string(),
             JobKind::PersonWaiting(_) => "person waiting".to_string(),
             JobKind::PersonHibernating(_) => "person hibernating".to_string(),
@@ -90,6 +95,11 @@ impl JobKind {
             JobKind::SendMessageToScene(job) => {
                 let data = serde_json::to_value(job)
                     .map_err(|err| format!("Failed to serialize SendMessageToSceneJob: {}", err))?;
+                Ok(Some(data))
+            }
+            JobKind::ProcessPersonJoin(job) => {
+                let data = serde_json::to_value(job)
+                    .map_err(|err| format!("Failed to serialize ProcessPersonJoinJob: {}", err))?;
                 Ok(Some(data))
             }
             JobKind::ProcessMessage(job) => {
@@ -248,6 +258,20 @@ impl JobKind {
                     })?;
 
                     Ok(JobKind::ProcessMessage(job))
+                }
+            },
+            "process person join" => match maybe_data {
+                None => Err(ParseError::NoJobDataForJobThatReuiresIt { job_name: name }),
+                Some(data) => {
+                    let job: ProcessPersonJoinJob =
+                        serde_json::from_value(data).map_err(|error| {
+                            ParseError::FailedToParseJobData {
+                                job_name: name.clone(),
+                                details: error.to_string(),
+                            }
+                        })?;
+
+                    Ok(JobKind::ProcessPersonJoin(job))
                 }
             },
             "person waiting" => match maybe_data {

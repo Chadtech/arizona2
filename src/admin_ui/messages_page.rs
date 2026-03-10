@@ -1,5 +1,6 @@
 use super::s;
 use crate::capability::scene::{Scene, SceneCapability, SceneParticipant};
+use crate::domain::actor_uuid::ActorUuid;
 use crate::domain::job::send_message_to_scene::send_scene_message_and_enqueue_recipients;
 use crate::domain::message::MessageSender;
 use crate::domain::random_seed::RandomSeed;
@@ -38,6 +39,8 @@ pub struct LoadedSceneModel {
     pub description: Option<String>,
     pub messages: MessagesStatus,
     pub participants: Vec<SceneParticipant>,
+    pub is_real_world_user_in_scene: bool,
+    pub real_world_user_presence_status: RealWorldUserPresenceStatus,
 }
 
 enum SceneLoadStatus {
@@ -82,6 +85,13 @@ enum SendStatus {
 }
 
 #[derive(Debug, Clone)]
+pub enum RealWorldUserPresenceStatus {
+    Ready,
+    Updating,
+    Error(String),
+}
+
+#[derive(Debug, Clone)]
 pub enum Msg {
     ViewModeRadioSelected(ViewMode),
     Person1Selected(String),
@@ -100,6 +110,8 @@ pub enum Msg {
     Timeline(scene_timeline::Msg),
     ClickedToggleAutoRefresh,
     AutoRefreshTick,
+    ClickedSetRealWorldUserInScene(bool),
+    SetRealWorldUserInScene(Result<bool, String>),
 }
 
 #[derive(Serialize, Deserialize, Debug, Default)]
@@ -173,6 +185,8 @@ impl Model {
                         description: scene.description,
                         messages: MessagesStatus::Loading,
                         participants: Vec::new(),
+                        is_real_world_user_in_scene: false,
+                        real_world_user_presence_status: RealWorldUserPresenceStatus::Ready,
                     };
 
                     self.scene_load_status = SceneLoadStatus::Loaded(Box::new(loaded_scene));
@@ -216,6 +230,8 @@ impl Model {
                 if let SceneLoadStatus::Loaded(loaded_scene) = &mut self.scene_load_status {
                     match result {
                         Ok(participants) => {
+                            loaded_scene.is_real_world_user_in_scene =
+                                has_real_world_user(&participants);
                             loaded_scene.participants = participants;
                         }
                         Err(err) => {
@@ -302,6 +318,12 @@ impl Model {
             Msg::SubmitMessage => {
                 // Only allow sending if we have a loaded scene and message content
                 if let SceneLoadStatus::Loaded(scene) = &self.scene_load_status {
+                    if !scene.is_real_world_user_in_scene {
+                        self.send_status =
+                            SendStatus::Error("You must be in this scene to send messages.".to_string());
+                        return Task::none();
+                    }
+
                     let content = self.message_input.text();
                     if content.trim().is_empty() {
                         return Task::none();
@@ -389,6 +411,39 @@ impl Model {
                 } else {
                     Task::none()
                 }
+            }
+            Msg::ClickedSetRealWorldUserInScene(is_in_scene) => {
+                if let SceneLoadStatus::Loaded(scene) = &mut self.scene_load_status {
+                    scene.real_world_user_presence_status = RealWorldUserPresenceStatus::Updating;
+                    let scene_uuid = scene.uuid.clone();
+                    return Task::perform(
+                        async move {
+                            worker
+                                .set_real_world_user_in_scene(&scene_uuid, is_in_scene)
+                                .await
+                                .map(|_| is_in_scene)
+                        },
+                        Msg::SetRealWorldUserInScene,
+                    );
+                }
+                Task::none()
+            }
+            Msg::SetRealWorldUserInScene(result) => {
+                if let SceneLoadStatus::Loaded(scene) = &mut self.scene_load_status {
+                    match result {
+                        Ok(is_in_scene) => {
+                            scene.is_real_world_user_in_scene = is_in_scene;
+                            scene.real_world_user_presence_status =
+                                RealWorldUserPresenceStatus::Ready;
+                            return self.refresh_loaded_scene(worker);
+                        }
+                        Err(err) => {
+                            scene.real_world_user_presence_status =
+                                RealWorldUserPresenceStatus::Error(err);
+                        }
+                    }
+                }
+                Task::none()
             }
         }
     }
@@ -508,7 +563,7 @@ impl Model {
             SceneLoadStatus::Ready => w::text("").into(),
             SceneLoadStatus::Loading => w::text("Loading scene...").into(),
             SceneLoadStatus::Loaded(scene) => {
-                let message_composer = self.view_message_composer();
+                let message_composer = self.view_message_composer(scene.is_real_world_user_in_scene);
                 let auto_refresh_button = self.view_auto_refresh_button();
                 let refresh_status = view_refresh_status(&scene.messages);
 
@@ -529,6 +584,54 @@ impl Model {
                     None => w::text("").into(),
                 };
 
+                let set_me_in_scene_button: Element<'_, Msg> = match scene
+                    .real_world_user_presence_status
+                {
+                    RealWorldUserPresenceStatus::Updating => w::button("Set Me In Scene").into(),
+                    _ => {
+                        if scene.is_real_world_user_in_scene {
+                            w::button("Set Me In Scene").into()
+                        } else {
+                            w::button("Set Me In Scene")
+                                .on_press(Msg::ClickedSetRealWorldUserInScene(true))
+                                .into()
+                        }
+                    }
+                };
+
+                let set_me_out_of_scene_button: Element<'_, Msg> = match scene
+                    .real_world_user_presence_status
+                {
+                    RealWorldUserPresenceStatus::Updating => {
+                        w::button("Set Me Out Of Scene").into()
+                    }
+                    _ => {
+                        if scene.is_real_world_user_in_scene {
+                            w::button("Set Me Out Of Scene")
+                                .on_press(Msg::ClickedSetRealWorldUserInScene(false))
+                                .into()
+                        } else {
+                            w::button("Set Me Out Of Scene").into()
+                        }
+                    }
+                };
+
+                let my_presence_status_text = match &scene.real_world_user_presence_status {
+                    RealWorldUserPresenceStatus::Ready => {
+                        if scene.is_real_world_user_in_scene {
+                            "You are in this scene.".to_string()
+                        } else {
+                            "You are not in this scene.".to_string()
+                        }
+                    }
+                    RealWorldUserPresenceStatus::Updating => {
+                        "Updating your scene presence...".to_string()
+                    }
+                    RealWorldUserPresenceStatus::Error(err) => {
+                        format!("Error updating your scene presence: {}", err)
+                    }
+                };
+
                 w::column![
                     w::text(format!(
                         "Loaded: {} (UUID: {})",
@@ -537,6 +640,9 @@ impl Model {
                     )),
                     w::text(participants_text),
                     description_view,
+                    w::text("My Presence"),
+                    w::row![set_me_in_scene_button, set_me_out_of_scene_button].spacing(s::S1),
+                    w::text(my_presence_status_text),
                     auto_refresh_button,
                     refresh_status,
                     view_messages(&scene.messages),
@@ -559,7 +665,7 @@ impl Model {
             .into()
     }
 
-    fn view_message_composer(&self) -> Element<'_, Msg> {
+    fn view_message_composer(&self, can_send: bool) -> Element<'_, Msg> {
         let input: Element<'_, Msg> = w::container(
             w::text_editor(&self.message_input)
                 .placeholder("Type your message...")
@@ -576,14 +682,26 @@ impl Model {
         .width(Length::Fill)
         .into();
 
-        let send_button = match &self.send_status {
-            SendStatus::Ready | SendStatus::Sent => w::button("Send").on_press(Msg::SubmitMessage),
-            SendStatus::Sending => w::button("Sending..."),
-            SendStatus::Error(_) => w::button("Send").on_press(Msg::SubmitMessage),
+        let send_button = if !can_send {
+            w::button("Send")
+        } else {
+            match &self.send_status {
+                SendStatus::Ready | SendStatus::Sent => {
+                    w::button("Send").on_press(Msg::SubmitMessage)
+                }
+                SendStatus::Sending => w::button("Sending..."),
+                SendStatus::Error(_) => w::button("Send").on_press(Msg::SubmitMessage),
+            }
         };
 
         let status_text: Element<'_, Msg> = match &self.send_status {
-            SendStatus::Ready => w::text("").into(),
+            SendStatus::Ready => {
+                if can_send {
+                    w::text("").into()
+                } else {
+                    w::text("You must be in this scene to send messages.").into()
+                }
+            }
             SendStatus::Sending => w::text("Sending...").into(),
             SendStatus::Sent => w::text("Message sent!").into(),
             SendStatus::Error(err) => w::text(format!("Error: {}", err)).into(),
@@ -730,4 +848,11 @@ fn view_refresh_status(messages_status: &MessagesStatus) -> Element<'_, Msg> {
         MessagesStatus::Refreshing(_) => w::text("Refreshing messages...").size(s::S3).into(),
         _ => w::text("Messages up to date").size(s::S3).into(),
     }
+}
+
+fn has_real_world_user(participants: &[SceneParticipant]) -> bool {
+    participants.iter().any(|participant| match participant.actor_uuid {
+        ActorUuid::RealWorldUser => true,
+        ActorUuid::AiPerson(_) => false,
+    })
 }

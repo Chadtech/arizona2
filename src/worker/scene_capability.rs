@@ -318,7 +318,7 @@ impl SceneCapability for Worker {
         .await
         .map_err(|err| format!("Error fetching scene participants: {}", err))?;
 
-        let participants = participant_rows
+        let mut participants: Vec<SceneParticipant> = participant_rows
             .into_iter()
             .map(|row| {
                 let person_uuid = PersonUuid::from_uuid(row.person_uuid);
@@ -328,6 +328,14 @@ impl SceneCapability for Worker {
                 }
             })
             .collect();
+
+        let is_real_world_user_in_scene = self.is_real_world_user_in_scene(scene_uuid).await?;
+        if is_real_world_user_in_scene {
+            participants.push(SceneParticipant {
+                person_name: PersonName::from_string("Chadtech".to_string()),
+                actor_uuid: ActorUuid::RealWorldUser,
+            });
+        }
 
         Ok(participants)
     }
@@ -365,6 +373,59 @@ impl SceneCapability for Worker {
             .collect();
 
         Ok(participation_history)
+    }
+
+    async fn set_real_world_user_in_scene(
+        &self,
+        scene_uuid: &SceneUuid,
+        is_in_scene: bool,
+    ) -> Result<(), String> {
+        if is_in_scene {
+            sqlx::query!(
+                r#"
+                    INSERT INTO real_world_user_scene_presence (scene_uuid)
+                    VALUES ($1::UUID)
+                    ON CONFLICT (scene_uuid) DO NOTHING;
+                "#,
+                scene_uuid.to_uuid(),
+            )
+            .execute(&self.sqlx)
+            .await
+            .map_err(|err| format!("Error setting real-world user in scene: {}", err))?;
+        } else {
+            sqlx::query!(
+                r#"
+                    DELETE FROM real_world_user_scene_presence
+                    WHERE scene_uuid = $1::UUID;
+                "#,
+                scene_uuid.to_uuid(),
+            )
+            .execute(&self.sqlx)
+            .await
+            .map_err(|err| format!("Error removing real-world user from scene: {}", err))?;
+        }
+
+        Ok(())
+    }
+
+    async fn is_real_world_user_in_scene(
+        &self,
+        scene_uuid: &SceneUuid,
+    ) -> Result<bool, String> {
+        let maybe_presence = sqlx::query!(
+            r#"
+                SELECT scene_uuid
+                FROM real_world_user_scene_presence
+                WHERE scene_uuid = $1::UUID
+                LIMIT 1;
+            "#,
+            scene_uuid.to_uuid(),
+        )
+        .fetch_optional(&self.sqlx)
+        .await
+        .map_err(|err| format!("Error checking real-world user scene presence: {}", err))?;
+
+        Ok(maybe_presence.is_some())
     }
 
     async fn get_scene_name(&self, scene_uuid: &SceneUuid) -> Result<Option<String>, String> {

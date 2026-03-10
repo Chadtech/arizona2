@@ -5,6 +5,7 @@ use crate::capability::scene::SceneCapability;
 use crate::domain::message::MessageSender;
 use crate::domain::person_uuid::PersonUuid;
 use crate::domain::scene_uuid::SceneUuid;
+use crate::text_utils::normalize_message_content;
 use crate::worker::Worker;
 use chrono::{DateTime, Utc};
 use iced::clipboard;
@@ -364,19 +365,6 @@ pub async fn load_participation_items(
     }
 
     Ok(items)
-}
-
-fn normalize_message_content(content: &str) -> &str {
-    let bytes = content.as_bytes();
-    if bytes.len() >= 2 {
-        let first = bytes[0];
-        let last = bytes[bytes.len() - 1];
-        if first == b'"' && last == b'"' {
-            return &content[1..bytes.len() - 1];
-        }
-    }
-
-    content
 }
 
 async fn load_message_page(

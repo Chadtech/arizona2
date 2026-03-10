@@ -30,6 +30,8 @@ struct SceneModel {
     new_participant_field: String,
     new_participant_status: NewParticipantStatus,
     delete_scene_status: DeleteSceneStatus,
+    is_real_world_user_in_scene: bool,
+    real_world_user_presence_status: RealWorldUserPresenceStatus,
 }
 
 enum NewParticipantStatus {
@@ -48,6 +50,12 @@ enum DeleteSceneStatus {
     ErrorDeletingScene(String),
 }
 
+enum RealWorldUserPresenceStatus {
+    Ready,
+    Updating,
+    Error(String),
+}
+
 enum NewSceneStatus {
     Ready,
     CreatingScene,
@@ -59,6 +67,7 @@ enum NewSceneStatus {
 pub struct SceneAggregate {
     scene: Scene,
     participants: Vec<SceneParticipant>,
+    is_real_world_user_in_scene: bool,
 }
 
 impl SceneAggregate {
@@ -72,9 +81,12 @@ impl SceneAggregate {
 
         let participants = worker.get_scene_current_participants(&scene.uuid).await?;
 
+        let is_real_world_user_in_scene = worker.is_real_world_user_in_scene(&scene.uuid).await?;
+
         let ret = Self {
             scene,
             participants,
+            is_real_world_user_in_scene,
         };
 
         Ok(Some(ret))
@@ -101,6 +113,9 @@ pub enum SceneLookUpMsg {
     GotRefreshedParticipants(Result<Vec<SceneParticipant>, String>),
     ClickedDeleteScene,
     DeletedScene(Result<(), String>),
+    ClickedSetRealWorldUserInScene(bool),
+    SetRealWorldUserInScene(Result<bool, String>),
+    GotRefreshedParticipantsAfterRealWorldUserUpdate(Result<Vec<SceneParticipant>, String>),
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -127,6 +142,8 @@ impl SceneModel {
             new_participant_field: "".to_string(),
             new_participant_status: NewParticipantStatus::Ready,
             delete_scene_status: DeleteSceneStatus::Ready,
+            is_real_world_user_in_scene: scene_agg.is_real_world_user_in_scene,
+            real_world_user_presence_status: RealWorldUserPresenceStatus::Ready,
         }
     }
 
@@ -199,6 +216,53 @@ impl SceneModel {
                 if let DeleteSceneStatus::Done = self.delete_scene_status {
                     self.participants = Vec::new();
                     self.new_participant_status = NewParticipantStatus::Ready;
+                }
+                Task::none()
+            }
+            SceneLookUpMsg::ClickedSetRealWorldUserInScene(is_in_scene) => {
+                match self.real_world_user_presence_status {
+                    RealWorldUserPresenceStatus::Updating => Task::none(),
+                    RealWorldUserPresenceStatus::Ready
+                    | RealWorldUserPresenceStatus::Error(_) => {
+                        self.real_world_user_presence_status = RealWorldUserPresenceStatus::Updating;
+                        let scene_uuid = self.scene_uuid.clone();
+                        Task::perform(
+                            async move {
+                                worker
+                                    .set_real_world_user_in_scene(&scene_uuid, is_in_scene)
+                                    .await
+                                    .map(|_| is_in_scene)
+                            },
+                            SceneLookUpMsg::SetRealWorldUserInScene,
+                        )
+                    }
+                }
+            }
+            SceneLookUpMsg::SetRealWorldUserInScene(result) => match result {
+                Ok(is_in_scene) => {
+                    self.is_real_world_user_in_scene = is_in_scene;
+                    let scene_uuid = self.scene_uuid.clone();
+                    Task::perform(
+                        async move { worker.get_scene_current_participants(&scene_uuid).await },
+                        SceneLookUpMsg::GotRefreshedParticipantsAfterRealWorldUserUpdate,
+                    )
+                }
+                Err(err) => {
+                    self.real_world_user_presence_status =
+                        RealWorldUserPresenceStatus::Error(err);
+                    Task::none()
+                }
+            },
+            SceneLookUpMsg::GotRefreshedParticipantsAfterRealWorldUserUpdate(result) => {
+                match result {
+                    Ok(participants) => {
+                        self.participants = participants;
+                        self.real_world_user_presence_status = RealWorldUserPresenceStatus::Ready;
+                    }
+                    Err(err) => {
+                        self.real_world_user_presence_status =
+                            RealWorldUserPresenceStatus::Error(err);
+                    }
                 }
                 Task::none()
             }
@@ -373,6 +437,54 @@ fn scene_loaded_view(scene_model: &SceneModel) -> Element<'_, SceneLookUpMsg> {
             .into(),
     };
 
+    let real_world_user_presence_status: Element<SceneLookUpMsg> =
+        match &scene_model.real_world_user_presence_status {
+            RealWorldUserPresenceStatus::Ready => {
+                let text = if scene_model.is_real_world_user_in_scene {
+                    "You are in this scene."
+                } else {
+                    "You are not in this scene."
+                };
+                w::text(text).into()
+            }
+            RealWorldUserPresenceStatus::Updating => {
+                w::text("Updating your scene presence...").into()
+            }
+            RealWorldUserPresenceStatus::Error(err) => {
+                w::text(format!("Error updating your scene presence: {}", err)).into()
+            }
+        };
+
+    let set_me_in_scene_button: Element<SceneLookUpMsg> = match scene_model
+        .real_world_user_presence_status
+    {
+        RealWorldUserPresenceStatus::Updating => w::button("Set Me In Scene").into(),
+        _ => {
+            if scene_model.is_real_world_user_in_scene {
+                w::button("Set Me In Scene").into()
+            } else {
+                w::button("Set Me In Scene")
+                    .on_press(SceneLookUpMsg::ClickedSetRealWorldUserInScene(true))
+                    .into()
+            }
+        }
+    };
+
+    let set_me_out_of_scene_button: Element<SceneLookUpMsg> = match scene_model
+        .real_world_user_presence_status
+    {
+        RealWorldUserPresenceStatus::Updating => w::button("Set Me Out Of Scene").into(),
+        _ => {
+            if scene_model.is_real_world_user_in_scene {
+                w::button("Set Me Out Of Scene")
+                    .on_press(SceneLookUpMsg::ClickedSetRealWorldUserInScene(false))
+                    .into()
+            } else {
+                w::button("Set Me Out Of Scene").into()
+            }
+        }
+    };
+
     w::column![
         w::text("Scene Name"),
         w::text(&scene_model.scene_name),
@@ -387,6 +499,9 @@ fn scene_loaded_view(scene_model: &SceneModel) -> Element<'_, SceneLookUpMsg> {
         .on_input(SceneLookUpMsg::NewParticipantFieldChanged),
         w::button("Add Participant").on_press(SceneLookUpMsg::ClickedAddParticipant),
         new_participant_status,
+        w::text("My Presence"),
+        w::row![set_me_in_scene_button, set_me_out_of_scene_button].spacing(s::S1),
+        real_world_user_presence_status,
         delete_scene_button,
         delete_scene_status
     ]
