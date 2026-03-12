@@ -846,6 +846,30 @@ mod tests {
         ) -> Result<PersonUuid, String> {
             Ok(PersonUuid::new())
         }
+
+        async fn set_person_hibernating(
+            &self,
+            _person_uuid: &PersonUuid,
+            _is_hibernating: bool,
+        ) -> Result<(), String> {
+            Ok(())
+        }
+
+        async fn is_person_hibernating(&self, _person_uuid: &PersonUuid) -> Result<bool, String> {
+            Ok(false)
+        }
+
+        async fn set_person_enabled(
+            &self,
+            _person_uuid: &PersonUuid,
+            _is_enabled: bool,
+        ) -> Result<(), String> {
+            Ok(())
+        }
+
+        async fn is_person_enabled(&self, _person_uuid: &PersonUuid) -> Result<bool, String> {
+            Ok(true)
+        }
     }
 
     impl EventCapability for MockWorker {

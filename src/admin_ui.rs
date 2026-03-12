@@ -4,7 +4,7 @@ mod memory_page;
 mod messages_page;
 mod motivation_page;
 mod new_identity_page;
-mod new_person_page;
+mod person_page;
 mod prompt_lab_page;
 mod reaction_page;
 mod scene_page;
@@ -31,7 +31,7 @@ struct Model {
     prompt_field: String,
     prompt_status: PromptStatus,
     new_identity_page: new_identity_page::Model,
-    new_person_page: new_person_page::Model,
+    person_page: person_page::Model,
     memory_page: memory_page::Model,
     motivation_page: motivation_page::Model,
     messages_page: messages_page::Model,
@@ -54,7 +54,7 @@ impl Model {
         Storage {
             prompt: self.prompt_field.clone(),
             new_identity: self.new_identity_page.to_storage(),
-            new_person: self.new_person_page.to_storage(),
+            person: self.person_page.to_storage(),
             memory: self.memory_page.to_storage(),
             motivation: self.motivation_page.to_storage(),
             messages: self.messages_page.to_storage(),
@@ -96,7 +96,8 @@ struct Storage {
     #[serde(default)]
     new_identity: new_identity_page::Storage,
     #[serde(default)]
-    new_person: new_person_page::Storage,
+    #[serde(alias = "new_person")]
+    person: person_page::Storage,
     #[serde(default)]
     memory: memory_page::Storage,
     #[serde(default, alias = "goal")]
@@ -154,7 +155,7 @@ impl Storage {
             prompt: String::new(),
             tab: Tab::default(),
             new_identity: new_identity_page::Storage::default(),
-            new_person: new_person_page::Storage::default(),
+            person: person_page::Storage::default(),
             memory: memory_page::Storage::default(),
             motivation: motivation_page::Storage::default(),
             messages: messages_page::Storage::default(),
@@ -254,7 +255,7 @@ enum Msg {
     SubmissionResult(Result<String, CompletionError>),
     TabSelected(Tab),
     NewIdentityPage(new_identity_page::Msg),
-    NewPersonPage(new_person_page::Msg),
+    PersonPage(person_page::Msg),
     MemoryPage(memory_page::Msg),
     MotivationPage(motivation_page::Msg),
     MessagesPage(messages_page::Msg),
@@ -310,7 +311,7 @@ impl Model {
             prompt_field: flags.storage.prompt,
             prompt_status: PromptStatus::Ready,
             new_identity_page: new_identity_page::Model::new(&flags.storage.new_identity),
-            new_person_page: new_person_page::Model::new(&flags.storage.new_person),
+            person_page: person_page::Model::new(&flags.storage.person),
             memory_page: memory_page::Model::new(&flags.storage.memory),
             motivation_page: motivation_page::Model::new(&flags.storage.motivation),
             messages_page: messages_page::Model::new(&flags.storage.messages),
@@ -419,14 +420,14 @@ impl Model {
 
                 task.map(Msg::NewIdentityPage)
             }
-            Msg::NewPersonPage(sub_msg) => {
-                let task = self.new_person_page.update(self.worker.clone(), sub_msg);
+            Msg::PersonPage(sub_msg) => {
+                let task = self.person_page.update(self.worker.clone(), sub_msg);
 
                 if let Err(err) = self.to_storage().save_to_file_system() {
                     self.error = Some(err);
                 }
 
-                task.map(Msg::NewPersonPage)
+                task.map(Msg::PersonPage)
             }
             Msg::MemoryPage(sub_msg) => {
                 let task = self.memory_page.update(self.worker.clone(), sub_msg);
@@ -650,7 +651,7 @@ impl Model {
             Tab::PromptLab => self.prompt_lab_page.view().map(Msg::PromptLab),
             Tab::Reaction => self.reaction_page.view().map(Msg::ReactionPage),
             Tab::Identity => self.new_identity_page.view().map(Msg::NewIdentityPage),
-            Tab::Person => self.new_person_page.view().map(Msg::NewPersonPage),
+            Tab::Person => self.person_page.view().map(Msg::PersonPage),
             Tab::Memory => self.memory_page.view().map(Msg::MemoryPage),
             Tab::Motivation => self.motivation_page.view().map(Msg::MotivationPage),
             Tab::Messages => self.messages_page.view().map(Msg::MessagesPage),

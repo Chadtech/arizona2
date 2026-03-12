@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                UPDATE person\n                SET is_enabled = $2::BOOLEAN,\n                    updated_at = NOW()\n                WHERE uuid = $1::UUID;\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Bool"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "2623b20f272448e6a5fb7c6bd76b1baac24decd04a7643763a5341e6331c1887"
+}

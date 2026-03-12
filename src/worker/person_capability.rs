@@ -99,45 +99,43 @@ impl PersonCapability for Worker {
         }
     }
 
-    async fn set_reaction_dual_layer(
+    async fn set_person_enabled(
         &self,
         person_uuid: &PersonUuid,
-        reaction_dual_layer: bool,
+        is_enabled: bool,
     ) -> Result<(), String> {
-        sqlx::query(
+        sqlx::query!(
             r#"
                 UPDATE person
-                SET reaction_dual_layer = $2::BOOLEAN,
+                SET is_enabled = $2::BOOLEAN,
                     updated_at = NOW()
                 WHERE uuid = $1::UUID;
             "#,
+            person_uuid.to_uuid(),
+            is_enabled
         )
-        .bind(person_uuid.to_uuid())
-        .bind(reaction_dual_layer)
         .execute(&self.sqlx)
         .await
-        .map_err(|err| format!("Error updating reaction_dual_layer: {}", err))?;
+        .map_err(|err| format!("Error updating enabled state: {}", err))?;
 
         Ok(())
     }
 
-    async fn is_reaction_dual_layer(&self, person_uuid: &PersonUuid) -> Result<bool, String> {
-        let rec = sqlx::query(
+    async fn is_person_enabled(&self, person_uuid: &PersonUuid) -> Result<bool, String> {
+        let rec = sqlx::query!(
             r#"
-                SELECT reaction_dual_layer
+                SELECT is_enabled
                 FROM person
                 WHERE uuid = $1::UUID;
             "#,
+            person_uuid.to_uuid()
         )
-        .bind(person_uuid.to_uuid())
         .fetch_optional(&self.sqlx)
         .await
-        .map_err(|err| format!("Error fetching reaction_dual_layer: {}", err))?;
+        .map_err(|err| format!("Error fetching enabled state: {}", err))?;
 
         match rec {
-            Some(row) => row
-                .try_get::<bool, _>("reaction_dual_layer")
-                .map_err(|err| format!("Error reading reaction_dual_layer: {}", err)),
+            Some(row) => Ok(row.is_enabled),
             None => Err(format!("Person {} not found", person_uuid.to_uuid())),
         }
     }

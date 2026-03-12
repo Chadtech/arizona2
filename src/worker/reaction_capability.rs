@@ -66,42 +66,6 @@ async fn get_reaction_helper(
     state_of_mind: String,
     situation: String,
 ) -> Result<PersonReaction, Error> {
-    let reaction_dual_layer = worker
-        .is_reaction_dual_layer(&person_uuid)
-        .await
-        .map_err(Error::FailedToGetReactionDualLayer)?;
-
-    if reaction_dual_layer {
-        get_reaction_dual_layer(
-            worker,
-            memories,
-            person_uuid,
-            person_identity,
-            state_of_mind,
-            situation,
-        )
-        .await
-    } else {
-        get_reaction_single_layer(
-            worker,
-            memories,
-            person_uuid,
-            person_identity,
-            state_of_mind,
-            situation,
-        )
-        .await
-    }
-}
-
-async fn get_reaction_dual_layer(
-    worker: &Worker,
-    memories: Vec<Memory>,
-    person_uuid: PersonUuid,
-    person_identity: String,
-    state_of_mind: String,
-    situation: String,
-) -> Result<PersonReaction, Error> {
     let mut completion = Completion::new(open_ai::model::Model::DEFAULT);
 
     let person_name = worker
@@ -150,7 +114,7 @@ async fn get_reaction_dual_layer(
         .await
         .map_err(Error::CompletionError)?;
 
-    let dual_layer_text = response
+    let text = response
         .as_message()
         .map_err(|err| Error::CompletionError(err.into()))?;
 
@@ -159,7 +123,7 @@ async fn get_reaction_dual_layer(
         format!(
             "Dual-layer first-pass reaction text for person {}:\n{}",
             person_uuid.to_uuid(),
-            dual_layer_text
+            text
         )
         .as_str(),
     );
@@ -178,7 +142,7 @@ async fn get_reaction_dual_layer(
         "Memories:\n{}\n\nRecent events and recent messages:\n{}\n\nFirst-pass internal reaction text:\n{}\n\nNow choose exactly one action tool call. Do not output any plain text.",
         memories_list_text,
         situation,
-        dual_layer_text
+        text
 			);
     worker.logger.log(
         Level::Info,
@@ -226,78 +190,6 @@ async fn get_reaction_dual_layer(
                     Level::Info,
                     format!(
                         "Dual-layer reaction for person {}: {} (reflection: {})",
-                        person_uuid.to_uuid(),
-                        describe_action(&first.action),
-                        describe_reflection(&first.reflection)
-                    )
-                    .as_str(),
-                );
-                Ok(first.clone())
-            }
-        }
-    }
-}
-
-async fn get_reaction_single_layer(
-    worker: &Worker,
-    memories: Vec<Memory>,
-    person_uuid: PersonUuid,
-    person_identity: String,
-    state_of_mind: String,
-    situation: String,
-) -> Result<PersonReaction, Error> {
-    let mut completion = Completion::new(open_ai::model::Model::DEFAULT);
-
-    completion.add_message(Role::System, "You are simulating a real human. Your goal is to predict what this person would actually do. The information provided is complete; the person has no other knowledge or context beyond what is in the prompt, and their behavior must not assume anything else. Use the memories, motivations, identity, and state of mind to choose the most realistic action. Predict behavior as a realistic person within the capacities of the available tool calls. Prefer ordinary, plausible behavior over dramatic or clever behavior. If the person does speak, they will contribute something novel instead of repeating what has already been said. If nothing new has happened, predict what a human of the following description realistically would do if that period of time elapsed with nothing happening. The person understands they can only do the following actions, and these are the only possible actions: wait, hibernate, idle, say in scene, move to scene. For say in scene, they may also include destination_scene_name to leave immediately after speaking. Respond with exactly one tool call and no extra text.");
-
-    let motivations = worker
-        .get_motivations_for_person(person_uuid.clone())
-        .await
-        .map_err(Error::FailedToGetMotivations)?;
-
-    let user_prompt = format!(
-        "Predict the most realistic, human behavior for this person in the situation below, then choose exactly one action tool call that best matches that behavior. Do not explain. The background drives should influence behavior implicitly; avoid stating them directly in dialogue.\n\nMemories:\n{}\n\nBackground drives:\n{}\n\nPerson identity:\n{}\n\nState of mind:\n{}\n\nSituation:\n{}",
-        Memory::many_to_list_text(&memories), Motivation::many_to_list_text(&motivations), person_identity, state_of_mind, situation
-	);
-
-    worker.logger.log(
-        Level::Info,
-        format!(
-            "Sending completion request with user prompt:\n{}",
-            user_prompt
-        )
-        .as_str(),
-    );
-
-    completion.add_message(Role::User, user_prompt.as_str());
-
-    completion.add_tool_call(PersonActionKind::to_choice_tool());
-
-    let response = completion
-        .send_request(&worker.open_ai_key, reqwest::Client::new())
-        .await
-        .map_err(Error::CompletionError)?;
-
-    let tool_calls_res: Result<Vec<ToolCall>, CompletionError> =
-        response.as_tool_calls().map_err(Into::into);
-
-    let tool_calls = tool_calls_res.map_err(Error::CompletionError)?;
-
-    let person_actions_res: Result<Vec<PersonReaction>, CompletionError> =
-        tool_calls_into_reactions(tool_calls);
-
-    let person_actions = person_actions_res.map_err(Error::CompletionError)?;
-
-    match person_actions.first() {
-        None => Err(Error::NoPersonActionFound)?,
-        Some(first) => {
-            if person_actions.len() > 1 {
-                Err(Error::MoreThanOnePersonActionFound(person_actions))?
-            } else {
-                worker.logger.log(
-                    Level::Info,
-                    format!(
-                        "Reaction for person {}: {} (reflection: {})",
                         person_uuid.to_uuid(),
                         describe_action(&first.action),
                         describe_reflection(&first.reflection)

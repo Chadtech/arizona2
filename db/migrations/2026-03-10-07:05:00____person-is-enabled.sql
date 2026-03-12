@@ -1,0 +1,8 @@
+-- person-is-enabled
+
+BEGIN;
+
+ALTER TABLE person
+    ADD COLUMN IF NOT EXISTS is_enabled BOOLEAN NOT NULL DEFAULT TRUE;
+
+COMMIT;

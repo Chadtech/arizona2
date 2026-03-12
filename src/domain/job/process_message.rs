@@ -77,6 +77,10 @@ pub enum Error {
         person_uuid: PersonUuid,
         details: String,
     },
+    FailedToGetEnabledState {
+        person_uuid: PersonUuid,
+        details: String,
+    },
     FailedToCreateMemory(String),
     FailedToCreateReflectionStateOfMind(String),
     FailedToCreateReflectionMemory(String),
@@ -198,6 +202,16 @@ impl NiceDisplay for Error {
             } => {
                 format!(
                     "Failed to get hibernation state for {}: {}",
+                    person_uuid.to_uuid(),
+                    details
+                )
+            }
+            Error::FailedToGetEnabledState {
+                person_uuid,
+                details,
+            } => {
+                format!(
+                    "Failed to get enabled state for {}: {}",
                     person_uuid.to_uuid(),
                     details
                 )

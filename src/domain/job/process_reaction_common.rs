@@ -1,0 +1,712 @@
+use crate::capability;
+use crate::capability::event::EventCapability;
+use crate::capability::job::JobCapability;
+use crate::capability::log_event::LogEventCapability;
+use crate::capability::logging::LogCapability;
+use crate::capability::memory::NewMemory;
+use crate::capability::memory::{MemoryCapability, MessageTypeArgs};
+use crate::capability::motivation::MotivationCapability;
+use crate::capability::motivation::NewMotivation;
+use crate::capability::person::PersonCapability;
+use crate::capability::person_identity::PersonIdentityCapability;
+use crate::capability::reaction::ReactionCapability;
+use crate::capability::reaction_history::ReactionHistoryCapability;
+use crate::capability::reflection::ReflectionCapability;
+use crate::capability::reflection::ReflectionChange;
+use crate::capability::state_of_mind::NewStateOfMind;
+use crate::capability::state_of_mind::StateOfMindCapability;
+use crate::domain::event::{Event, EventType};
+use crate::domain::job::person_action_handler;
+use crate::domain::job::process_message::Error;
+use crate::domain::logger::Level;
+use crate::domain::memory::Memory;
+use crate::domain::memory_uuid::MemoryUuid;
+use crate::domain::message::{Message, MessageSender};
+use crate::domain::person_name::PersonName;
+use crate::domain::person_uuid::PersonUuid;
+use crate::domain::random_seed::RandomSeed;
+use crate::domain::scene_uuid::SceneUuid;
+use crate::domain::situation;
+use crate::domain::situation::Situation;
+use crate::domain::state_of_mind::StateOfMind;
+use crate::domain::state_of_mind_uuid::StateOfMindUuid;
+use crate::person_actions::ReflectionDecision;
+use crate::text_utils::normalize_message_content;
+use crate::{capability::message::MessageCapability, capability::scene::SceneCapability};
+use std::collections::HashSet;
+
+struct ReflectionInput {
+    person_name: PersonName,
+    memories: Vec<Memory>,
+    person_identity: String,
+    state_of_mind: String,
+}
+
+pub enum SceneReactionTrigger {
+    NewMessages,
+    PersonJoined { joined_person_uuid: PersonUuid },
+}
+
+pub async fn run_scene_reaction<
+    W: MessageCapability
+        + SceneCapability
+        + ReactionCapability
+        + MemoryCapability
+        + PersonCapability
+        + EventCapability
+        + StateOfMindCapability
+        + PersonIdentityCapability
+        + ReflectionCapability
+        + LogCapability
+        + LogEventCapability
+        + MotivationCapability
+        + ReactionHistoryCapability
+        + JobCapability
+        + Sync,
+>(
+    worker: &W,
+    person_uuid: &PersonUuid,
+    scene_uuid: &SceneUuid,
+    trigger: SceneReactionTrigger,
+    random_seed: RandomSeed,
+    current_active_ms: i64,
+) -> Result<(), Error> {
+    let pending_messages = match trigger {
+        SceneReactionTrigger::NewMessages => worker
+            .get_unhandled_scene_messages_for_person(person_uuid, scene_uuid)
+            .await
+            .map_err(|err| Error::FailedToGetUnhandledSceneMessages {
+                scene_uuid: scene_uuid.clone(),
+                details: err,
+            })?,
+        SceneReactionTrigger::PersonJoined { .. } => vec![],
+    };
+
+    let is_enabled = worker
+        .is_person_enabled(person_uuid)
+        .await
+        .map_err(|err| Error::FailedToGetEnabledState {
+            person_uuid: person_uuid.clone(),
+            details: err,
+        })?;
+
+    if !is_enabled {
+        if !pending_messages.is_empty() {
+            let handled_ids = pending_messages
+                .iter()
+                .map(|msg| msg.uuid.clone())
+                .collect::<Vec<_>>();
+
+            worker
+                .mark_scene_messages_handled_for_person(person_uuid, handled_ids)
+                .await
+                .map_err(|err| Error::FailedToMarkSceneMessagesHandled {
+                    scene_uuid: scene_uuid.clone(),
+                    details: err,
+                })?;
+        }
+
+        let skip_reason = match trigger {
+            SceneReactionTrigger::NewMessages => "Skipping reaction",
+            SceneReactionTrigger::PersonJoined { .. } => "Skipping join reaction",
+        };
+        tracing::info!(
+            "{} for person {} in scene {}: person is disabled",
+            skip_reason,
+            person_uuid.to_uuid(),
+            scene_uuid.to_uuid()
+        );
+        worker.log(
+            Level::Info,
+            format!(
+                "{} for person {} in scene {}: person is disabled",
+                skip_reason,
+                person_uuid.to_uuid(),
+                scene_uuid.to_uuid()
+            )
+            .as_str(),
+        );
+        return Ok(());
+    }
+
+    let is_hibernating = worker
+        .is_person_hibernating(person_uuid)
+        .await
+        .map_err(|err| Error::FailedToGetHibernationState {
+            person_uuid: person_uuid.clone(),
+            details: err,
+        })?;
+
+    if is_hibernating {
+        if !pending_messages.is_empty() {
+            let handled_ids = pending_messages
+                .iter()
+                .map(|msg| msg.uuid.clone())
+                .collect::<Vec<_>>();
+
+            worker
+                .mark_scene_messages_handled_for_person(person_uuid, handled_ids)
+                .await
+                .map_err(|err| Error::FailedToMarkSceneMessagesHandled {
+                    scene_uuid: scene_uuid.clone(),
+                    details: err,
+                })?;
+        }
+
+        let skip_reason = match trigger {
+            SceneReactionTrigger::NewMessages => "Skipping reaction",
+            SceneReactionTrigger::PersonJoined { .. } => "Skipping join reaction",
+        };
+        tracing::info!(
+            "{} for person {} in scene {}: person is hibernating",
+            skip_reason,
+            person_uuid.to_uuid(),
+            scene_uuid.to_uuid()
+        );
+        worker.log(
+            Level::Info,
+            format!(
+                "{} for person {} in scene {}: person is hibernating",
+                skip_reason,
+                person_uuid.to_uuid(),
+                scene_uuid.to_uuid()
+            )
+            .as_str(),
+        );
+        return Ok(());
+    }
+
+    let is_new_messages_trigger = match &trigger {
+        SceneReactionTrigger::NewMessages => true,
+        SceneReactionTrigger::PersonJoined { .. } => false,
+    };
+
+    if is_new_messages_trigger && pending_messages.is_empty() {
+        tracing::info!(
+            "Skipping reaction for person {} in scene {}: no new messages",
+            person_uuid.to_uuid(),
+            scene_uuid.to_uuid()
+        );
+        worker.log(
+            Level::Info,
+            format!(
+                "Skipping reaction for person {} in scene {}: no new messages",
+                person_uuid.to_uuid(),
+                scene_uuid.to_uuid()
+            )
+            .as_str(),
+        );
+        return Ok(());
+    }
+
+    let situation =
+        build_scene_situation(worker, scene_uuid, &pending_messages, person_uuid).await?;
+
+    let reflection_input = build_reflection_input(
+        worker,
+        MessageTypeArgs::SceneByUuid {
+            scene_uuid: scene_uuid.clone(),
+        },
+        &situation,
+        person_uuid,
+    )
+    .await?;
+
+    let reaction_recent_events = get_recent_events_text(
+        worker,
+        MessageTypeArgs::SceneByUuid {
+            scene_uuid: scene_uuid.clone(),
+        },
+        person_uuid,
+    )
+    .await?;
+
+    let reaction_events = filter_reaction_events(reaction_recent_events, &pending_messages);
+    let recent_events_text = Event::many_to_prompt_list(reaction_events);
+
+    let priority_instruction = match &trigger {
+        SceneReactionTrigger::NewMessages => {
+            "React to the newest activity first. Prioritize the NEW MESSAGE EVENT lines below when deciding what to do now."
+        }
+        SceneReactionTrigger::PersonJoined { .. } => {
+            "React to the newest activity first. Prioritize the NEW JOIN EVENT lines below when deciding what to do now."
+        }
+    };
+
+    let new_event_section_label = match &trigger {
+        SceneReactionTrigger::NewMessages => {
+            "New message events (newest; primary reaction target):"
+        }
+        SceneReactionTrigger::PersonJoined { .. } => {
+            "New join events (newest; primary reaction target):"
+        }
+    };
+
+    let new_event_section_text = match &trigger {
+        SceneReactionTrigger::NewMessages => {
+            let new_message_event_lines =
+                pending_messages_to_event_lines(worker, &pending_messages, person_uuid).await?;
+            if new_message_event_lines.is_empty() {
+                "None.".to_string()
+            } else {
+                new_message_event_lines.join("\n")
+            }
+        }
+        SceneReactionTrigger::PersonJoined { joined_person_uuid } => {
+            let joined_person_name = worker
+                .get_persons_name(joined_person_uuid.clone())
+                .await
+                .map_err(Error::FailedToGetPersonsName)?;
+            format!(
+                "In the current scene, {} joined the scene [NEW JOIN EVENT]",
+                joined_person_name.as_str()
+            )
+        }
+    };
+
+    let description_prefix = match &trigger {
+        SceneReactionTrigger::NewMessages => None,
+        SceneReactionTrigger::PersonJoined { .. } => {
+            Some(format!("Join event:\n{}", new_event_section_text))
+        }
+    };
+
+    let reaction_situation = format!(
+        "{}\n\nRecent events (older context):\n{}\n\n{}\n{}\n\n{}",
+        priority_instruction,
+        recent_events_text,
+        new_event_section_label,
+        new_event_section_text,
+        situation
+    );
+
+    let reaction = worker
+        .get_reaction(
+            reflection_input.memories.clone(),
+            person_uuid.clone(),
+            reflection_input.person_identity.clone(),
+            reflection_input.state_of_mind.clone(),
+            reaction_situation,
+        )
+        .await
+        .map_err(Error::GetPersonReaction)?;
+
+    let action = reaction.action;
+
+    person_action_handler::handle_person_action(
+        worker,
+        &action,
+        person_uuid,
+        random_seed,
+        current_active_ms,
+    )
+    .await
+    .map_err(Error::Action)?;
+
+    match reaction.reflection {
+        ReflectionDecision::Reflection => {
+            let reflection_recent_events = get_recent_events_text(
+                worker,
+                MessageTypeArgs::SceneByUuid {
+                    scene_uuid: scene_uuid.clone(),
+                },
+                person_uuid,
+            )
+            .await?;
+
+            let reflection_situation = format!(
+                "{}\n\nRecent events:\n{}",
+                situation,
+                Event::many_to_prompt_list(reflection_recent_events)
+            );
+            let changes = worker
+                .get_reflection_changes(
+                    reflection_input.memories.clone(),
+                    person_uuid.clone(),
+                    reflection_input.person_identity.clone(),
+                    reflection_input.state_of_mind.clone(),
+                    reflection_situation,
+                )
+                .await
+                .map_err(Error::Reflection)?;
+
+            apply_reflection_changes(worker, person_uuid, &reflection_input, changes).await?;
+        }
+        ReflectionDecision::NoReflection => {}
+    }
+
+    let description = match description_prefix {
+        Some(prefix) => format!(
+            "{}\n\n{}\n\nResponse:\n{}",
+            situation,
+            prefix,
+            action.summarize()
+        ),
+        None => format!("{}\n\nResponse:\n{}", situation, action.summarize()),
+    };
+
+    worker
+        .maybe_create_memories_from_description(person_uuid.clone(), description)
+        .await
+        .map_err(Error::FailedToCreateMemory)?;
+
+    if is_new_messages_trigger {
+        let handled_ids = pending_messages
+            .into_iter()
+            .map(|msg| msg.uuid)
+            .collect::<Vec<_>>();
+
+        worker
+            .mark_scene_messages_handled_for_person(person_uuid, handled_ids)
+            .await
+            .map_err(|err| Error::FailedToMarkSceneMessagesHandled {
+                scene_uuid: scene_uuid.clone(),
+                details: err,
+            })?;
+    }
+
+    Ok(())
+}
+
+async fn build_scene_situation<W: SceneCapability + PersonCapability>(
+    worker: &W,
+    scene_uuid: &SceneUuid,
+    messages: &[Message],
+    person_uuid: &PersonUuid,
+) -> Result<Situation, Error> {
+    let person_name = worker
+        .get_persons_name(person_uuid.clone())
+        .await
+        .map_err(Error::FailedToGetPersonsName)?;
+
+    let scene_name = worker
+        .get_scene_name(scene_uuid)
+        .await
+        .map_err(|err| Error::FailedToGetSceneName {
+            scene_uuid: scene_uuid.clone(),
+            details: err,
+        })?
+        .ok_or_else(|| Error::SceneNameNotFound {
+            scene_uuid: scene_uuid.clone(),
+        })?;
+
+    let scene_description = worker
+        .get_scene_description(scene_uuid)
+        .await
+        .map_err(|err| Error::FailedToGetSceneDescription {
+            scene_uuid: scene_uuid.clone(),
+            details: err,
+        })?
+        .ok_or_else(|| Error::SceneDescriptionNotFound {
+            scene_uuid: scene_uuid.clone(),
+        })?;
+
+    let participants = worker
+        .get_scene_current_participants(scene_uuid)
+        .await
+        .map_err(|err| Error::FailedToGetSceneParticipants {
+            scene_uuid: scene_uuid.clone(),
+            details: err,
+        })?;
+
+    let participant_names = participants
+        .iter()
+        .map(|participant| participant.person_name.to_string())
+        .collect::<Vec<String>>();
+
+    let mut lines = Vec::new();
+    for message in messages {
+        let sender_label = match &message.sender {
+            MessageSender::AiPerson(sender_person_uuid) => {
+                if sender_person_uuid.to_uuid() == person_uuid.to_uuid() {
+                    continue;
+                }
+                worker
+                    .get_persons_name(sender_person_uuid.clone())
+                    .await
+                    .map_err(|err| Error::FailedToGetSendersName {
+                        person_uuid: sender_person_uuid.clone(),
+                        details: err,
+                    })?
+                    .to_string()
+            }
+            MessageSender::RealWorldUser => "Chadtech".to_string(),
+        };
+
+        lines.push(format!(
+            "{}: \"{}\"",
+            sender_label,
+            normalize_message_content(&message.content)
+        ));
+    }
+
+    let situation = Situation::new(situation::Input {
+        person_name: person_name.to_string(),
+        scene_name,
+        scene_description,
+        particpants: participant_names,
+        messages: lines,
+    });
+
+    Ok(situation)
+}
+
+fn filter_reaction_events(events: Vec<Event>, messages: &[Message]) -> Vec<Event> {
+    let mut message_ids = HashSet::new();
+    for message in messages {
+        message_ids.insert(message.uuid.clone());
+    }
+
+    events
+        .into_iter()
+        .filter(|event| match &event.event_type {
+            EventType::Said { message_uuid, .. } => !message_ids.contains(message_uuid),
+            _ => true,
+        })
+        .collect()
+}
+
+async fn pending_messages_to_event_lines<W: PersonCapability + Sync>(
+    worker: &W,
+    pending_messages: &[Message],
+    person_uuid: &PersonUuid,
+) -> Result<Vec<String>, Error> {
+    let mut lines = Vec::new();
+
+    for message in pending_messages {
+        let sender_label = match &message.sender {
+            MessageSender::AiPerson(sender_person_uuid) => {
+                if sender_person_uuid.to_uuid() == person_uuid.to_uuid() {
+                    continue;
+                }
+                worker
+                    .get_persons_name(sender_person_uuid.clone())
+                    .await
+                    .map_err(|err| Error::FailedToGetSendersName {
+                        person_uuid: sender_person_uuid.clone(),
+                        details: err,
+                    })?
+                    .to_string()
+            }
+            MessageSender::RealWorldUser => "Chadtech".to_string(),
+        };
+
+        lines.push(format!(
+            "At {}, in the current scene, {} said: \"{}\" [NEW MESSAGE EVENT]",
+            message.sent_at,
+            sender_label,
+            normalize_message_content(&message.content)
+        ));
+    }
+
+    Ok(lines)
+}
+
+async fn apply_reflection_changes<
+    W: StateOfMindCapability + MemoryCapability + LogEventCapability + MotivationCapability,
+>(
+    worker: &W,
+    person_uuid: &PersonUuid,
+    reflection_input: &ReflectionInput,
+    changes: Vec<ReflectionChange>,
+) -> Result<(), Error> {
+    for change in changes {
+        match change {
+            ReflectionChange::StateOfMind { content } => {
+                let new_state_of_mind = NewStateOfMind {
+                    uuid: StateOfMindUuid::new(),
+                    person_name: reflection_input.person_name.clone(),
+                    state_of_mind: content.clone(),
+                };
+                worker
+                    .create_state_of_mind(new_state_of_mind)
+                    .await
+                    .map_err(Error::FailedToCreateReflectionStateOfMind)?;
+                let data = serde_json::json!({
+                    "person_uuid": person_uuid.to_uuid().to_string(),
+                    "change_type": "state_of_mind",
+                    "content": content,
+                });
+                let _ = worker
+                    .log_event("reflection_change".to_string(), Some(data))
+                    .await;
+            }
+            ReflectionChange::MemorySummary { summary } => {
+                if summary.trim().is_empty() {
+                    continue;
+                }
+                let new_memory = NewMemory {
+                    memory_uuid: MemoryUuid::new(),
+                    content: summary.clone(),
+                    person_uuid: person_uuid.clone(),
+                };
+                worker
+                    .create_memory(new_memory)
+                    .await
+                    .map_err(Error::FailedToCreateReflectionMemory)?;
+                let data = serde_json::json!({
+                    "person_uuid": person_uuid.to_uuid().to_string(),
+                    "change_type": "memory_summary",
+                    "summary": summary,
+                });
+                let _ = worker
+                    .log_event("reflection_change".to_string(), Some(data))
+                    .await;
+            }
+            ReflectionChange::NewMotivation { content, priority } => {
+                let priority_i32 = i32::try_from(priority).map_err(|_| {
+                    Error::FailedToCreateReflectionMotivation(
+                        "Motivation priority must fit in i32".to_string(),
+                    )
+                })?;
+                let new_motivation = NewMotivation {
+                    person_uuid: person_uuid.clone(),
+                    content: content.clone(),
+                    priority: priority_i32,
+                };
+                let motivation_uuid = worker
+                    .create_motivation(new_motivation)
+                    .await
+                    .map_err(Error::FailedToCreateReflectionMotivation)?;
+                let data = serde_json::json!({
+                    "person_uuid": person_uuid.to_uuid().to_string(),
+                    "change_type": "add_motivation",
+                    "content": content,
+                    "priority": priority,
+                    "motivation_uuid": motivation_uuid.to_uuid().to_string(),
+                });
+                let _ = worker
+                    .log_event("reflection_change".to_string(), Some(data))
+                    .await;
+            }
+            ReflectionChange::DeleteMotivation { motivation_uuid } => {
+                worker
+                    .delete_motivation(motivation_uuid.clone())
+                    .await
+                    .map_err(Error::FailedToDeleteReflectionMotivation)?;
+                let data = serde_json::json!({
+                    "person_uuid": person_uuid.to_uuid().to_string(),
+                    "change_type": "remove_motivation",
+                    "motivation_uuid": motivation_uuid.to_uuid().to_string(),
+                });
+                let _ = worker
+                    .log_event("reflection_change".to_string(), Some(data))
+                    .await;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+async fn build_reflection_input<
+    W: MessageCapability
+        + SceneCapability
+        + MemoryCapability
+        + PersonCapability
+        + EventCapability
+        + StateOfMindCapability
+        + PersonIdentityCapability,
+>(
+    worker: &W,
+    message_type_args: MessageTypeArgs,
+    situation: &Situation,
+    person_uuid: &PersonUuid,
+) -> Result<ReflectionInput, Error> {
+    let persons_name: PersonName = worker
+        .get_persons_name(person_uuid.clone())
+        .await
+        .map_err(Error::FailedToGetPersonsName)?;
+
+    let get_args: capability::event::GetArgs = match &message_type_args {
+        MessageTypeArgs::SceneByUuid { scene_uuid } => capability::event::GetArgs::new()
+            .with_person_uuid(person_uuid.clone())
+            .with_scene_uuid(scene_uuid.clone()),
+        MessageTypeArgs::Scene { .. } => {
+            capability::event::GetArgs::new().with_person_uuid(person_uuid.clone())
+        }
+        MessageTypeArgs::Direct { .. } => {
+            capability::event::GetArgs::new().with_person_uuid(person_uuid.clone())
+        }
+    };
+
+    let events = worker
+        .get_events(get_args)
+        .await
+        .map_err(Error::FailedToGetEvents)?
+        .iter()
+        .map(|event| event.to_text())
+        .collect::<Vec<String>>();
+
+    let maybe_state_of_mind: Option<StateOfMind> = worker
+        .get_latest_state_of_mind(person_uuid)
+        .await
+        .map_err(Error::FailedToGetStateOfMind)?;
+
+    let state_of_mind: StateOfMind = match maybe_state_of_mind {
+        Some(som) => som,
+        None => Err(Error::NoStateOfMindFound {
+            person_uuid: person_uuid.clone(),
+        })?,
+    };
+
+    let memories_prompt = worker
+        .create_memory_query_prompt(
+            &persons_name,
+            message_type_args,
+            events,
+            &state_of_mind.content,
+            &situation.to_string(),
+        )
+        .await
+        .map_err(Error::CouldNotCreateMemoriesPrompt)?;
+
+    let memories: Vec<Memory> = crate::domain::memory::filter_memory_results(
+        worker
+            .search_memories(person_uuid.clone(), memories_prompt.prompt, 5)
+            .await
+            .map_err(Error::FailedToSearchMemories)?,
+    );
+
+    let maybe_person_identity: Option<String> = worker
+        .get_person_identity(person_uuid)
+        .await
+        .map_err(Error::FailedToGetPersonIdentity)?;
+
+    let person_identity: String = match maybe_person_identity {
+        Some(identity) => identity,
+        None => Err(Error::NoPersonIdentityFound {
+            person_uuid: person_uuid.clone(),
+        })?,
+    };
+
+    Ok(ReflectionInput {
+        person_name: persons_name,
+        memories,
+        person_identity,
+        state_of_mind: state_of_mind.content,
+    })
+}
+
+async fn get_recent_events_text<W: EventCapability>(
+    worker: &W,
+    message_type_args: MessageTypeArgs,
+    person_uuid: &PersonUuid,
+) -> Result<Vec<Event>, Error> {
+    let get_args: capability::event::GetArgs = match &message_type_args {
+        MessageTypeArgs::SceneByUuid { .. } => {
+            capability::event::GetArgs::new().with_person_uuid(person_uuid.clone())
+        }
+        MessageTypeArgs::Scene { .. } => {
+            capability::event::GetArgs::new().with_person_uuid(person_uuid.clone())
+        }
+        MessageTypeArgs::Direct { .. } => {
+            capability::event::GetArgs::new().with_person_uuid(person_uuid.clone())
+        }
+    };
+
+    worker
+        .get_events(get_args)
+        .await
+        .map_err(Error::FailedToGetEvents)
+}

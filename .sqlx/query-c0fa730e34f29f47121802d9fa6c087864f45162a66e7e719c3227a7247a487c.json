@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                    INSERT INTO real_world_user_scene_presence (scene_uuid)\n                    VALUES ($1::UUID)\n                    ON CONFLICT (scene_uuid) DO NOTHING;\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "c0fa730e34f29f47121802d9fa6c087864f45162a66e7e719c3227a7247a487c"
+}

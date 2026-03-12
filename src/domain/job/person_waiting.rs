@@ -36,6 +36,7 @@ pub enum Error {
     MissingPersonUuid,
     MissingStartedAt,
     FailedToGetHibernationState(String),
+    FailedToGetEnabledState(String),
     FailedToGetEvents(String),
     FailedToGetReactionHistory(String),
     FailedToGetStateOfMind(String),
@@ -69,6 +70,9 @@ impl NiceDisplay for Error {
             Error::MissingStartedAt => "Missing started_at on wait job".to_string(),
             Error::FailedToGetHibernationState(err) => {
                 format!("Failed to get hibernation state: {}", err)
+            }
+            Error::FailedToGetEnabledState(err) => {
+                format!("Failed to get enabled state: {}", err)
             }
             Error::FailedToGetEvents(err) => {
                 format!("Failed to get events: {}", err)
@@ -161,6 +165,14 @@ impl PersonWaitingJob {
             .await
             .map_err(Error::FailedToGetHibernationState)?;
         if is_hibernating {
+            return Ok(WaitOutcome::Ready);
+        }
+
+        let is_enabled = worker
+            .is_person_enabled(&person_uuid)
+            .await
+            .map_err(Error::FailedToGetEnabledState)?;
+        if !is_enabled {
             return Ok(WaitOutcome::Ready);
         }
 

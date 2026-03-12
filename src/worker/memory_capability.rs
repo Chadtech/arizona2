@@ -91,6 +91,8 @@ impl MemoryCapability for Worker {
             .await
             .map_err(|err| err.message())?;
 
+        let response_json = response.as_pretty_json();
+
         let tool_calls = response.maybe_tool_calls().map_err(|err| err.message())?;
 
         let new_memories: Vec<MemoryCandidate> = match tool_calls {
@@ -98,7 +100,20 @@ impl MemoryCapability for Worker {
                 log_memory_decision(self, None, None, Some("no_tool_call")).await;
                 vec![]
             }
-            Some(tool_calls) => extract_memory_content(tool_calls)?,
+            Some(tool_calls) => match extract_memory_content(tool_calls) {
+                Ok(new_memories) => new_memories,
+                Err(err) => {
+                    self.logger.log(
+                        Level::Error,
+                        format!(
+                            "Failed to parse memory tool call: {}\nResponse JSON:\n{}",
+                            err, response_json
+                        )
+                        .as_str(),
+                    );
+                    return Err(err);
+                }
+            },
         };
 
         let mut ret = vec![];
