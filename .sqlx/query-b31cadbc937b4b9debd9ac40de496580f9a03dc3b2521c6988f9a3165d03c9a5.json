@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                SELECT content\n                FROM memory\n                WHERE person_uuid = $1::UUID\n                ORDER BY created_at ASC;\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "content",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "b31cadbc937b4b9debd9ac40de496580f9a03dc3b2521c6988f9a3165d03c9a5"
+}

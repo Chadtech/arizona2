@@ -1,26 +1,66 @@
 use async_trait::async_trait;
 
 use crate::capability::person_identity::{NewPersonIdentity, PersonIdentityCapability};
+use crate::open_ai;
+use crate::open_ai::completion::Completion;
+use crate::open_ai::role::Role;
 use crate::domain::person_identity_uuid::PersonIdentityUuid;
 use crate::domain::person_uuid::PersonUuid;
+use crate::nice_display::NiceDisplay;
 use crate::worker::Worker;
 
 #[async_trait]
 impl PersonIdentityCapability for Worker {
+    async fn summarize_person_identity(
+        &self,
+        person_name: &str,
+        identity: &str,
+    ) -> Result<String, String> {
+        let mut completion = Completion::new(open_ai::model::Model::DEFAULT);
+        completion.add_message(
+            Role::System,
+            "Summarize this description of a person's identity in no more than three sentences.",
+        );
+        completion.add_message(
+            Role::User,
+            format!(
+                "Person name: {}\n\nIdentity text:\n{}",
+                person_name, identity
+            )
+            .as_str(),
+        );
+
+        let response = completion
+            .send_request(&self.open_ai_key, self.reqwest_client.clone())
+            .await
+            .map_err(|err| err.message())?;
+
+        response.as_message().map_err(|err| err.message())
+    }
+
     async fn create_person_identity(
         &self,
         new_person_identity: NewPersonIdentity,
     ) -> Result<PersonIdentityUuid, String> {
+        let summary = self
+            .summarize_person_identity(
+                new_person_identity.person_name.as_str(),
+                new_person_identity.identity.as_str(),
+            )
+            .await
+            .map_err(|err| format!("Error summarizing person identity: {}", err))?;
+
         let ret = sqlx::query!(
             r#"
-                INSERT INTO person_identity (uuid, person_uuid, identity)
-                SELECT $1::UUID, person.uuid, $2::TEXT
+                INSERT INTO person_identity (uuid, person_uuid, identity, summary)
+                SELECT $1::UUID, person.uuid, $2::TEXT, $3::TEXT
                 FROM person
-                WHERE name = $3::TEXT
+                WHERE name = $4::TEXT
                 RETURNING uuid;
             "#,
             new_person_identity.person_identity_uuid.to_uuid(),
             new_person_identity.identity,
+            summary,
             new_person_identity.person_name
         )
         .fetch_one(&self.sqlx)

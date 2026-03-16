@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                UPDATE person_identity\n                SET summary = $2::TEXT\n                WHERE uuid = $1::UUID;\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "cc96cce62503785bf3e17354c4b1e2a1b2b798e359ede222e827255c7069dad0"
+}

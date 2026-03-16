@@ -916,6 +916,14 @@ mod tests {
 
     #[async_trait]
     impl PersonIdentityCapability for MockWorker {
+        async fn summarize_person_identity(
+            &self,
+            _person_name: &str,
+            _identity: &str,
+        ) -> Result<String, String> {
+            Ok("summary".to_string())
+        }
+
         async fn create_person_identity(
             &self,
             _new_person_identity: NewPersonIdentity,

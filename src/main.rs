@@ -10,10 +10,13 @@ mod nice_display;
 mod open_ai;
 mod open_ai_key;
 mod person_actions;
+mod tasks;
 mod text_utils;
 mod worker;
 
 use crate::nice_display::NiceDisplay;
+use crate::tasks::summarize_memories_v2;
+use crate::tasks::summarize_person_identities;
 use clap::Parser;
 
 #[derive(Debug, Parser, Clone)]
@@ -27,6 +30,8 @@ enum Cmd {
     RunMigrations,
     AdminUi,
     RunJobRunner,
+    SummarizePersonIdentities,
+    SummarizeMemoriesV2,
 }
 
 enum Error {
@@ -35,6 +40,8 @@ enum Error {
     EnvVars(dotenv::Error),
     AdminUi(admin_ui::Error),
     JobRunner(job_runner::Error),
+    SummarizePersonIdentities(summarize_person_identities::Error),
+    SummarizeMemoriesV2(summarize_memories_v2::Error),
 }
 
 impl NiceDisplay for Error {
@@ -47,6 +54,8 @@ impl NiceDisplay for Error {
             }
             Error::AdminUi(err) => err.message(),
             Error::JobRunner(err) => err.message(),
+            Error::SummarizePersonIdentities(err) => err.message(),
+            Error::SummarizeMemoriesV2(err) => err.message(),
         }
     }
 }
@@ -58,6 +67,8 @@ impl Cmd {
             Cmd::RunMigrations => "migrations",
             Cmd::AdminUi => "admin-ui",
             Cmd::RunJobRunner => "job-runner",
+            Cmd::SummarizePersonIdentities => "summarize-person-identities",
+            Cmd::SummarizeMemoriesV2 => "summarize-memories-v2",
         }
     }
 }
@@ -119,5 +130,11 @@ async fn nice_main(cmd: Cmd) -> Result<(), Error> {
         Cmd::RunMigrations => migrations::run().await.map_err(Error::RunMigrations),
         Cmd::AdminUi => admin_ui::run().await.map_err(Error::AdminUi),
         Cmd::RunJobRunner => job_runner::run().await.map_err(Error::JobRunner),
+        Cmd::SummarizePersonIdentities => tasks::summarize_person_identities::run()
+            .await
+            .map_err(Error::SummarizePersonIdentities),
+        Cmd::SummarizeMemoriesV2 => tasks::summarize_memories_v2::run()
+            .await
+            .map_err(Error::SummarizeMemoriesV2),
     }
 }

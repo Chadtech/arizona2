@@ -11,6 +11,11 @@ pub struct NewPersonIdentity {
 
 #[async_trait]
 pub trait PersonIdentityCapability {
+    async fn summarize_person_identity(
+        &self,
+        person_name: &str,
+        identity: &str,
+    ) -> Result<String, String>;
     async fn create_person_identity(
         &self,
         new_person_identity: NewPersonIdentity,

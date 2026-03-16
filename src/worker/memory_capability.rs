@@ -18,30 +18,77 @@ use crate::open_ai::role::Role;
 use crate::open_ai::tool::{ToolFunction, ToolFunctionParameter};
 use crate::open_ai::tool_call::ToolCall;
 use sqlx::Row;
+use uuid::Uuid;
 
 impl MemoryCapability for Worker {
     async fn create_memory(&self, new_memory: NewMemory) -> Result<MemoryUuid, String> {
-        let embedding = EmbeddingRequest::new(new_memory.content.clone())
+        let memory_uuid = new_memory.memory_uuid;
+        let person_uuid = new_memory.person_uuid;
+        let content = new_memory.content;
+
+        let person_name = self
+            .get_persons_name(person_uuid.clone())
+            .await
+            .map_err(|err| format!("Failed to get person name: {}", err))?;
+
+        let metadata =
+            summarize_memory_metadata(self, person_name.as_str(), content.as_str()).await?;
+
+        let people_names = normalize_string_list(metadata.people_names);
+        let subject_tags = normalize_string_list(metadata.subject_tags);
+        let people_uuids = map_people_names_to_uuids(self, people_names.as_slice()).await?;
+
+        let embedding = EmbeddingRequest::new(metadata.retrieval_summary.clone())
             .create(self.open_ai_key.clone(), self.reqwest_client.clone())
             .await
             .map_err(|err| err.message())?;
 
-        let rec = sqlx::query!(
+        sqlx::query!(
             r#"
-                INSERT INTO memory (uuid, person_uuid, content, embedding)
-                VALUES ($1::UUID, $2::UUID, $3::TEXT, $4)
-                RETURNING uuid;
+                INSERT INTO memory (
+                    uuid,
+                    person_uuid,
+                    content,
+                    embedding,
+                    summary,
+                    emotional_score,
+                    retrieval_summary,
+                    summary_first_person,
+                    people_names,
+                    people_uuids,
+                    subject_tags
+                )
+                VALUES (
+                    $1::UUID,
+                    $2::UUID,
+                    $3::TEXT,
+                    $4,
+                    $5::TEXT,
+                    $6::INT,
+                    $7::TEXT,
+                    $8::TEXT,
+                    $9::TEXT[],
+                    $10::UUID[],
+                    $11::TEXT[]
+                );
             "#,
-            new_memory.memory_uuid.to_uuid(),
-            new_memory.person_uuid.to_uuid(),
-            new_memory.content,
-            &embedding[..] as &[f32]
+            memory_uuid.to_uuid(),
+            person_uuid.to_uuid(),
+            content,
+            &embedding[..] as &[f32],
+            metadata.summary,
+            metadata.emotional_score,
+            metadata.retrieval_summary,
+            metadata.summary_first_person,
+            &people_names as &[String],
+            &people_uuids as &[Uuid],
+            &subject_tags as &[String],
         )
-        .fetch_one(&self.sqlx)
+        .execute(&self.sqlx)
         .await
         .map_err(|err| format!("Error inserting new memory: {}", err))?;
 
-        Ok(MemoryUuid::from_uuid(rec.uuid))
+        Ok(memory_uuid)
     }
 
     async fn maybe_create_memories_from_description(
@@ -447,6 +494,15 @@ struct MemoryCandidate {
     memorable_score: i64,
 }
 
+struct MemoryMetadata {
+    summary: String,
+    summary_first_person: String,
+    retrieval_summary: String,
+    emotional_score: i32,
+    people_names: Vec<String>,
+    subject_tags: Vec<String>,
+}
+
 fn extract_memory_content(tool_calls: Vec<ToolCall>) -> Result<Vec<MemoryCandidate>, String> {
     let mut ret: Vec<MemoryCandidate> = vec![];
 
@@ -481,4 +537,205 @@ fn extract_memory_content(tool_calls: Vec<ToolCall>) -> Result<Vec<MemoryCandida
     }
 
     Ok(ret)
+}
+
+async fn summarize_memory_metadata(
+    worker: &Worker,
+    person_name: &str,
+    memory_content: &str,
+) -> Result<MemoryMetadata, String> {
+    let mut completion = Completion::new(open_ai::model::Model::DEFAULT);
+
+    completion.add_tool_call(
+        ToolFunction::new(
+            "set_memory_metadata".to_string(),
+            "Set structured metadata for a memory.".to_string(),
+            vec![
+                ToolFunctionParameter::String {
+                    name: "summary".to_string(),
+                    description:
+                        "Short third-person memory summary, one sentence, max 18 words."
+                            .to_string(),
+                    required: true,
+                },
+                ToolFunctionParameter::String {
+                    name: "summary_first_person".to_string(),
+                    description: "First-person summary of the same memory.".to_string(),
+                    required: true,
+                },
+                ToolFunctionParameter::String {
+                    name: "retrieval_summary".to_string(),
+                    description: "One or two concise sentences that describe what makes this memory significant."
+                        .to_string(),
+                    required: true,
+                },
+                ToolFunctionParameter::Integer {
+                    name: "emotional_score".to_string(),
+                    description: "0-100 emotional salience score.".to_string(),
+                    required: true,
+                },
+                ToolFunctionParameter::StringArray {
+                    name: "people_names".to_string(),
+                    description: "Names of people in the memory; use [] if none.".to_string(),
+                    required: true,
+                },
+                ToolFunctionParameter::StringArray {
+                    name: "subject_tags".to_string(),
+                    description: "Short lowercase topic tags; use [] if none.".to_string(),
+                    required: true,
+                },
+            ],
+        )
+        .into(),
+    );
+
+    completion.add_message(
+        Role::System,
+        "You convert one memory into structured metadata. Use only the tool call and no plain text.",
+    );
+    completion.add_message(
+        Role::User,
+        format!(
+            "Person name: {}\n\nMemory content:\n{}\n\nCall set_memory_metadata exactly once.",
+            person_name, memory_content
+        )
+        .as_str(),
+    );
+
+    let response = completion
+        .send_request(&worker.open_ai_key, worker.reqwest_client.clone())
+        .await
+        .map_err(|err| err.message())?;
+    let response_json = response.as_pretty_json();
+
+    let tool_calls = response.as_tool_calls().map_err(|err| {
+        format!(
+            "Failed to decode memory metadata tool call: {}",
+            err.message()
+        )
+    })?;
+    let call = tool_calls
+        .into_iter()
+        .find(|call| call.name == "set_memory_metadata")
+        .ok_or_else(|| {
+            format!(
+                "Missing 'set_memory_metadata' tool call. Response JSON:\n{}",
+                response_json
+            )
+        })?;
+
+    let emotional_score_i64 = find_required_integer_argument(&call, "emotional_score")?;
+    if !(0..=100).contains(&emotional_score_i64) {
+        Err(format!(
+            "Invalid emotional_score {} (expected 0-100)",
+            emotional_score_i64
+        ))?
+    }
+
+    let summary = find_required_string_argument(&call, "summary")?;
+    let retrieval_details = find_required_string_argument(&call, "retrieval_summary")?;
+    let retrieval_summary = format!("{} {}", summary.trim(), retrieval_details.trim())
+        .trim()
+        .to_string();
+
+    Ok(MemoryMetadata {
+        summary,
+        summary_first_person: find_required_string_argument(&call, "summary_first_person")?,
+        retrieval_summary,
+        emotional_score: emotional_score_i64 as i32,
+        people_names: find_required_string_array_argument(&call, "people_names")?,
+        subject_tags: find_required_string_array_argument(&call, "subject_tags")?,
+    })
+}
+
+async fn map_people_names_to_uuids(
+    worker: &Worker,
+    people_names: &[String],
+) -> Result<Vec<Uuid>, String> {
+    if people_names.is_empty() {
+        return Ok(vec![]);
+    }
+
+    let lower_names = people_names
+        .iter()
+        .map(|name| name.to_lowercase())
+        .collect::<Vec<String>>();
+
+    let matched_people = sqlx::query!(
+        r#"
+            SELECT uuid, name
+            FROM person
+            WHERE lower(name) = ANY($1::TEXT[]);
+        "#
+        ,
+        &lower_names as &[String]
+    )
+    .fetch_all(&worker.sqlx)
+    .await
+    .map_err(|err| format!("Error fetching people for memory metadata: {}", err))?;
+
+    let mut ret: Vec<Uuid> = vec![];
+    for name in &lower_names {
+        for person in &matched_people {
+            if person.name.to_lowercase() == *name && !ret.contains(&person.uuid) {
+                ret.push(person.uuid);
+                break;
+            }
+        }
+    }
+
+    Ok(ret)
+}
+
+fn find_required_string_argument(call: &ToolCall, key: &str) -> Result<String, String> {
+    call.arguments
+        .iter()
+        .find(|(name, _)| name == key)
+        .and_then(|(_, value)| value.as_str())
+        .map(|text| text.trim().to_string())
+        .filter(|text| !text.is_empty())
+        .ok_or_else(|| format!("Missing '{}' argument in '{}' tool call", key, call.name))
+}
+
+fn find_required_integer_argument(call: &ToolCall, key: &str) -> Result<i64, String> {
+    call.arguments
+        .iter()
+        .find(|(name, _)| name == key)
+        .and_then(|(_, value)| value.as_i64())
+        .ok_or_else(|| format!("Missing '{}' argument in '{}' tool call", key, call.name))
+}
+
+fn find_required_string_array_argument(call: &ToolCall, key: &str) -> Result<Vec<String>, String> {
+    call.arguments
+        .iter()
+        .find(|(name, _)| name == key)
+        .and_then(|(_, value)| value.as_array())
+        .ok_or_else(|| format!("Missing '{}' argument in '{}' tool call", key, call.name))?
+        .iter()
+        .map(|value| {
+            value.as_str().map(|text| text.to_string()).ok_or_else(|| {
+                format!(
+                    "'{}' argument in '{}' tool call must contain strings",
+                    key, call.name
+                )
+            })
+        })
+        .collect::<Result<Vec<String>, String>>()
+}
+
+fn normalize_string_list(values: Vec<String>) -> Vec<String> {
+    let mut ret: Vec<String> = vec![];
+    for value in values {
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if !ret
+            .iter()
+            .any(|existing| existing.eq_ignore_ascii_case(trimmed))
+        {
+            ret.push(trimmed.to_string());
+        }
+    }
+    ret
 }

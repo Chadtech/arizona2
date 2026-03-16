@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            DELETE FROM person_identity\n            WHERE summary IS NULL;\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "c00501b34cba7f98340a85818fc058afe5105379dcef41d0dcc95b45e1ffcff7"
+}

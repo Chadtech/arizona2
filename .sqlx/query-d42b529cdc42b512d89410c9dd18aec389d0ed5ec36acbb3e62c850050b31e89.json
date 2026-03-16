@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                    INSERT INTO memory (\n                        uuid,\n                        person_uuid,\n                        content,\n                        embedding,\n                        summary,\n                        emotional_score,\n                        retrieval_summary,\n                        summary_first_person,\n                        people_names,\n                        people_uuids,\n                        subject_tags\n                    )\n                    VALUES (\n                        $1::UUID,\n                        $2::UUID,\n                        $3::TEXT,\n                        $4,\n                        $5::TEXT,\n                        $6::INT,\n                        $7::TEXT,\n                        $8::TEXT,\n                        $9::TEXT[],\n                        $10::UUID[],\n                        $11::TEXT[]\n                    );\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        {
+          "Custom": {
+            "name": "vector",
+            "kind": "Simple"
+          }
+        },
+        "Text",
+        "Int4",
+        "Text",
+        "Text",
+        "TextArray",
+        "UuidArray",
+        "TextArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "d42b529cdc42b512d89410c9dd18aec389d0ed5ec36acbb3e62c850050b31e89"
+}

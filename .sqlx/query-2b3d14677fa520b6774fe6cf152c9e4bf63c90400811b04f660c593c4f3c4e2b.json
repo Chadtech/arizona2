@@ -1,0 +1,38 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT\n                p.uuid AS person_uuid,\n                p.name AS person_name,\n                latest_identity.uuid AS person_identity_uuid,\n                latest_identity.identity\n            FROM person p\n            LEFT JOIN LATERAL (\n                SELECT pi.uuid, pi.identity\n                FROM person_identity pi\n                WHERE pi.person_uuid = p.uuid\n                ORDER BY pi.created_at DESC\n                LIMIT 1\n            ) AS latest_identity ON true\n            ORDER BY p.name ASC;\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "person_uuid",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "person_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "person_identity_uuid",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "identity",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "2b3d14677fa520b6774fe6cf152c9e4bf63c90400811b04f660c593c4f3c4e2b"
+}
