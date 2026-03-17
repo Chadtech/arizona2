@@ -262,7 +262,7 @@ impl PersonWaitingJob {
             );
 
             let maybe_person_identity: Option<String> = worker
-                .get_person_identity(&person_uuid)
+                .get_person_identity_summary(&person_uuid)
                 .await
                 .map_err(Error::FailedToGetPersonIdentity)?;
 

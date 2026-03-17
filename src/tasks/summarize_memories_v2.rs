@@ -1,7 +1,6 @@
 use crate::domain::logger::{Level, Logger};
 use crate::domain::memory_uuid::MemoryUuid;
 use crate::nice_display::NiceDisplay;
-use crate::open_ai;
 use crate::open_ai::completion::Completion;
 use crate::open_ai::embedding::EmbeddingRequest;
 use crate::open_ai::role::Role;
@@ -22,7 +21,10 @@ pub enum Error {
     Completion(String),
     ToolCallDecode(String),
     MissingToolArgument(String),
-    InvalidResponseShape { person_name: String, details: String },
+    InvalidResponseShape {
+        person_name: String,
+        details: String,
+    },
     CreateEmbedding(String),
     InsertMemory(sqlx::Error),
 }
@@ -240,19 +242,13 @@ async fn summarize_memory_for_section(
     let section_memory_list = section_memories
         .iter()
         .enumerate()
-        .map(|(idx, memory)| {
-            format!(
-                "{}. {}",
-                idx + 1,
-                memory.trim().replace('\n', " ")
-            )
-        })
+        .map(|(idx, memory)| format!("{}. {}", idx + 1, memory.trim().replace('\n', " ")))
         .collect::<Vec<String>>()
         .join("\n");
 
     let mut last_count = 0usize;
     for _attempt in 1..=MAX_SECTION_SUMMARY_ATTEMPTS {
-        let mut completion = Completion::new(open_ai::model::Model::DEFAULT);
+        let mut completion = Completion::new();
         completion.add_tool_call(v2_memory_tool_definition().into());
         completion.add_message(
             Role::System,
@@ -285,10 +281,13 @@ async fn summarize_memory_for_section(
             .collect::<Result<Vec<V2MemoryCandidate>, Error>>()?;
 
         if candidates.len() == 1 {
-            return Ok(candidates.into_iter().next().ok_or_else(|| Error::InvalidResponseShape {
-                person_name: person_name.to_string(),
-                details: "internal error extracting section summary".to_string(),
-            })?);
+            return candidates
+                .into_iter()
+                .next()
+                .ok_or_else(|| Error::InvalidResponseShape {
+                    person_name: person_name.to_string(),
+                    details: "internal error extracting section summary".to_string(),
+                });
         }
         last_count = candidates.len();
     }
@@ -411,7 +410,10 @@ fn normalize_string_list(values: Vec<String>) -> Vec<String> {
         if trimmed.is_empty() {
             continue;
         }
-        if !ret.iter().any(|existing| existing.eq_ignore_ascii_case(trimmed)) {
+        if !ret
+            .iter()
+            .any(|existing| existing.eq_ignore_ascii_case(trimmed))
+        {
             ret.push(trimmed.to_string());
         }
     }

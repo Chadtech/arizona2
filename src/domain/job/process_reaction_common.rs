@@ -10,6 +10,7 @@ use crate::capability::motivation::NewMotivation;
 use crate::capability::person::PersonCapability;
 use crate::capability::person_identity::PersonIdentityCapability;
 use crate::capability::reaction::ReactionCapability;
+use crate::capability::reaction::ReactionPromptPreview;
 use crate::capability::reaction_history::ReactionHistoryCapability;
 use crate::capability::reflection::ReflectionCapability;
 use crate::capability::reflection::ReflectionChange;
@@ -40,6 +41,13 @@ struct ReflectionInput {
     memories: Vec<Memory>,
     person_identity: String,
     state_of_mind: String,
+}
+
+struct ReactionExecutionInput {
+    situation: Situation,
+    reflection_input: ReflectionInput,
+    reaction_situation: String,
+    description_prefix: Option<String>,
 }
 
 pub enum SceneReactionTrigger {
@@ -199,94 +207,22 @@ pub async fn run_scene_reaction<
         return Ok(());
     }
 
-    let situation =
-        build_scene_situation(worker, scene_uuid, &pending_messages, person_uuid).await?;
-
-    let reflection_input = build_reflection_input(
+    let reaction_input = build_reaction_execution_input(
         worker,
-        MessageTypeArgs::SceneByUuid {
-            scene_uuid: scene_uuid.clone(),
-        },
-        &situation,
         person_uuid,
+        scene_uuid,
+        &trigger,
+        &pending_messages,
     )
     .await?;
-
-    let reaction_recent_events = get_recent_events_text(
-        worker,
-        MessageTypeArgs::SceneByUuid {
-            scene_uuid: scene_uuid.clone(),
-        },
-        person_uuid,
-    )
-    .await?;
-
-    let reaction_events = filter_reaction_events(reaction_recent_events, &pending_messages);
-    let recent_events_text = Event::many_to_prompt_list(reaction_events);
-
-    let priority_instruction = match &trigger {
-        SceneReactionTrigger::NewMessages => {
-            "React to the newest activity first. Prioritize the NEW MESSAGE EVENT lines below when deciding what to do now."
-        }
-        SceneReactionTrigger::PersonJoined { .. } => {
-            "React to the newest activity first. Prioritize the NEW JOIN EVENT lines below when deciding what to do now."
-        }
-    };
-
-    let new_event_section_label = match &trigger {
-        SceneReactionTrigger::NewMessages => {
-            "New message events (newest; primary reaction target):"
-        }
-        SceneReactionTrigger::PersonJoined { .. } => {
-            "New join events (newest; primary reaction target):"
-        }
-    };
-
-    let new_event_section_text = match &trigger {
-        SceneReactionTrigger::NewMessages => {
-            let new_message_event_lines =
-                pending_messages_to_event_lines(worker, &pending_messages, person_uuid).await?;
-            if new_message_event_lines.is_empty() {
-                "None.".to_string()
-            } else {
-                new_message_event_lines.join("\n")
-            }
-        }
-        SceneReactionTrigger::PersonJoined { joined_person_uuid } => {
-            let joined_person_name = worker
-                .get_persons_name(joined_person_uuid.clone())
-                .await
-                .map_err(Error::FailedToGetPersonsName)?;
-            format!(
-                "In the current scene, {} joined the scene [NEW JOIN EVENT]",
-                joined_person_name.as_str()
-            )
-        }
-    };
-
-    let description_prefix = match &trigger {
-        SceneReactionTrigger::NewMessages => None,
-        SceneReactionTrigger::PersonJoined { .. } => {
-            Some(format!("Join event:\n{}", new_event_section_text))
-        }
-    };
-
-    let reaction_situation = format!(
-        "{}\n\nRecent events (older context):\n{}\n\n{}\n{}\n\n{}",
-        priority_instruction,
-        recent_events_text,
-        new_event_section_label,
-        new_event_section_text,
-        situation
-    );
 
     let reaction = worker
         .get_reaction(
-            reflection_input.memories.clone(),
+            reaction_input.reflection_input.memories.clone(),
             person_uuid.clone(),
-            reflection_input.person_identity.clone(),
-            reflection_input.state_of_mind.clone(),
-            reaction_situation,
+            reaction_input.reflection_input.person_identity.clone(),
+            reaction_input.reflection_input.state_of_mind.clone(),
+            reaction_input.reaction_situation,
         )
         .await
         .map_err(Error::GetPersonReaction)?;
@@ -316,33 +252,43 @@ pub async fn run_scene_reaction<
 
             let reflection_situation = format!(
                 "{}\n\nRecent events:\n{}",
-                situation,
+                reaction_input.situation,
                 Event::many_to_prompt_list(reflection_recent_events)
             );
             let changes = worker
                 .get_reflection_changes(
-                    reflection_input.memories.clone(),
+                    reaction_input.reflection_input.memories.clone(),
                     person_uuid.clone(),
-                    reflection_input.person_identity.clone(),
-                    reflection_input.state_of_mind.clone(),
+                    reaction_input.reflection_input.person_identity.clone(),
+                    reaction_input.reflection_input.state_of_mind.clone(),
                     reflection_situation,
                 )
                 .await
                 .map_err(Error::Reflection)?;
 
-            apply_reflection_changes(worker, person_uuid, &reflection_input, changes).await?;
+            apply_reflection_changes(
+                worker,
+                person_uuid,
+                &reaction_input.reflection_input,
+                changes,
+            )
+            .await?;
         }
         ReflectionDecision::NoReflection => {}
     }
 
-    let description = match description_prefix {
+    let description = match reaction_input.description_prefix {
         Some(prefix) => format!(
             "{}\n\n{}\n\nResponse:\n{}",
-            situation,
+            reaction_input.situation,
             prefix,
             action.summarize()
         ),
-        None => format!("{}\n\nResponse:\n{}", situation, action.summarize()),
+        None => format!(
+            "{}\n\nResponse:\n{}",
+            reaction_input.situation,
+            action.summarize()
+        ),
     };
 
     worker
@@ -366,6 +312,171 @@ pub async fn run_scene_reaction<
     }
 
     Ok(())
+}
+
+pub async fn preview_scene_reaction_prompts<
+    W: MessageCapability
+        + SceneCapability
+        + ReactionCapability
+        + MemoryCapability
+        + PersonCapability
+        + EventCapability
+        + StateOfMindCapability
+        + PersonIdentityCapability
+        + MotivationCapability
+        + Sync,
+>(
+    worker: &W,
+    person_uuid: &PersonUuid,
+    scene_uuid: &SceneUuid,
+    trigger: SceneReactionTrigger,
+) -> Result<ReactionPromptPreview, Error> {
+    let pending_messages = match trigger {
+        SceneReactionTrigger::NewMessages => worker
+            .get_unhandled_scene_messages_for_person(person_uuid, scene_uuid)
+            .await
+            .map_err(|err| Error::FailedToGetUnhandledSceneMessages {
+                scene_uuid: scene_uuid.clone(),
+                details: err,
+            })?,
+        SceneReactionTrigger::PersonJoined { .. } => vec![],
+    };
+
+    let is_new_messages_trigger = match &trigger {
+        SceneReactionTrigger::NewMessages => true,
+        SceneReactionTrigger::PersonJoined { .. } => false,
+    };
+
+    if is_new_messages_trigger && pending_messages.is_empty() {
+        return Err(Error::GetPersonReaction(
+            "No pending messages for this process message job.".to_string(),
+        ));
+    }
+
+    let reaction_input = build_reaction_execution_input(
+        worker,
+        person_uuid,
+        scene_uuid,
+        &trigger,
+        &pending_messages,
+    )
+    .await?;
+
+    worker
+        .preview_reaction_prompts(
+            reaction_input.reflection_input.memories,
+            person_uuid.clone(),
+            reaction_input.reflection_input.person_identity,
+            reaction_input.reflection_input.state_of_mind,
+            reaction_input.reaction_situation,
+        )
+        .await
+        .map_err(Error::GetPersonReaction)
+}
+
+async fn build_reaction_execution_input<
+    W: MessageCapability
+        + SceneCapability
+        + MemoryCapability
+        + PersonCapability
+        + EventCapability
+        + StateOfMindCapability
+        + PersonIdentityCapability
+        + Sync,
+>(
+    worker: &W,
+    person_uuid: &PersonUuid,
+    scene_uuid: &SceneUuid,
+    trigger: &SceneReactionTrigger,
+    pending_messages: &[Message],
+) -> Result<ReactionExecutionInput, Error> {
+    let situation =
+        build_scene_situation(worker, scene_uuid, pending_messages, person_uuid).await?;
+
+    let reflection_input = build_reflection_input(
+        worker,
+        MessageTypeArgs::SceneByUuid {
+            scene_uuid: scene_uuid.clone(),
+        },
+        &situation,
+        person_uuid,
+    )
+    .await?;
+
+    let reaction_recent_events = get_recent_events_text(
+        worker,
+        MessageTypeArgs::SceneByUuid {
+            scene_uuid: scene_uuid.clone(),
+        },
+        person_uuid,
+    )
+    .await?;
+
+    let reaction_events = filter_reaction_events(reaction_recent_events, pending_messages);
+    let recent_events_text = Event::many_to_prompt_list(reaction_events);
+
+    let priority_instruction = match trigger {
+        SceneReactionTrigger::NewMessages => {
+            "React to the newest activity first. Prioritize the NEW MESSAGE EVENT lines below when deciding what to do now."
+        }
+        SceneReactionTrigger::PersonJoined { .. } => {
+            "React to the newest activity first. Prioritize the NEW JOIN EVENT lines below when deciding what to do now."
+        }
+    };
+
+    let new_event_section_label = match trigger {
+        SceneReactionTrigger::NewMessages => {
+            "New message events (newest; primary reaction target):"
+        }
+        SceneReactionTrigger::PersonJoined { .. } => {
+            "New join events (newest; primary reaction target):"
+        }
+    };
+
+    let new_event_section_text = match trigger {
+        SceneReactionTrigger::NewMessages => {
+            let new_message_event_lines =
+                pending_messages_to_event_lines(worker, pending_messages, person_uuid).await?;
+            if new_message_event_lines.is_empty() {
+                "None.".to_string()
+            } else {
+                new_message_event_lines.join("\n")
+            }
+        }
+        SceneReactionTrigger::PersonJoined { joined_person_uuid } => {
+            let joined_person_name = worker
+                .get_persons_name(joined_person_uuid.clone())
+                .await
+                .map_err(Error::FailedToGetPersonsName)?;
+            format!(
+                "In the current scene, {} joined the scene [NEW JOIN EVENT]",
+                joined_person_name.as_str()
+            )
+        }
+    };
+
+    let description_prefix = match trigger {
+        SceneReactionTrigger::NewMessages => None,
+        SceneReactionTrigger::PersonJoined { .. } => {
+            Some(format!("Join event:\n{}", new_event_section_text))
+        }
+    };
+
+    let reaction_situation = format!(
+        "{}\n\nRecent events (older context):\n{}\n\n{}\n{}\n\n{}",
+        priority_instruction,
+        recent_events_text,
+        new_event_section_label,
+        new_event_section_text,
+        situation
+    );
+
+    Ok(ReactionExecutionInput {
+        situation,
+        reflection_input,
+        reaction_situation,
+        description_prefix,
+    })
 }
 
 async fn build_scene_situation<W: SceneCapability + PersonCapability>(
@@ -669,7 +780,7 @@ async fn build_reflection_input<
     );
 
     let maybe_person_identity: Option<String> = worker
-        .get_person_identity(person_uuid)
+        .get_person_identity_summary(person_uuid)
         .await
         .map_err(Error::FailedToGetPersonIdentity)?;
 

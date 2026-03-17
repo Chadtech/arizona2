@@ -1,5 +1,8 @@
 use super::s;
 use crate::capability::job::JobCapability;
+use crate::capability::message::MessageCapability;
+use crate::capability::reaction::ReactionPromptPreview;
+use crate::domain::job::process_reaction_common::{self, SceneReactionTrigger};
 use crate::domain::job::{Job, JobKind, JobStatus};
 use crate::domain::job_uuid::JobUuid;
 use crate::job_runner::{self, RunNextJobResult};
@@ -73,7 +76,7 @@ enum ResetFailedStatus {
 enum SelectedJobStatus {
     None,
     Loading,
-    Loaded(SelectedJobModel),
+    Loaded(Box<SelectedJobModel>),
     Error(String),
 }
 
@@ -81,6 +84,14 @@ struct SelectedJobModel {
     job: Job,
     delete_status: DeleteStatus,
     reset_status: ResetJobStatus,
+    preview_status: PromptPreviewStatus,
+}
+
+enum PromptPreviewStatus {
+    Ready,
+    Loading,
+    Loaded(ReactionPromptPreview),
+    Error(String),
 }
 
 enum DeleteStatus {
@@ -110,7 +121,10 @@ pub enum Msg {
     ClickedCancelDelete,
     DeletedJob(Result<JobUuid, String>),
     ClickedCopyJobUuid(String),
+    ClickedCopyPromptPreview(String),
     ClickedRefreshSelected,
+    ClickedPreviewSelectedJob,
+    LoadedPromptPreview(Result<ReactionPromptPreview, String>),
     ClickedToggleAutoRefresh,
     AutoRefreshTick,
     JobListScrolled(scrollable::Viewport),
@@ -287,11 +301,12 @@ impl Model {
             }
             Msg::LoadedJob(res) => {
                 self.selected_job_status = match res {
-                    Ok(Some(job)) => SelectedJobStatus::Loaded(SelectedJobModel {
+                    Ok(Some(job)) => SelectedJobStatus::Loaded(Box::new(SelectedJobModel {
                         job,
                         delete_status: DeleteStatus::Ready,
                         reset_status: ResetJobStatus::Ready,
-                    }),
+                        preview_status: PromptPreviewStatus::Ready,
+                    })),
                     Ok(None) => SelectedJobStatus::Error("Job not found".to_string()),
                     Err(err) => SelectedJobStatus::Error(err),
                 };
@@ -311,6 +326,27 @@ impl Model {
 
                     let worker = worker.clone();
                     return Task::perform(get_job(worker, selected_job_uuid), Msg::LoadedJob);
+                }
+                Task::none()
+            }
+            Msg::ClickedPreviewSelectedJob => {
+                if let SelectedJobStatus::Loaded(selected_job) = &mut self.selected_job_status {
+                    selected_job.preview_status = PromptPreviewStatus::Loading;
+                    let worker = worker.clone();
+                    let job = selected_job.job.clone();
+                    return Task::perform(
+                        preview_job_prompts(worker, job),
+                        Msg::LoadedPromptPreview,
+                    );
+                }
+                Task::none()
+            }
+            Msg::LoadedPromptPreview(result) => {
+                if let SelectedJobStatus::Loaded(selected_job) = &mut self.selected_job_status {
+                    selected_job.preview_status = match result {
+                        Ok(preview) => PromptPreviewStatus::Loaded(preview),
+                        Err(err) => PromptPreviewStatus::Error(err),
+                    };
                 }
                 Task::none()
             }
@@ -356,6 +392,7 @@ impl Model {
                 }
             },
             Msg::ClickedCopyJobUuid(uuid) => clipboard::write(uuid),
+            Msg::ClickedCopyPromptPreview(contents) => clipboard::write(contents),
             Msg::JobListScrolled(viewport) => {
                 if self.should_load_more_jobs(viewport) {
                     self.load_more_status = LoadMoreStatus::Loading;
@@ -603,6 +640,42 @@ fn selected_job_view(selected: &SelectedJobStatus) -> Element<'_, Msg> {
                 .spacing(s::S4)
                 .into();
 
+            let preview_controls: Element<Msg> = match &selected_job.preview_status {
+                PromptPreviewStatus::Ready => w::button("Preview prompts")
+                    .on_press(Msg::ClickedPreviewSelectedJob)
+                    .into(),
+                PromptPreviewStatus::Loading => w::text("Building prompt preview...").into(),
+                PromptPreviewStatus::Loaded(preview) => {
+                    let copy_text = format_prompt_preview(preview);
+                    w::column![
+                        w::row![
+                            w::button("Preview prompts").on_press(Msg::ClickedPreviewSelectedJob),
+                            w::button(w::text("Copy preview").size(s::S3))
+                                .style(w::button::text)
+                                .padding(s::S1)
+                                .on_press(Msg::ClickedCopyPromptPreview(copy_text)),
+                        ]
+                        .spacing(s::S2),
+                        w::text("Thinking System Prompt"),
+                        w::text(&preview.thinking_system_prompt),
+                        w::text("Thinking User Prompt"),
+                        w::text(&preview.thinking_user_prompt),
+                        w::text("Action System Prompt"),
+                        w::text(&preview.action_system_prompt),
+                        w::text("Action User Prompt"),
+                        w::text(&preview.action_user_prompt),
+                    ]
+                    .spacing(s::S1)
+                    .into()
+                }
+                PromptPreviewStatus::Error(err) => w::column![
+                    w::button("Preview prompts").on_press(Msg::ClickedPreviewSelectedJob),
+                    w::text(format!("Preview error: {}", err)),
+                ]
+                .spacing(s::S1)
+                .into(),
+            };
+
             w::column![
                 w::row![
                     w::text("Selected Job"),
@@ -631,7 +704,8 @@ fn selected_job_view(selected: &SelectedJobStatus) -> Element<'_, Msg> {
                 w::text(deleted_at),
                 w::text(error_text),
                 w::text(data_text),
-                action_row
+                action_row,
+                preview_controls
             ]
             .spacing(s::S2)
             .into()
@@ -673,6 +747,16 @@ fn format_job_time(label: &str, timestamp: Option<chrono::DateTime<chrono::Utc>>
         Some(time) => format!("{}: {}", label, time.format("%Y-%m-%d %H:%M:%S UTC")),
         None => format!("{}: none", label),
     }
+}
+
+fn format_prompt_preview(preview: &ReactionPromptPreview) -> String {
+    format!(
+        "Thinking System Prompt\n\n{}\n\nThinking User Prompt\n\n{}\n\nAction System Prompt\n\n{}\n\nAction User Prompt\n\n{}",
+        preview.thinking_system_prompt,
+        preview.thinking_user_prompt,
+        preview.action_system_prompt,
+        preview.action_user_prompt
+    )
 }
 
 pub async fn get_jobs(worker: Arc<Worker>, limit: usize) -> Msg {
@@ -719,4 +803,41 @@ async fn delete_job(worker: Arc<Worker>, job_uuid: JobUuid) -> Result<JobUuid, S
         .await
         .map_err(|err| format!("Error deleting job:\n{}", err))?;
     Ok(job_uuid)
+}
+
+async fn preview_job_prompts(
+    worker: Arc<Worker>,
+    job: Job,
+) -> Result<ReactionPromptPreview, String> {
+    match job.kind() {
+        JobKind::ProcessMessage(process_message_job) => {
+            let maybe_message = worker
+                .get_message_by_uuid(&process_message_job.message_uuid)
+                .await
+                .map_err(|err| format!("Failed to load message for process message job: {}", err))?;
+            let message = maybe_message.ok_or_else(|| "Message not found for process message job".to_string())?;
+
+            process_reaction_common::preview_scene_reaction_prompts(
+                worker.as_ref(),
+                &process_message_job.recipient_person_uuid,
+                &message.scene_uuid,
+                SceneReactionTrigger::NewMessages,
+            )
+            .await
+            .map_err(|err| err.message())
+        }
+        JobKind::ProcessPersonJoin(process_person_join_job) => {
+            process_reaction_common::preview_scene_reaction_prompts(
+                worker.as_ref(),
+                &process_person_join_job.recipient_person_uuid,
+                &process_person_join_job.scene_uuid,
+                SceneReactionTrigger::PersonJoined {
+                    joined_person_uuid: process_person_join_job.joined_person_uuid.clone(),
+                },
+            )
+            .await
+            .map_err(|err| err.message())
+        }
+        _ => Err("Prompt preview is currently supported only for process message and process person join jobs.".to_string()),
+    }
 }

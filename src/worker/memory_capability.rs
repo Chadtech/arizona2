@@ -11,7 +11,6 @@ use crate::domain::message::MessageSender;
 use crate::domain::person_name::PersonName;
 use crate::domain::person_uuid::PersonUuid;
 use crate::nice_display::NiceDisplay;
-use crate::open_ai;
 use crate::open_ai::completion::Completion;
 use crate::open_ai::embedding::EmbeddingRequest;
 use crate::open_ai::role::Role;
@@ -101,7 +100,7 @@ impl MemoryCapability for Worker {
             .await
             .map_err(|err| format!("Failed to get person name: {}", err))?;
 
-        let mut completion = Completion::new(open_ai::model::Model::DEFAULT);
+        let mut completion = Completion::new();
         completion.add_message(
             Role::System,
             "You decide whether a person should store a memory of a recent event. Be conservative: only store memories that are useful, relevant to motivations, emotionally significant, or important to relationships. If the event is not meaningful or lasting, do not call any tool. When you do create a memory, write it in standardized, first-person language (e.g., \"I ...\"), never refer to the person by name, and include a memorable_score from 0-100. Use the full scale: 0-20 = trivial/noisy, 21-49 = minor context, 50-69 = somewhat meaningful, 70-84 = memorable, 85-100 = highly significant. Most memories should score below 50; only rare, highly salient events should be 70+.",
@@ -364,7 +363,7 @@ impl MemoryCapability for Worker {
             prompt.push_str(format!("- {}\n", event).as_str());
         }
 
-        let mut completion = Completion::new(open_ai::model::Model::DEFAULT);
+        let mut completion = Completion::new();
 
         completion.add_message(Role::System, "You are a memory retrieval assistant. Given context, generate a prompt that can be used in a vector database of memories to retrieve relevant memories for that person in that situation.");
         completion.add_message(Role::User, prompt.as_str());
@@ -544,7 +543,7 @@ async fn summarize_memory_metadata(
     person_name: &str,
     memory_content: &str,
 ) -> Result<MemoryMetadata, String> {
-    let mut completion = Completion::new(open_ai::model::Model::DEFAULT);
+    let mut completion = Completion::new();
 
     completion.add_tool_call(
         ToolFunction::new(
@@ -666,8 +665,7 @@ async fn map_people_names_to_uuids(
             SELECT uuid, name
             FROM person
             WHERE lower(name) = ANY($1::TEXT[]);
-        "#
-        ,
+        "#,
         &lower_names as &[String]
     )
     .fetch_all(&worker.sqlx)

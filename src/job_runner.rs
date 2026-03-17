@@ -729,6 +729,22 @@ mod tests {
     }
 
     impl ReactionCapability for MockWorker {
+        async fn preview_reaction_prompts(
+            &self,
+            _memories: Vec<Memory>,
+            _person_uuid: PersonUuid,
+            _person_identity: String,
+            _state_of_mind: String,
+            _situation: String,
+        ) -> Result<crate::capability::reaction::ReactionPromptPreview, String> {
+            Ok(crate::capability::reaction::ReactionPromptPreview {
+                thinking_system_prompt: String::new(),
+                thinking_user_prompt: String::new(),
+                action_system_prompt: String::new(),
+                action_user_prompt: String::new(),
+            })
+        }
+
         async fn get_reaction(
             &self,
             _memories: Vec<Memory>,
@@ -932,6 +948,13 @@ mod tests {
         }
 
         async fn get_person_identity(
+            &self,
+            _person_uuid: &PersonUuid,
+        ) -> Result<Option<String>, String> {
+            Ok(None)
+        }
+
+        async fn get_person_identity_summary(
             &self,
             _person_uuid: &PersonUuid,
         ) -> Result<Option<String>, String> {

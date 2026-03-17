@@ -209,6 +209,10 @@ impl Job {
     pub fn data(&self) -> Result<Option<serde_json::Value>, String> {
         self.kind.to_data()
     }
+
+    pub fn kind(&self) -> &JobKind {
+        &self.kind
+    }
 }
 
 impl PoppedJob {

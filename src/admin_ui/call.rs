@@ -1,4 +1,3 @@
-use crate::open_ai;
 use crate::open_ai::completion::{Completion, CompletionError};
 use crate::open_ai::role::Role;
 use crate::open_ai_key::OpenAiKey;
@@ -9,7 +8,7 @@ pub async fn submit_prompt(
     client: reqwest::Client,
     prompt: String,
 ) -> Result<String, CompletionError> {
-    let response = Completion::new(open_ai::model::Model::DEFAULT)
+    let response = Completion::new()
         .add_message(Role::User, prompt.as_str())
         .send_request(&open_ai_key, client)
         .await?;
@@ -24,7 +23,7 @@ pub async fn submit_reaction(
     situation: String,
     state_of_mind: String,
 ) -> Result<Vec<PersonReaction>, CompletionError> {
-    let mut completion = Completion::new(open_ai::model::Model::DEFAULT);
+    let mut completion = Completion::new();
 
     completion.add_message(Role::System, "You are a person simulation framework. You have deep insights into the human mind and are very good at predicting people's reactions. When given a description of a person, their state of mind, and some of their recent memories, respond as the person would in the given situation.");
 
@@ -72,7 +71,7 @@ pub async fn submit_prompt_lab(
     system_prompt: String,
     user_prompt: String,
 ) -> Result<String, CompletionError> {
-    let mut completion = Completion::new(open_ai::model::Model::DEFAULT);
+    let mut completion = Completion::new();
 
     if !system_prompt.trim().is_empty() {
         completion.add_message(Role::System, system_prompt.trim());

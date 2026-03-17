@@ -9,7 +9,6 @@ use crate::open_ai_key::OpenAiKey;
 use crate::person_actions::PersonActionError;
 
 pub struct Completion {
-    model: String,
     history: History,
     tool_call: Vec<Tool>,
 }
@@ -201,11 +200,8 @@ fn format_json(value: &serde_json::Value) -> String {
 }
 
 impl Completion {
-    pub fn new(model: Model) -> Self {
-        let model_str = model.to_string();
-
+    pub fn new() -> Self {
         Self {
-            model: model_str,
             history: History::new(),
             tool_call: vec![],
         }
@@ -227,7 +223,7 @@ impl Completion {
         client: reqwest::Client,
     ) -> Result<Response, CompletionError> {
         let mut body = serde_json::json!({
-            "model": self.model,
+            "model": Model::DEFAULT.to_string(),
             "messages": self.history.get_messages().iter().map(|msg| {
                 serde_json::json!({
                     "role": msg.role().to_str(),

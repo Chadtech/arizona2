@@ -1,12 +1,11 @@
 use async_trait::async_trait;
 
 use crate::capability::person_identity::{NewPersonIdentity, PersonIdentityCapability};
-use crate::open_ai;
-use crate::open_ai::completion::Completion;
-use crate::open_ai::role::Role;
 use crate::domain::person_identity_uuid::PersonIdentityUuid;
 use crate::domain::person_uuid::PersonUuid;
 use crate::nice_display::NiceDisplay;
+use crate::open_ai::completion::Completion;
+use crate::open_ai::role::Role;
 use crate::worker::Worker;
 
 #[async_trait]
@@ -16,7 +15,7 @@ impl PersonIdentityCapability for Worker {
         person_name: &str,
         identity: &str,
     ) -> Result<String, String> {
-        let mut completion = Completion::new(open_ai::model::Model::DEFAULT);
+        let mut completion = Completion::new();
         completion.add_message(
             Role::System,
             "Summarize this description of a person's identity in no more than three sentences.",
@@ -89,5 +88,26 @@ impl PersonIdentityCapability for Worker {
         .map_err(|err| format!("Error fetching person identity: {}", err))?;
 
         Ok(rec.map(|r| r.identity))
+    }
+
+    async fn get_person_identity_summary(
+        &self,
+        person_uuid: &PersonUuid,
+    ) -> Result<Option<String>, String> {
+        let rec = sqlx::query!(
+            r#"
+                SELECT summary
+                FROM person_identity
+                WHERE person_uuid = $1::UUID
+                ORDER BY created_at DESC
+                LIMIT 1;
+            "#,
+            person_uuid.to_uuid()
+        )
+        .fetch_optional(&self.sqlx)
+        .await
+        .map_err(|err| format!("Error fetching person identity summary: {}", err))?;
+
+        Ok(rec.and_then(|r| r.summary))
     }
 }

@@ -1,5 +1,11 @@
 use super::call;
 use super::style as s;
+use crate::capability::person::PersonCapability;
+use crate::capability::person_identity::PersonIdentityCapability;
+use crate::capability::reaction::{ReactionCapability, ReactionPromptPreview};
+use crate::capability::state_of_mind::StateOfMindCapability;
+use crate::domain::memory::Memory;
+use crate::domain::person_name::PersonName;
 use crate::nice_display::NiceDisplay;
 use crate::open_ai::completion::CompletionError;
 use crate::person_actions::PersonReaction;
@@ -9,6 +15,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
 pub struct Model {
+    person_name_field: String,
     identity_field: String,
     memory_fields: Vec<w::text_editor::Content>,
     situation_field: String,
@@ -19,11 +26,14 @@ pub struct Model {
 enum ReactionStatus {
     Ready,
     Response(Vec<PersonReaction>),
-    Error(CompletionError),
+    PromptPreview(ReactionPromptPreview),
+    Error(String),
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct Storage {
+    #[serde(default)]
+    pub person_name_field: String,
     #[serde(default)]
     pub identity_field: String,
     #[serde(default)]
@@ -41,16 +51,20 @@ pub enum Msg {
         index: usize,
         action: w::text_editor::Action,
     },
+    PersonNameFieldChanged(String),
     IdentityFieldChanged(String),
+    ClickedPreviewPrompts,
     ClickedSubmitReaction,
     SituationFieldChanged(String),
     StateOfMindFieldChanged(String),
     ReactionSubmissionResult(Result<Vec<PersonReaction>, CompletionError>),
+    PromptPreviewResult(Result<ReactionPromptPreview, String>),
 }
 
 impl Model {
     pub fn new(storage: &Storage) -> Self {
         Model {
+            person_name_field: storage.person_name_field.clone(),
             identity_field: storage.identity_field.clone(),
             memory_fields: storage
                 .memories
@@ -65,6 +79,7 @@ impl Model {
 
     pub fn to_storage(&self) -> Storage {
         Storage {
+            person_name_field: self.person_name_field.clone(),
             identity_field: self.identity_field.clone(),
             memories: self
                 .memory_fields
@@ -88,9 +103,41 @@ impl Model {
                 }
                 Task::none()
             }
+            Msg::PersonNameFieldChanged(new_field) => {
+                self.person_name_field = new_field;
+                Task::none()
+            }
             Msg::IdentityFieldChanged(new_field) => {
                 self.identity_field = new_field;
                 Task::none()
+            }
+            Msg::ClickedPreviewPrompts => {
+                let person_name = self.person_name_field.clone();
+                let memories = self
+                    .memory_fields
+                    .iter()
+                    .map(|editor_content| Memory {
+                        content: editor_content.text(),
+                    })
+                    .collect::<Vec<Memory>>();
+                let person_identity = self.identity_field.clone();
+                let situation = self.situation_field.clone();
+                let state_of_mind = self.state_of_mind_field.clone();
+
+                Task::perform(
+                    async move {
+                        preview_reaction_prompts(
+                            &worker,
+                            person_name,
+                            memories,
+                            person_identity,
+                            situation,
+                            state_of_mind,
+                        )
+                        .await
+                    },
+                    Msg::PromptPreviewResult,
+                )
             }
             Msg::ClickedSubmitReaction => {
                 let open_ai_key = worker.open_ai_key.clone();
@@ -125,6 +172,13 @@ impl Model {
             Msg::ReactionSubmissionResult(result) => {
                 self.reaction_status = match result {
                     Ok(response) => ReactionStatus::Response(response),
+                    Err(err) => ReactionStatus::Error(err.to_nice_error().to_string()),
+                };
+                Task::none()
+            }
+            Msg::PromptPreviewResult(result) => {
+                self.reaction_status = match result {
+                    Ok(preview) => ReactionStatus::PromptPreview(preview),
                     Err(err) => ReactionStatus::Error(err),
                 };
                 Task::none()
@@ -153,12 +207,28 @@ impl Model {
                     .collect::<Vec<_>>(),
             )
             .into(),
-            ReactionStatus::Error(err) => {
-                w::text(format!("Error: {}", err.to_nice_error())).into()
-            }
+            ReactionStatus::PromptPreview(preview) => w::column![
+                w::text("Thinking System Prompt"),
+                w::text(&preview.thinking_system_prompt),
+                w::horizontal_rule(1),
+                w::text("Thinking User Prompt"),
+                w::text(&preview.thinking_user_prompt),
+                w::horizontal_rule(1),
+                w::text("Action System Prompt"),
+                w::text(&preview.action_system_prompt),
+                w::horizontal_rule(1),
+                w::text("Action User Prompt"),
+                w::text(&preview.action_user_prompt),
+            ]
+            .spacing(s::S2)
+            .into(),
+            ReactionStatus::Error(err) => w::text(format!("Error: {}", err)).into(),
         };
 
         w::column![
+            w::text("Person Name"),
+            w::text_input("Person Name", &self.person_name_field)
+                .on_input(Msg::PersonNameFieldChanged),
             w::text("Identity"),
             w::text_input("Identity", &self.identity_field).on_input(Msg::IdentityFieldChanged),
             w::text("Memories"),
@@ -166,14 +236,53 @@ impl Model {
             w::button("Add Memory").on_press(Msg::ClickedAddMemory),
             w::text("Situation"),
             w::text_input("Situation", &self.situation_field)
-                .on_input(|field| { Msg::SituationFieldChanged(field) }),
+                .on_input(Msg::SituationFieldChanged),
             w::text("State of Mind"),
             w::text_input("State of Mind", &self.state_of_mind_field)
-                .on_input(|field| { Msg::StateOfMindFieldChanged(field) }),
+                .on_input(Msg::StateOfMindFieldChanged),
+            w::button("Preview Prompts (No LLM)").on_press(Msg::ClickedPreviewPrompts),
             w::button("Submit Reaction").on_press(Msg::ClickedSubmitReaction),
             reaction_response_view,
         ]
         .spacing(s::S4)
         .into()
     }
+}
+
+async fn preview_reaction_prompts(
+    worker: &Worker,
+    person_name: String,
+    memories: Vec<Memory>,
+    mut person_identity: String,
+    situation: String,
+    mut state_of_mind: String,
+) -> Result<ReactionPromptPreview, String> {
+    let person_uuid = worker
+        .get_person_uuid_by_name(PersonName::from_string(person_name))
+        .await?;
+
+    if person_identity.trim().is_empty() {
+        person_identity = worker
+            .get_person_identity_summary(&person_uuid)
+            .await?
+            .unwrap_or_else(|| "No identity found.".to_string());
+    }
+
+    if state_of_mind.trim().is_empty() {
+        state_of_mind = worker
+            .get_latest_state_of_mind(&person_uuid)
+            .await?
+            .map(|value| value.content)
+            .unwrap_or_else(|| "No state of mind found.".to_string());
+    }
+
+    worker
+        .preview_reaction_prompts(
+            memories,
+            person_uuid,
+            person_identity,
+            state_of_mind,
+            situation,
+        )
+        .await
 }

@@ -8,7 +8,6 @@ use crate::domain::person_uuid::PersonUuid;
 use crate::domain::scene_participant_uuid::SceneParticipantUuid;
 use crate::domain::scene_uuid::SceneUuid;
 use crate::nice_display::NiceDisplay;
-use crate::open_ai;
 use crate::open_ai::completion::Completion;
 use crate::open_ai::role::Role;
 use crate::worker::Worker;
@@ -408,10 +407,7 @@ impl SceneCapability for Worker {
         Ok(())
     }
 
-    async fn is_real_world_user_in_scene(
-        &self,
-        scene_uuid: &SceneUuid,
-    ) -> Result<bool, String> {
+    async fn is_real_world_user_in_scene(&self, scene_uuid: &SceneUuid) -> Result<bool, String> {
         let maybe_presence = sqlx::query!(
             r#"
                 SELECT scene_uuid
@@ -483,7 +479,7 @@ impl SceneCapability for Worker {
             _ => Err("Basis scene has no description; cannot derive travel context".to_string())?,
         };
 
-        let mut completion = Completion::new(open_ai::model::Model::DEFAULT);
+        let mut completion = Completion::new();
         completion.add_message(
             Role::System,
             "You write concise, vivid scene descriptions for roleplay environments. Return exactly two paragraphs. No bullet points or titles. Write in neutral third-person environmental prose only. Do not address the reader (avoid 'you' and imperative phrasing). Do not include specific people, named actors, or what any individual is doing.",

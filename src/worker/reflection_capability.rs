@@ -6,7 +6,6 @@ use crate::domain::memory::Memory;
 use crate::domain::motivation_uuid::MotivationUuid;
 use crate::domain::person_uuid::PersonUuid;
 use crate::nice_display::NiceDisplay;
-use crate::open_ai;
 use crate::open_ai::completion::Completion;
 use crate::open_ai::role::Role;
 use crate::open_ai::tool::{ToolFunction, ToolFunctionParameter};
@@ -142,7 +141,7 @@ impl ReflectionCapability for Worker {
             format!("Reflection prompt:\n{}", user_prompt).as_str(),
         );
 
-        let mut completion = Completion::new(open_ai::model::Model::DEFAULT);
+        let mut completion = Completion::new();
         completion.add_message(
             Role::System,
             "You are a reflection assistant making an objective, third-person assessment of how this person's mind would realistically change after reflecting on the situation. Predict natural, human shifts rather than idealized outcomes. For state of mind updates, output a neutral, direct statement of internal disposition only. Rules for state of mind: third person only; no first-person words (I/me/my/we/us/our); no comparative or relative phrasing (e.g., calmer, steadier, more, less, better, worse, than); no references to specific events, invitations, conversations, requests, permissions, evidence, logs, or what anyone said/did; no names, places, or concrete external details. The state-of-mind line must be context-free and timeless, so it still makes sense without the Situation text. Keep it abstract and trait-level (e.g., \"steady and guarded\", \"restless and distracted\", \"cautious but curious\"). Memory summaries may include concrete details. If removing a motivation, use the index from the enumerated motivations list. Decide whether to update their state of mind, summarize memories, or adjust motivations. Use a tool call only when there is a meaningful change. If nothing should change, do not call any tools. Respond with tool calls only. Consider whether any motivations should be added or removed based on the situation, especially when feedback suggests a long-term mismatch or feasibility constraint.",

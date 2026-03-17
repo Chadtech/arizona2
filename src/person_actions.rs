@@ -70,7 +70,8 @@ impl PersonActionKind {
             },
             ToolFunctionParameter::String {
                 name: "comment".to_string(),
-                description: "What to say if action is say in scene.".to_string(),
+                description: "What to say if action is say in scene. Write like spoken dialogue, not a document: avoid bullet points, numbered lists, headings, and list-like enumeration."
+                    .to_string(),
                 required: false,
             },
             ToolFunctionParameter::String {
@@ -96,7 +97,7 @@ impl PersonActionKind {
 
         Tool::FunctionCall(ToolFunction::new(
             "choose_action".to_string(),
-            "Choose a single action for the person. Only one action is allowed. Use idle when the person decides to do nothing. Use hibernate for long, uninterrupted sleep. If action is say in scene, you may also provide destination_scene_name to leave right after speaking."
+            "Choose a single action for the person. Only one action is allowed. Use idle when the person decides to do nothing. Use hibernate for long, uninterrupted sleep. If action is say in scene, the comment should resemble natural speech rather than a document or list. You may also provide destination_scene_name to leave right after speaking."
                 .to_string(),
             parameters,
         ))

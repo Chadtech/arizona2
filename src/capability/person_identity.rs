@@ -22,4 +22,8 @@ pub trait PersonIdentityCapability {
     ) -> Result<PersonIdentityUuid, String>;
     async fn get_person_identity(&self, person_uuid: &PersonUuid)
         -> Result<Option<String>, String>;
+    async fn get_person_identity_summary(
+        &self,
+        person_uuid: &PersonUuid,
+    ) -> Result<Option<String>, String>;
 }
