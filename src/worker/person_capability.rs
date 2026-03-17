@@ -22,6 +22,24 @@ impl PersonCapability for Worker {
         Ok(PersonUuid::from_uuid(ret.uuid))
     }
 
+    async fn get_all_person_uuids(&self) -> Result<Vec<PersonUuid>, String> {
+        let rows = sqlx::query!(
+            r#"
+                SELECT uuid
+                FROM person
+                ORDER BY name ASC;
+            "#
+        )
+        .fetch_all(&self.sqlx)
+        .await
+        .map_err(|err| format!("Error fetching all person UUIDs: {}", err))?;
+
+        Ok(rows
+            .into_iter()
+            .map(|row| PersonUuid::from_uuid(row.uuid))
+            .collect())
+    }
+
     async fn get_persons_name(&self, person_uuid: PersonUuid) -> Result<PersonName, String> {
         let rec = sqlx::query!(
             r#"

@@ -26,7 +26,9 @@ pub struct Model {
 enum Status {
     Ready,
     CreatingMemory,
+    CreatingMemoryForEveryone,
     Done,
+    DoneForEveryone(usize),
     FailedCreatingMemory(String),
 }
 
@@ -49,6 +51,8 @@ pub enum Msg {
     MemoryFieldChanged(String),
     ClickedCreateMemory,
     CreatedMemory(Result<MemoryUuid, String>),
+    ClickedCreateMemoryForEveryone,
+    CreatedMemoryForEveryone(Result<usize, String>),
     // Memory query messages
     QueryPersonRecallingChanged(String),
     QueryPeopleChanged(String),
@@ -110,7 +114,10 @@ impl Model {
             w::text_input("", &self.name_field).on_input(Msg::NameFieldChanged),
             w::text("Memory"),
             w::text_input("", &self.memory_field).on_input(Msg::MemoryFieldChanged),
-            w::button("Create Memory").on_press(Msg::ClickedCreateMemory),
+            w::row![
+                w::button("Create Memory").on_press(Msg::ClickedCreateMemory),
+                w::button("Create Memory For Everyone").on_press(Msg::ClickedCreateMemoryForEveryone),
+            ].spacing(s::S4),
             status_view(&self.status),
             w::horizontal_rule(1),
             w::text("Memory Query Prompt Generator").size(20),
@@ -192,6 +199,23 @@ impl Model {
                     Err(err) => Status::FailedCreatingMemory(err),
                 };
 
+                Task::none()
+            }
+            Msg::ClickedCreateMemoryForEveryone => {
+                self.status = Status::CreatingMemoryForEveryone;
+
+                let content = self.memory_field.clone();
+
+                Task::perform(
+                    async move { create_new_memory_for_everyone(&worker, content).await },
+                    Msg::CreatedMemoryForEveryone,
+                )
+            }
+            Msg::CreatedMemoryForEveryone(result) => {
+                self.status = match result {
+                    Ok(count) => Status::DoneForEveryone(count),
+                    Err(err) => Status::FailedCreatingMemory(err),
+                };
                 Task::none()
             }
             Msg::QueryPersonRecallingChanged(value) => {
@@ -281,7 +305,11 @@ fn status_view(status: &Status) -> Element<'_, Msg> {
     match status {
         Status::Ready => w::text("Ready").into(),
         Status::CreatingMemory => w::text("Creating Memory...").into(),
+        Status::CreatingMemoryForEveryone => w::text("Creating Memory For Everyone...").into(),
         Status::Done => w::text("Memory created successfully!").into(),
+        Status::DoneForEveryone(count) => {
+            w::text(format!("Created memory for {} people.", count)).into()
+        }
         Status::FailedCreatingMemory(err) => w::text(format!("Error: {}", err)).into(),
     }
 }
@@ -300,6 +328,23 @@ async fn create_new_memory(
     };
 
     worker.create_memory(new_memory).await
+}
+
+async fn create_new_memory_for_everyone(worker: &Worker, content: String) -> Result<usize, String> {
+    let person_uuids = worker.get_all_person_uuids().await?;
+
+    let mut created = 0usize;
+    for person_uuid in person_uuids {
+        let new_memory = NewMemory {
+            memory_uuid: MemoryUuid::new(),
+            content: content.clone(),
+            person_uuid,
+        };
+        worker.create_memory(new_memory).await?;
+        created += 1;
+    }
+
+    Ok(created)
 }
 
 struct GeneratePromptAndSearchMemoriesInput {
