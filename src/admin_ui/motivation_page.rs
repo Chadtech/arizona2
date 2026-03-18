@@ -60,13 +60,11 @@ pub enum Msg {
     MotivationDeleted(Result<MotivationUuid, (MotivationUuid, String)>),
 }
 
-#[derive(Serialize, Deserialize, Debug)]
-#[derive(Default)]
+#[derive(Serialize, Deserialize, Debug, Default)]
 pub struct Storage {
     #[serde(default)]
     person_name_input: String,
 }
-
 
 impl Model {
     pub fn new(storage: &Storage) -> Self {
@@ -365,9 +363,7 @@ async fn load_motivations(
     let person_uuid = worker
         .get_person_uuid_by_name(PersonName::from_string(person_name))
         .await?;
-    let motivations = worker
-        .get_motivations_for_person(person_uuid.clone())
-        .await?;
+    let motivations = worker.get_motivations_for_person(&person_uuid).await?;
     Ok((person_uuid, motivations))
 }
 

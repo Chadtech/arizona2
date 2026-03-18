@@ -14,11 +14,11 @@ use crate::capability::scene::SceneCapability;
 use crate::capability::state_of_mind::StateOfMindCapability;
 use crate::domain::job::person_action_handler::ActionHandleError;
 use crate::domain::job::process_reaction_common::{self, SceneReactionTrigger};
+use crate::domain::message_uuid::MessageUuid;
 use crate::domain::person_uuid::PersonUuid;
 use crate::domain::random_seed::RandomSeed;
 use crate::domain::scene_uuid::SceneUuid;
 use crate::nice_display::NiceDisplay;
-use crate::domain::message_uuid::MessageUuid;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -47,20 +47,6 @@ pub enum Error {
         details: String,
     },
     FailedToGetPersonsName(String),
-    FailedToGetSceneName {
-        scene_uuid: SceneUuid,
-        details: String,
-    },
-    SceneNameNotFound {
-        scene_uuid: SceneUuid,
-    },
-    FailedToGetSceneDescription {
-        scene_uuid: SceneUuid,
-        details: String,
-    },
-    SceneDescriptionNotFound {
-        scene_uuid: SceneUuid,
-    },
     FailedToGetSceneParticipants {
         scene_uuid: SceneUuid,
         details: String,
@@ -139,32 +125,6 @@ impl NiceDisplay for Error {
             }
             Error::FailedToGetPersonsName(err) => {
                 format!("Failed to get person's name: {}", err)
-            }
-            Error::FailedToGetSceneName {
-                scene_uuid,
-                details,
-            } => {
-                format!(
-                    "Failed to get scene name for {}: {}",
-                    scene_uuid.to_uuid(),
-                    details
-                )
-            }
-            Error::SceneNameNotFound { scene_uuid } => {
-                format!("Scene name not found for {}", scene_uuid.to_uuid())
-            }
-            Error::FailedToGetSceneDescription {
-                scene_uuid,
-                details,
-            } => {
-                format!(
-                    "Failed to get scene description for {}: {}",
-                    scene_uuid.to_uuid(),
-                    details
-                )
-            }
-            Error::SceneDescriptionNotFound { scene_uuid } => {
-                format!("Scene description not found for {}", scene_uuid.to_uuid())
             }
             Error::FailedToGetSceneParticipants {
                 scene_uuid,

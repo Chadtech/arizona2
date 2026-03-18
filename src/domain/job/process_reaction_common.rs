@@ -90,13 +90,12 @@ pub async fn run_scene_reaction<
         SceneReactionTrigger::PersonJoined { .. } => vec![],
     };
 
-    let is_enabled = worker
-        .is_person_enabled(person_uuid)
-        .await
-        .map_err(|err| Error::FailedToGetEnabledState {
+    let is_enabled = worker.is_person_enabled(person_uuid).await.map_err(|err| {
+        Error::FailedToGetEnabledState {
             person_uuid: person_uuid.clone(),
             details: err,
-        })?;
+        }
+    })?;
 
     if !is_enabled {
         if !pending_messages.is_empty() {
@@ -220,7 +219,6 @@ pub async fn run_scene_reaction<
         .get_reaction(
             reaction_input.reflection_input.memories.clone(),
             person_uuid.clone(),
-            reaction_input.reflection_input.person_identity.clone(),
             reaction_input.reflection_input.state_of_mind.clone(),
             reaction_input.reaction_situation,
         )
@@ -366,8 +364,6 @@ pub async fn preview_scene_reaction_prompts<
         .preview_reaction_prompts(
             reaction_input.reflection_input.memories,
             person_uuid.clone(),
-            reaction_input.reflection_input.person_identity,
-            reaction_input.reflection_input.state_of_mind,
             reaction_input.reaction_situation,
         )
         .await
@@ -380,6 +376,7 @@ async fn build_reaction_execution_input<
         + MemoryCapability
         + PersonCapability
         + EventCapability
+        + ReactionCapability
         + StateOfMindCapability
         + PersonIdentityCapability
         + Sync,
@@ -392,6 +389,16 @@ async fn build_reaction_execution_input<
 ) -> Result<ReactionExecutionInput, Error> {
     let situation =
         build_scene_situation(worker, scene_uuid, pending_messages, person_uuid).await?;
+    let prompt_situation_messages = match trigger {
+        SceneReactionTrigger::NewMessages => &[],
+        SceneReactionTrigger::PersonJoined { .. } => pending_messages,
+    };
+    let prompt_situation =
+        build_scene_situation(worker, scene_uuid, prompt_situation_messages, person_uuid).await?;
+    let prompt_situation_text = match trigger {
+        SceneReactionTrigger::NewMessages => prompt_situation.to_people_present_text(),
+        SceneReactionTrigger::PersonJoined { .. } => prompt_situation.to_string(),
+    };
 
     let reflection_input = build_reflection_input(
         worker,
@@ -414,6 +421,10 @@ async fn build_reaction_execution_input<
 
     let reaction_events = filter_reaction_events(reaction_recent_events, pending_messages);
     let recent_events_text = Event::many_to_prompt_list(reaction_events);
+    let recent_events_summary = worker
+        .summarize_reaction_events(recent_events_text)
+        .await
+        .map_err(Error::GetPersonReaction)?;
 
     let priority_instruction = match trigger {
         SceneReactionTrigger::NewMessages => {
@@ -465,10 +476,10 @@ async fn build_reaction_execution_input<
     let reaction_situation = format!(
         "{}\n\nRecent events (older context):\n{}\n\n{}\n{}\n\n{}",
         priority_instruction,
-        recent_events_text,
+        recent_events_summary,
         new_event_section_label,
         new_event_section_text,
-        situation
+        prompt_situation_text
     );
 
     Ok(ReactionExecutionInput {
@@ -489,28 +500,6 @@ async fn build_scene_situation<W: SceneCapability + PersonCapability>(
         .get_persons_name(person_uuid.clone())
         .await
         .map_err(Error::FailedToGetPersonsName)?;
-
-    let scene_name = worker
-        .get_scene_name(scene_uuid)
-        .await
-        .map_err(|err| Error::FailedToGetSceneName {
-            scene_uuid: scene_uuid.clone(),
-            details: err,
-        })?
-        .ok_or_else(|| Error::SceneNameNotFound {
-            scene_uuid: scene_uuid.clone(),
-        })?;
-
-    let scene_description = worker
-        .get_scene_description(scene_uuid)
-        .await
-        .map_err(|err| Error::FailedToGetSceneDescription {
-            scene_uuid: scene_uuid.clone(),
-            details: err,
-        })?
-        .ok_or_else(|| Error::SceneDescriptionNotFound {
-            scene_uuid: scene_uuid.clone(),
-        })?;
 
     let participants = worker
         .get_scene_current_participants(scene_uuid)
@@ -553,8 +542,6 @@ async fn build_scene_situation<W: SceneCapability + PersonCapability>(
 
     let situation = Situation::new(situation::Input {
         person_name: person_name.to_string(),
-        scene_name,
-        scene_description,
         particpants: participant_names,
         messages: lines,
     });

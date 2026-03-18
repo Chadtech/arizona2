@@ -11,19 +11,17 @@ pub struct ReactionPromptPreview {
 }
 
 pub trait ReactionCapability {
+    async fn summarize_reaction_events(&self, events_text: String) -> Result<String, String>;
     async fn preview_reaction_prompts(
         &self,
         memories: Vec<Memory>,
         person_uuid: PersonUuid,
-        person_identity: String,
-        state_of_mind: String,
         situation: String,
     ) -> Result<ReactionPromptPreview, String>;
     async fn get_reaction(
         &self,
         memories: Vec<Memory>,
         person_uuid: PersonUuid,
-        person_identity: String,
         state_of_mind: String,
         situation: String,
     ) -> Result<PersonReaction, String>;

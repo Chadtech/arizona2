@@ -729,12 +729,14 @@ mod tests {
     }
 
     impl ReactionCapability for MockWorker {
+        async fn summarize_reaction_events(&self, events_text: String) -> Result<String, String> {
+            Ok(events_text)
+        }
+
         async fn preview_reaction_prompts(
             &self,
             _memories: Vec<Memory>,
             _person_uuid: PersonUuid,
-            _person_identity: String,
-            _state_of_mind: String,
             _situation: String,
         ) -> Result<crate::capability::reaction::ReactionPromptPreview, String> {
             Ok(crate::capability::reaction::ReactionPromptPreview {
@@ -749,7 +751,6 @@ mod tests {
             &self,
             _memories: Vec<Memory>,
             _person_uuid: PersonUuid,
-            _person_identity: String,
             _state_of_mind: String,
             _situation: String,
         ) -> Result<PersonReaction, String> {

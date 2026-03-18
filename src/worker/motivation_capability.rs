@@ -29,7 +29,7 @@ impl MotivationCapability for Worker {
 
     async fn get_motivations_for_person(
         &self,
-        person_uuid: PersonUuid,
+        person_uuid: &PersonUuid,
     ) -> Result<Vec<Motivation>, String> {
         let rows = sqlx::query!(
             r#"

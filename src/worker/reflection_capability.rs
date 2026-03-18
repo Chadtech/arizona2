@@ -98,7 +98,7 @@ impl ReflectionCapability for Worker {
             .map_err(|err| format!("Failed to get person name: {}", err))?;
 
         let motivations = self
-            .get_motivations_for_person(person_uuid.clone())
+            .get_motivations_for_person(&person_uuid)
             .await
             .map_err(|err| format!("Failed to get motivations: {}", err))?;
 

@@ -1,6 +1,8 @@
 use crate::capability::motivation::MotivationCapability;
 use crate::capability::person::PersonCapability;
+use crate::capability::person_identity::PersonIdentityCapability;
 use crate::capability::reaction::{ReactionCapability, ReactionPromptPreview};
+use crate::capability::state_of_mind::StateOfMindCapability;
 use crate::domain::logger::Level;
 use crate::domain::memory::Memory;
 use crate::domain::motivation::Motivation;
@@ -14,6 +16,8 @@ use crate::person_actions::{
 };
 use crate::worker::Worker;
 
+const INTERNAL_REACTION_PLACEHOLDER: &str = "<internal reaction text placeholder>";
+
 pub enum Error {
     CompletionError(CompletionError),
     FailedToGetMotivations(String),
@@ -23,30 +27,80 @@ pub enum Error {
 }
 
 impl ReactionCapability for Worker {
+    async fn summarize_reaction_events(&self, events_text: String) -> Result<String, String> {
+        let trimmed = events_text.trim();
+        if trimmed.is_empty() {
+            return Ok("None.".to_string());
+        }
+
+        let mut completion = Completion::new();
+        completion.add_message(
+            Role::System,
+            "You summarize recent roleplay events for another model that needs short working context before choosing an immediate action. Compress aggressively. Return a brief bullet list only. Keep the most decision-relevant developments, preserve important concrete facts, merge repetition, and omit low-signal detail. Prefer 4-8 bullets unless there is almost nothing to say.",
+        );
+        completion.add_message(
+            Role::User,
+            format!(
+                "Summarize these recent events into a much shorter list.\n\n{}",
+                trimmed
+            )
+            .as_str(),
+        );
+
+        let response = completion
+            .send_request(&self.open_ai_key, reqwest::Client::new())
+            .await
+            .map_err(|err| err.message())?;
+
+        let summary = response.as_message().map_err(|err| err.message())?;
+
+        self.logger.log(
+            Level::Info,
+            format!("Summarized reaction events:\n{}", summary).as_str(),
+        );
+
+        Ok(summary)
+    }
+
     async fn preview_reaction_prompts(
         &self,
         memories: Vec<Memory>,
         person_uuid: PersonUuid,
-        person_identity: String,
-        state_of_mind: String,
         situation: String,
     ) -> Result<ReactionPromptPreview, String> {
         let person_name = self
             .get_persons_name(person_uuid.clone())
             .await
             .map_err(|err| format!("Failed to get person's name: {}", err))?;
+
         let motivations = self
-            .get_motivations_for_person(person_uuid)
+            .get_motivations_for_person(&person_uuid)
             .await
             .map_err(|err| format!("Failed to get motivations: {}", err))?;
+
+        let person_identity = get_person_identity_summary(self, &person_uuid).await?;
+
+        let state_of_mind = if let Some(som) = self
+            .get_latest_state_of_mind(&person_uuid)
+            .await
+            .map_err(|err| format!("Failed to get state of mind: {}", err))?
+        {
+            som
+        } else {
+            Err(format!(
+                "No state of mind found for person_uuid: {}",
+                person_uuid.to_uuid()
+            ))?
+        };
+
         let prompts = build_prompts(
             person_name.as_str(),
             &memories,
             &motivations,
             person_identity.as_str(),
-            state_of_mind.as_str(),
+            state_of_mind.content.as_str(),
             situation.as_str(),
-            "<first-pass internal reaction text from layer 1>",
+            INTERNAL_REACTION_PLACEHOLDER,
         );
         Ok(prompts)
     }
@@ -55,10 +109,10 @@ impl ReactionCapability for Worker {
         &self,
         memories: Vec<Memory>,
         person_uuid: PersonUuid,
-        person_identity: String,
         state_of_mind: String,
         situation: String,
     ) -> Result<PersonReaction, String> {
+        let person_identity = get_person_identity_summary(self, &person_uuid).await?;
         get_reaction_helper(
             self,
             memories,
@@ -101,7 +155,7 @@ async fn get_reaction_helper(
         })?;
 
     let motivations = worker
-        .get_motivations_for_person(person_uuid.clone())
+        .get_motivations_for_person(&person_uuid)
         .await
         .map_err(Error::FailedToGetMotivations)?;
 
@@ -112,7 +166,7 @@ async fn get_reaction_helper(
         person_identity.as_str(),
         state_of_mind.as_str(),
         situation.as_str(),
-        "<first-pass internal reaction text placeholder>",
+        INTERNAL_REACTION_PLACEHOLDER,
     );
 
     let mut completion = Completion::new();
@@ -159,26 +213,20 @@ async fn get_reaction_helper(
     // Second LLM call
 
     let mut action_completion = Completion::new();
-    let action_prompts = build_prompts(
-        person_name.as_str(),
-        &memories,
-        &motivations,
-        person_identity.as_str(),
-        state_of_mind.as_str(),
-        situation.as_str(),
-        text.as_str(),
-    );
+    let action_user_prompt = prompts
+        .action_user_prompt
+        .replace(INTERNAL_REACTION_PLACEHOLDER, text.as_str());
     worker.logger.log(
         Level::Info,
         format!(
-            "Dual-layer action call prompts\nSystem:\n{}\n\nUser:\n{}",
-            action_prompts.action_system_prompt, action_prompts.action_user_prompt
+            "Action call prompts\nSystem:\n{}\n\nUser:\n{}",
+            prompts.action_system_prompt, action_user_prompt
         )
         .as_str(),
     );
 
-    action_completion.add_message(Role::System, action_prompts.action_system_prompt.as_str());
-    action_completion.add_message(Role::User, action_prompts.action_user_prompt.as_str());
+    action_completion.add_message(Role::System, prompts.action_system_prompt.as_str());
+    action_completion.add_message(Role::User, action_user_prompt.as_str());
     action_completion.add_tool_call(PersonActionKind::to_choice_tool());
 
     let action_response = action_completion
@@ -285,11 +333,11 @@ Rules:
 	).replace("$name$", person_name);
 
     let action_user_prompt = format!(
-        "Memories:\n{}\n\nRecent events and recent messages:\n{}\n\nFirst-pass internal reaction text:\n{}\n\nNow choose exactly one action tool call. Do not output any plain text.",
+        "Memories:\n{}\n\nRecent events and recent messages:\n{}\n\nInternal reaction text:\n{}\n\nNow choose exactly one action tool call. Do not output any plain text.",
         memories_list_text,
         situation,
         first_pass_text
-			);
+    );
 
     ReactionPromptPreview {
         thinking_system_prompt,
@@ -334,4 +382,22 @@ fn tool_calls_into_reactions(
         .map(PersonReaction::from_open_ai_tool_call)
         .collect::<Result<Vec<PersonReaction>, PersonActionError>>()
         .map_err(Into::into)
+}
+
+async fn get_person_identity_summary(
+    worker: &Worker,
+    person_uuid: &PersonUuid,
+) -> Result<String, String> {
+    if let Some(pi) = worker
+        .get_person_identity_summary(person_uuid)
+        .await
+        .map_err(|err| format!("Failed to get person identity: {}", err))?
+    {
+        Ok(pi)
+    } else {
+        Err(format!(
+            "No person identity found for person_uuid: {}",
+            person_uuid.to_uuid()
+        ))
+    }
 }

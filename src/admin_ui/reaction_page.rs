@@ -1,9 +1,7 @@
 use super::call;
 use super::style as s;
 use crate::capability::person::PersonCapability;
-use crate::capability::person_identity::PersonIdentityCapability;
 use crate::capability::reaction::{ReactionCapability, ReactionPromptPreview};
-use crate::capability::state_of_mind::StateOfMindCapability;
 use crate::domain::memory::Memory;
 use crate::domain::person_name::PersonName;
 use crate::nice_display::NiceDisplay;
@@ -120,21 +118,11 @@ impl Model {
                         content: editor_content.text(),
                     })
                     .collect::<Vec<Memory>>();
-                let person_identity = self.identity_field.clone();
                 let situation = self.situation_field.clone();
-                let state_of_mind = self.state_of_mind_field.clone();
 
                 Task::perform(
                     async move {
-                        preview_reaction_prompts(
-                            &worker,
-                            person_name,
-                            memories,
-                            person_identity,
-                            situation,
-                            state_of_mind,
-                        )
-                        .await
+                        preview_reaction_prompts(&worker, person_name, memories, situation).await
                     },
                     Msg::PromptPreviewResult,
                 )
@@ -235,8 +223,7 @@ impl Model {
             w::Column::with_children(memories_children).spacing(s::S4),
             w::button("Add Memory").on_press(Msg::ClickedAddMemory),
             w::text("Situation"),
-            w::text_input("Situation", &self.situation_field)
-                .on_input(Msg::SituationFieldChanged),
+            w::text_input("Situation", &self.situation_field).on_input(Msg::SituationFieldChanged),
             w::text("State of Mind"),
             w::text_input("State of Mind", &self.state_of_mind_field)
                 .on_input(Msg::StateOfMindFieldChanged),
@@ -253,36 +240,13 @@ async fn preview_reaction_prompts(
     worker: &Worker,
     person_name: String,
     memories: Vec<Memory>,
-    mut person_identity: String,
     situation: String,
-    mut state_of_mind: String,
 ) -> Result<ReactionPromptPreview, String> {
     let person_uuid = worker
         .get_person_uuid_by_name(PersonName::from_string(person_name))
         .await?;
 
-    if person_identity.trim().is_empty() {
-        person_identity = worker
-            .get_person_identity_summary(&person_uuid)
-            .await?
-            .unwrap_or_else(|| "No identity found.".to_string());
-    }
-
-    if state_of_mind.trim().is_empty() {
-        state_of_mind = worker
-            .get_latest_state_of_mind(&person_uuid)
-            .await?
-            .map(|value| value.content)
-            .unwrap_or_else(|| "No state of mind found.".to_string());
-    }
-
     worker
-        .preview_reaction_prompts(
-            memories,
-            person_uuid,
-            person_identity,
-            state_of_mind,
-            situation,
-        )
+        .preview_reaction_prompts(memories, person_uuid, situation)
         .await
 }

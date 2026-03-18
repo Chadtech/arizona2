@@ -43,10 +43,6 @@ pub enum Error {
     NoStateOfMindFound {
         person_uuid: PersonUuid,
     },
-    FailedToGetPersonIdentity(String),
-    NoPersonIdentityFound {
-        person_uuid: PersonUuid,
-    },
     FailedToGetPersonsName(String),
     CouldNotCreateMemoriesPrompt(String),
     FailedToSearchMemories(String),
@@ -86,15 +82,6 @@ impl NiceDisplay for Error {
             Error::NoStateOfMindFound { person_uuid } => {
                 format!(
                     "No state of mind found for person {}",
-                    person_uuid.to_uuid()
-                )
-            }
-            Error::FailedToGetPersonIdentity(err) => {
-                format!("Failed to get person identity: {}", err)
-            }
-            Error::NoPersonIdentityFound { person_uuid } => {
-                format!(
-                    "No person identity found for person {}",
                     person_uuid.to_uuid()
                 )
             }
@@ -261,23 +248,10 @@ impl PersonWaitingJob {
                     .map_err(Error::FailedToSearchMemories)?,
             );
 
-            let maybe_person_identity: Option<String> = worker
-                .get_person_identity_summary(&person_uuid)
-                .await
-                .map_err(Error::FailedToGetPersonIdentity)?;
-
-            let person_identity: String = match maybe_person_identity {
-                Some(identity) => identity,
-                None => Err(Error::NoPersonIdentityFound {
-                    person_uuid: person_uuid.clone(),
-                })?,
-            };
-
             let reaction = worker
                 .get_reaction(
                     memories,
                     person_uuid.clone(),
-                    person_identity,
                     state_of_mind.content,
                     situation,
                 )

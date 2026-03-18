@@ -656,16 +656,21 @@ fn selected_job_view(selected: &SelectedJobStatus) -> Element<'_, Msg> {
                                 .on_press(Msg::ClickedCopyPromptPreview(copy_text)),
                         ]
                         .spacing(s::S2),
-                        w::text("Thinking System Prompt"),
-                        w::text(&preview.thinking_system_prompt),
-                        w::text("Thinking User Prompt"),
-                        w::text(&preview.thinking_user_prompt),
-                        w::text("Action System Prompt"),
-                        w::text(&preview.action_system_prompt),
-                        w::text("Action User Prompt"),
-                        w::text(&preview.action_user_prompt),
+                        prompt_preview_section(
+                            "Thinking System Prompt",
+                            &preview.thinking_system_prompt,
+                        ),
+                        prompt_preview_section(
+                            "Thinking User Prompt",
+                            &preview.thinking_user_prompt,
+                        ),
+                        prompt_preview_section(
+                            "Action System Prompt",
+                            &preview.action_system_prompt,
+                        ),
+                        prompt_preview_section("Action User Prompt", &preview.action_user_prompt),
                     ]
-                    .spacing(s::S1)
+                    .spacing(s::S2)
                     .into()
                 }
                 PromptPreviewStatus::Error(err) => w::column![
@@ -747,6 +752,26 @@ fn format_job_time(label: &str, timestamp: Option<chrono::DateTime<chrono::Utc>>
         Some(time) => format!("{}: {}", label, time.format("%Y-%m-%d %H:%M:%S UTC")),
         None => format!("{}: none", label),
     }
+}
+
+fn prompt_preview_section<'a>(title: &'a str, body: &'a str) -> Element<'a, Msg> {
+    w::container(
+        w::column![
+            w::text(title).size(s::S4).color(s::GRAY_VERY_SOFT),
+            w::text(body),
+        ]
+        .spacing(s::S2),
+    )
+    .padding(s::S2)
+    .style(|_| container::Style {
+        border: iced::border::Border {
+            width: 1.0,
+            color: s::GRAY_DEEP,
+            ..Default::default()
+        },
+        ..Default::default()
+    })
+    .into()
 }
 
 fn format_prompt_preview(preview: &ReactionPromptPreview) -> String {
