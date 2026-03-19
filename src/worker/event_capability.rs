@@ -5,6 +5,7 @@ use crate::domain::event::{Event, EventType};
 use crate::domain::message_uuid::MessageUuid;
 use crate::domain::person_uuid::PersonUuid;
 use crate::domain::scene_uuid::SceneUuid;
+use crate::temporary_event_cutoff::event_history_cutoff;
 use crate::worker::Worker;
 
 impl EventCapability for Worker {
@@ -337,6 +338,9 @@ impl EventCapability for Worker {
             // Case 4: Neither specified - return empty
             (None, None) => {}
         }
+
+        let cutoff = event_history_cutoff();
+        events.retain(|event| event.timestamp >= cutoff);
 
         // Sort all events by timestamp
         events.sort_by(|a, b| a.timestamp.cmp(&b.timestamp));

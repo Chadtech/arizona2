@@ -3,6 +3,7 @@ use crate::domain::message::{Message, MessageSender};
 use crate::domain::message_uuid::MessageUuid;
 use crate::domain::person_uuid::PersonUuid;
 use crate::domain::scene_uuid::SceneUuid;
+use crate::temporary_event_cutoff::event_history_cutoff;
 use crate::worker::Worker;
 use chrono::{DateTime, Utc};
 
@@ -155,8 +156,10 @@ impl MessageCapability for Worker {
         .await
         .map_err(|err| format!("Error fetching unhandled scene messages: {}", err))?;
 
+        let cutoff = event_history_cutoff();
         let messages = rows
             .into_iter()
+            .filter(|row| row.sent_at >= cutoff)
             .map(|row| Message {
                 uuid: MessageUuid::from_uuid(row.uuid),
                 sender: match row.sender_person_uuid {
