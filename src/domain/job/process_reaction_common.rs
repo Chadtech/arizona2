@@ -340,17 +340,6 @@ pub async fn preview_scene_reaction_prompts<
         SceneReactionTrigger::PersonJoined { .. } => vec![],
     };
 
-    let is_new_messages_trigger = match &trigger {
-        SceneReactionTrigger::NewMessages => true,
-        SceneReactionTrigger::PersonJoined { .. } => false,
-    };
-
-    if is_new_messages_trigger && pending_messages.is_empty() {
-        return Err(Error::GetPersonReaction(
-            "No pending messages for this process message job.".to_string(),
-        ));
-    }
-
     let reaction_input = build_reaction_execution_input(
         worker,
         person_uuid,
