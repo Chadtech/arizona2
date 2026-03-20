@@ -320,7 +320,7 @@ async fn choose_reaction(
     worker.logger.log(
         Level::Info,
         format!(
-            "Action call prompts\nSystem:\n{}\n\nUser:\n{}",
+            "=== ACTION SYSTEM PROMPT ===\n{}\n\n=== ACTION USER PROMPT ===\n{}",
             prompts.action_system_prompt, action_user_prompt
         )
         .as_str(),
