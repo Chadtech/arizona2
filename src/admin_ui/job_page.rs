@@ -863,6 +863,19 @@ async fn preview_job_prompts(
             .await
             .map_err(|err| err.message())
         }
-        _ => Err("Prompt preview is currently supported only for process message and process person join jobs.".to_string()),
+        JobKind::ProcessSceneGaze(process_scene_gaze_job) => {
+            process_reaction_common::preview_scene_reaction_prompts(
+                worker.as_ref(),
+                &process_scene_gaze_job.gazing_person_uuid,
+                &process_scene_gaze_job.scene_uuid,
+                SceneReactionTrigger::SceneDescriptionGaze,
+            )
+            .await
+            .map_err(|err| err.message())
+        }
+        _ => Err(
+            "Prompt preview is currently supported only for process message, process person join, and process scene gaze jobs."
+                .to_string(),
+        ),
     }
 }

@@ -4,12 +4,14 @@ pub mod person_waiting;
 pub mod process_person_join;
 pub mod process_message;
 pub mod process_reaction_common;
+pub mod process_scene_gaze;
 pub mod send_message_to_scene;
 
 use super::job_uuid::JobUuid;
 use crate::domain::job::person_waiting::PersonWaitingJob;
 use crate::domain::job::person_hibernating::PersonHibernatingJob;
 use process_person_join::ProcessPersonJoinJob;
+use process_scene_gaze::ProcessSceneGazeJob;
 use crate::domain::job::send_message_to_scene::SendMessageToSceneJob;
 use crate::nice_display::NiceDisplay;
 use chrono::{DateTime, Utc};
@@ -47,6 +49,7 @@ pub enum JobKind {
     SendMessageToScene(SendMessageToSceneJob),
     ProcessPersonJoin(ProcessPersonJoinJob),
     ProcessMessage(ProcessMessageJob),
+    ProcessSceneGaze(ProcessSceneGazeJob),
     PersonWaiting(PersonWaitingJob),
     PersonHibernating(PersonHibernatingJob),
 }
@@ -84,6 +87,7 @@ impl JobKind {
             JobKind::SendMessageToScene(_) => "send message to scene".to_string(),
             JobKind::ProcessPersonJoin(_) => "process person join".to_string(),
             JobKind::ProcessMessage(_) => "process message".to_string(),
+            JobKind::ProcessSceneGaze(_) => "process scene gaze".to_string(),
             JobKind::PersonWaiting(_) => "person waiting".to_string(),
             JobKind::PersonHibernating(_) => "person hibernating".to_string(),
         }
@@ -105,6 +109,11 @@ impl JobKind {
             JobKind::ProcessMessage(job) => {
                 let data = serde_json::to_value(job)
                     .map_err(|err| format!("Failed to serialize ProcessMessageJob: {}", err))?;
+                Ok(Some(data))
+            }
+            JobKind::ProcessSceneGaze(job) => {
+                let data = serde_json::to_value(job)
+                    .map_err(|err| format!("Failed to serialize ProcessSceneGazeJob: {}", err))?;
                 Ok(Some(data))
             }
             JobKind::PersonWaiting(job) => {
@@ -276,6 +285,20 @@ impl JobKind {
                         })?;
 
                     Ok(JobKind::ProcessPersonJoin(job))
+                }
+            },
+            "process scene gaze" => match maybe_data {
+                None => Err(ParseError::NoJobDataForJobThatReuiresIt { job_name: name }),
+                Some(data) => {
+                    let job: ProcessSceneGazeJob =
+                        serde_json::from_value(data).map_err(|error| {
+                            ParseError::FailedToParseJobData {
+                                job_name: name.clone(),
+                                details: error.to_string(),
+                            }
+                        })?;
+
+                    Ok(JobKind::ProcessSceneGaze(job))
                 }
             },
             "person waiting" => match maybe_data {

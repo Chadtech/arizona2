@@ -12,7 +12,6 @@ use crate::capability::reaction_history::ReactionHistoryCapability;
 use crate::capability::reflection::ReflectionCapability;
 use crate::capability::scene::SceneCapability;
 use crate::capability::state_of_mind::StateOfMindCapability;
-use crate::domain::job::process_message;
 use crate::domain::job::process_reaction_common::{self, SceneReactionTrigger};
 use crate::domain::person_uuid::PersonUuid;
 use crate::domain::random_seed::RandomSeed;
@@ -28,13 +27,13 @@ pub struct ProcessPersonJoinJob {
 }
 
 pub enum Error {
-    ProcessMessage(process_message::Error),
+    Reaction(process_reaction_common::Error),
 }
 
 impl NiceDisplay for Error {
     fn message(&self) -> String {
         match self {
-            Error::ProcessMessage(err) => err.message(),
+            Error::Reaction(err) => err.message(),
         }
     }
 }
@@ -73,6 +72,6 @@ impl ProcessPersonJoinJob {
             current_active_ms,
         )
         .await
-        .map_err(Error::ProcessMessage)
+        .map_err(Error::Reaction)
     }
 }

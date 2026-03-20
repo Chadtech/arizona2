@@ -18,7 +18,7 @@ use crate::capability::state_of_mind::NewStateOfMind;
 use crate::capability::state_of_mind::StateOfMindCapability;
 use crate::domain::event::{Event, EventType};
 use crate::domain::job::person_action_handler;
-use crate::domain::job::process_message::Error;
+use crate::domain::job::person_action_handler::ActionHandleError;
 use crate::domain::logger::Level;
 use crate::domain::memory::Memory;
 use crate::domain::memory_uuid::MemoryUuid;
@@ -34,6 +34,7 @@ use crate::domain::state_of_mind_uuid::StateOfMindUuid;
 use crate::person_actions::ReflectionDecision;
 use crate::text_utils::normalize_message_content;
 use crate::{capability::message::MessageCapability, capability::scene::SceneCapability};
+use crate::nice_display::NiceDisplay;
 use std::collections::HashSet;
 
 struct ReflectionInput {
@@ -53,6 +54,213 @@ struct ReactionExecutionInput {
 pub enum SceneReactionTrigger {
     NewMessages,
     PersonJoined { joined_person_uuid: PersonUuid },
+    SceneDescriptionGaze,
+}
+
+pub enum Error {
+    GetPersonReaction(String),
+    FailedToGetEvents(String),
+    FailedToGetStateOfMind(String),
+    NoStateOfMindFound {
+        person_uuid: PersonUuid,
+    },
+    CouldNotCreateMemoriesPrompt(String),
+    FailedToSearchMemories(String),
+    FailedToGetPersonIdentity(String),
+    NoPersonIdentityFound {
+        person_uuid: PersonUuid,
+    },
+    FailedToGetSendersName {
+        person_uuid: PersonUuid,
+        details: String,
+    },
+    FailedToGetPersonsName(String),
+    FailedToGetSceneParticipants {
+        scene_uuid: SceneUuid,
+        details: String,
+    },
+    FailedToGetSceneName {
+        scene_uuid: SceneUuid,
+        details: String,
+    },
+    SceneNameNotFound {
+        scene_uuid: SceneUuid,
+    },
+    FailedToGetSceneDescription {
+        scene_uuid: SceneUuid,
+        details: String,
+    },
+    SceneDescriptionNotFound {
+        scene_uuid: SceneUuid,
+    },
+    FailedToGetUnhandledSceneMessages {
+        scene_uuid: SceneUuid,
+        details: String,
+    },
+    FailedToMarkSceneMessagesHandled {
+        scene_uuid: SceneUuid,
+        details: String,
+    },
+    FailedToGetHibernationState {
+        person_uuid: PersonUuid,
+        details: String,
+    },
+    FailedToGetEnabledState {
+        person_uuid: PersonUuid,
+        details: String,
+    },
+    FailedToCreateMemory(String),
+    FailedToCreateReflectionStateOfMind(String),
+    FailedToCreateReflectionMemory(String),
+    FailedToCreateReflectionMotivation(String),
+    FailedToDeleteReflectionMotivation(String),
+    Action(ActionHandleError),
+    Reflection(String),
+}
+
+impl NiceDisplay for Error {
+    fn message(&self) -> String {
+        match self {
+            Error::GetPersonReaction(err) => {
+                format!("Failed to get person reaction: {}", err)
+            }
+            Error::FailedToGetEvents(err) => {
+                format!("Failed to get events: {}", err)
+            }
+            Error::FailedToGetStateOfMind(err) => {
+                format!("Failed to get state of mind: {}", err)
+            }
+            Error::NoStateOfMindFound { person_uuid } => {
+                format!(
+                    "No state of mind found for person {}",
+                    person_uuid.to_uuid()
+                )
+            }
+            Error::CouldNotCreateMemoriesPrompt(err) => {
+                format!("Could not create memories prompt: {}", err)
+            }
+            Error::FailedToSearchMemories(err) => {
+                format!("Failed to search memories: {}", err)
+            }
+            Error::FailedToGetPersonIdentity(err) => {
+                format!("Failed to get person identity: {}", err)
+            }
+            Error::NoPersonIdentityFound { person_uuid } => {
+                format!(
+                    "No person identity found for person {}",
+                    person_uuid.to_uuid()
+                )
+            }
+            Error::FailedToGetSendersName {
+                person_uuid,
+                details,
+            } => {
+                format!(
+                    "Failed to get person's name for {}: {}",
+                    person_uuid.to_uuid(),
+                    details
+                )
+            }
+            Error::FailedToGetPersonsName(err) => {
+                format!("Failed to get person's name: {}", err)
+            }
+            Error::FailedToGetSceneParticipants {
+                scene_uuid,
+                details,
+            } => {
+                format!(
+                    "Failed to get scene participants for {}: {}",
+                    scene_uuid.to_uuid(),
+                    details
+                )
+            }
+            Error::FailedToGetSceneName {
+                scene_uuid,
+                details,
+            } => {
+                format!(
+                    "Failed to get scene name for {}: {}",
+                    scene_uuid.to_uuid(),
+                    details
+                )
+            }
+            Error::SceneNameNotFound { scene_uuid } => {
+                format!("Scene name not found for {}", scene_uuid.to_uuid())
+            }
+            Error::FailedToGetSceneDescription {
+                scene_uuid,
+                details,
+            } => {
+                format!(
+                    "Failed to get scene description for {}: {}",
+                    scene_uuid.to_uuid(),
+                    details
+                )
+            }
+            Error::SceneDescriptionNotFound { scene_uuid } => {
+                format!("Scene description not found for {}", scene_uuid.to_uuid())
+            }
+            Error::FailedToGetUnhandledSceneMessages {
+                scene_uuid,
+                details,
+            } => {
+                format!(
+                    "Failed to get unhandled scene messages for {}: {}",
+                    scene_uuid.to_uuid(),
+                    details
+                )
+            }
+            Error::FailedToMarkSceneMessagesHandled {
+                scene_uuid,
+                details,
+            } => {
+                format!(
+                    "Failed to mark scene messages handled for {}: {}",
+                    scene_uuid.to_uuid(),
+                    details
+                )
+            }
+            Error::FailedToGetHibernationState {
+                person_uuid,
+                details,
+            } => {
+                format!(
+                    "Failed to get hibernation state for {}: {}",
+                    person_uuid.to_uuid(),
+                    details
+                )
+            }
+            Error::FailedToGetEnabledState {
+                person_uuid,
+                details,
+            } => {
+                format!(
+                    "Failed to get enabled state for {}: {}",
+                    person_uuid.to_uuid(),
+                    details
+                )
+            }
+            Error::FailedToCreateMemory(err) => {
+                format!("Failed to create memory:\n{}", err)
+            }
+            Error::FailedToCreateReflectionStateOfMind(err) => {
+                format!("Failed to create reflection state of mind:\n{}", err)
+            }
+            Error::FailedToCreateReflectionMemory(err) => {
+                format!("Failed to create reflection memory:\n{}", err)
+            }
+            Error::FailedToCreateReflectionMotivation(err) => {
+                format!("Failed to create reflection motivation:\n{}", err)
+            }
+            Error::FailedToDeleteReflectionMotivation(err) => {
+                format!("Failed to delete reflection motivation:\n{}", err)
+            }
+            Error::Action(err) => err.to_nice_error().to_string(),
+            Error::Reflection(err) => {
+                format!("Reflection error:\n{}", err)
+            }
+        }
+    }
 }
 
 pub async fn run_scene_reaction<
@@ -88,6 +296,7 @@ pub async fn run_scene_reaction<
                 details: err,
             })?,
         SceneReactionTrigger::PersonJoined { .. } => vec![],
+        SceneReactionTrigger::SceneDescriptionGaze => vec![],
     };
 
     let is_enabled = worker.is_person_enabled(person_uuid).await.map_err(|err| {
@@ -116,6 +325,7 @@ pub async fn run_scene_reaction<
         let skip_reason = match trigger {
             SceneReactionTrigger::NewMessages => "Skipping reaction",
             SceneReactionTrigger::PersonJoined { .. } => "Skipping join reaction",
+            SceneReactionTrigger::SceneDescriptionGaze => "Skipping scene gaze reaction",
         };
         tracing::info!(
             "{} for person {} in scene {}: person is disabled",
@@ -163,6 +373,7 @@ pub async fn run_scene_reaction<
         let skip_reason = match trigger {
             SceneReactionTrigger::NewMessages => "Skipping reaction",
             SceneReactionTrigger::PersonJoined { .. } => "Skipping join reaction",
+            SceneReactionTrigger::SceneDescriptionGaze => "Skipping scene gaze reaction",
         };
         tracing::info!(
             "{} for person {} in scene {}: person is hibernating",
@@ -186,6 +397,7 @@ pub async fn run_scene_reaction<
     let is_new_messages_trigger = match &trigger {
         SceneReactionTrigger::NewMessages => true,
         SceneReactionTrigger::PersonJoined { .. } => false,
+        SceneReactionTrigger::SceneDescriptionGaze => false,
     };
 
     if is_new_messages_trigger && pending_messages.is_empty() {
@@ -338,6 +550,7 @@ pub async fn preview_scene_reaction_prompts<
                 details: err,
             })?,
         SceneReactionTrigger::PersonJoined { .. } => vec![],
+        SceneReactionTrigger::SceneDescriptionGaze => vec![],
     };
 
     let reaction_input = build_reaction_execution_input(
@@ -376,17 +589,36 @@ async fn build_reaction_execution_input<
     trigger: &SceneReactionTrigger,
     pending_messages: &[Message],
 ) -> Result<ReactionExecutionInput, Error> {
-    let situation =
-        build_scene_situation(worker, scene_uuid, pending_messages, person_uuid).await?;
+    let include_scene_context = match trigger {
+        SceneReactionTrigger::SceneDescriptionGaze => true,
+        SceneReactionTrigger::NewMessages => false,
+        SceneReactionTrigger::PersonJoined { .. } => false,
+    };
+    let situation = build_scene_situation(
+        worker,
+        scene_uuid,
+        pending_messages,
+        person_uuid,
+        include_scene_context,
+    )
+    .await?;
     let prompt_situation_messages = match trigger {
         SceneReactionTrigger::NewMessages => &[],
         SceneReactionTrigger::PersonJoined { .. } => pending_messages,
+        SceneReactionTrigger::SceneDescriptionGaze => &[],
     };
-    let prompt_situation =
-        build_scene_situation(worker, scene_uuid, prompt_situation_messages, person_uuid).await?;
+    let prompt_situation = build_scene_situation(
+        worker,
+        scene_uuid,
+        prompt_situation_messages,
+        person_uuid,
+        include_scene_context,
+    )
+    .await?;
     let prompt_situation_text = match trigger {
         SceneReactionTrigger::NewMessages => prompt_situation.to_people_present_text(),
         SceneReactionTrigger::PersonJoined { .. } => prompt_situation.to_string(),
+        SceneReactionTrigger::SceneDescriptionGaze => prompt_situation.to_people_present_text(),
     };
 
     let reflection_input = build_reflection_input(
@@ -422,6 +654,9 @@ async fn build_reaction_execution_input<
         SceneReactionTrigger::PersonJoined { .. } => {
             "React to the newest activity first. Prioritize the NEW JOIN EVENT lines below when deciding what to do now."
         }
+        SceneReactionTrigger::SceneDescriptionGaze => {
+            "React to the current scene description first. Prioritize the SCENE GAZE EVENT lines below when deciding what to do now."
+        }
     };
 
     let new_event_section_label = match trigger {
@@ -430,6 +665,9 @@ async fn build_reaction_execution_input<
         }
         SceneReactionTrigger::PersonJoined { .. } => {
             "New join events (newest; primary reaction target):"
+        }
+        SceneReactionTrigger::SceneDescriptionGaze => {
+            "Scene gaze event (primary reaction target):"
         }
     };
 
@@ -453,12 +691,47 @@ async fn build_reaction_execution_input<
                 joined_person_name.as_str()
             )
         }
+        SceneReactionTrigger::SceneDescriptionGaze => {
+            let scene_name = match worker
+                .get_scene_name(scene_uuid)
+                .await
+                .map_err(|err| Error::FailedToGetSceneName {
+                    scene_uuid: scene_uuid.clone(),
+                    details: err,
+                })?
+            {
+                Some(scene_name) => scene_name,
+                None => return Err(Error::SceneNameNotFound {
+                    scene_uuid: scene_uuid.clone(),
+                }),
+            };
+            let scene_description = match worker
+                .get_scene_description(scene_uuid)
+                .await
+                .map_err(|err| Error::FailedToGetSceneDescription {
+                    scene_uuid: scene_uuid.clone(),
+                    details: err,
+                })?
+            {
+                Some(scene_description) => scene_description,
+                None => return Err(Error::SceneDescriptionNotFound {
+                    scene_uuid: scene_uuid.clone(),
+                }),
+            };
+            format!(
+                "In the current scene \"{}\", the environment is described as:\n{}\n[SCENE GAZE EVENT]",
+                scene_name, scene_description
+            )
+        }
     };
 
     let description_prefix = match trigger {
         SceneReactionTrigger::NewMessages => None,
         SceneReactionTrigger::PersonJoined { .. } => {
             Some(format!("Join event:\n{}", new_event_section_text))
+        }
+        SceneReactionTrigger::SceneDescriptionGaze => {
+            Some(format!("Scene gaze event:\n{}", new_event_section_text))
         }
     };
 
@@ -484,6 +757,7 @@ async fn build_scene_situation<W: SceneCapability + PersonCapability>(
     scene_uuid: &SceneUuid,
     messages: &[Message],
     person_uuid: &PersonUuid,
+    include_scene_context: bool,
 ) -> Result<Situation, Error> {
     let person_name = worker
         .get_persons_name(person_uuid.clone())
@@ -502,6 +776,20 @@ async fn build_scene_situation<W: SceneCapability + PersonCapability>(
         .iter()
         .map(|participant| participant.person_name.to_string())
         .collect::<Vec<String>>();
+
+    let (scene_name, scene_description) = if include_scene_context {
+        let scene_name = worker
+            .get_scene_name(scene_uuid)
+            .await
+            .map_err(Error::GetPersonReaction)?;
+        let scene_description = worker
+            .get_scene_description(scene_uuid)
+            .await
+            .map_err(Error::GetPersonReaction)?;
+        (scene_name, scene_description)
+    } else {
+        (None, None)
+    };
 
     let mut lines = Vec::new();
     for message in messages {
@@ -531,6 +819,8 @@ async fn build_scene_situation<W: SceneCapability + PersonCapability>(
 
     let situation = Situation::new(situation::Input {
         person_name: person_name.to_string(),
+        scene_name,
+        scene_description,
         particpants: participant_names,
         messages: lines,
     });

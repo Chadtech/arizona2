@@ -15,6 +15,7 @@ use crate::capability::scene::SceneCapability;
 use crate::capability::state_of_mind::StateOfMindCapability;
 use crate::domain::job::{
     person_hibernating, person_waiting, process_message, process_person_join,
+    process_scene_gaze,
     send_message_to_scene, JobKind, PoppedJob,
 };
 use crate::domain::job_uuid::JobUuid;
@@ -48,6 +49,7 @@ pub enum RunJobError {
     FailedToResetJob(String),
     ProcessMessageError(process_message::Error),
     ProcessPersonJoinError(process_person_join::Error),
+    ProcessSceneGazeError(process_scene_gaze::Error),
     SendMessageToSceneError(send_message_to_scene::Error),
     PersonWaitingError(person_waiting::Error),
     PersonHibernatingError(person_hibernating::Error),
@@ -153,6 +155,9 @@ impl NiceDisplay for RunJobError {
             }
             RunJobError::ProcessPersonJoinError(err) => {
                 format!("Error processing person join job\n{}", err.message())
+            }
+            RunJobError::ProcessSceneGazeError(err) => {
+                format!("Error processing scene gaze job\n{}", err.message())
             }
             RunJobError::SendMessageToSceneError(err) => {
                 format!("Error sending message to scene job\n{}", err.message())
@@ -391,6 +396,14 @@ async fn run_job<
                 .run(&worker, random_seed, current_active_ms)
                 .await
                 .map_err(RunJobError::ProcessPersonJoinError)
+                .map(|_| RunJobOutcome::Completed)
+        }
+        JobKind::ProcessSceneGaze(process_scene_gaze_job) => {
+            tracing::debug!("Executing ProcessSceneGaze job");
+            process_scene_gaze_job
+                .run(&worker, random_seed, current_active_ms)
+                .await
+                .map_err(RunJobError::ProcessSceneGazeError)
                 .map(|_| RunJobOutcome::Completed)
         }
         JobKind::PersonWaiting(person_waiting_job) => {

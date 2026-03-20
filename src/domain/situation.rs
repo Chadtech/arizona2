@@ -11,6 +11,8 @@ pub struct Situation {
 
 pub struct Input {
     pub person_name: String,
+    pub scene_name: Option<String>,
+    pub scene_description: Option<String>,
     pub particpants: Vec<String>,
     pub messages: Vec<String>,
 }
@@ -19,8 +21,8 @@ impl Situation {
     pub fn new(input: Input) -> Self {
         Self {
             person_name: input.person_name,
-            scene_name: None,
-            scene_description: None,
+            scene_name: input.scene_name,
+            scene_description: input.scene_description,
             participants: input.particpants,
             messages: input.messages,
         }
