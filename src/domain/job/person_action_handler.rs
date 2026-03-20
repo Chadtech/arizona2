@@ -252,6 +252,14 @@ async fn move_person_to_scene<
         }
     };
 
+    if from_scene_uuid
+        .as_ref()
+        .map(|uuid| uuid.to_uuid())
+        == Some(scene.uuid.to_uuid())
+    {
+        return Ok(());
+    }
+
     let from_scene_desc = match &from_scene_uuid {
         Some(uuid) => uuid.to_uuid().to_string(),
         None => "none".to_string(),

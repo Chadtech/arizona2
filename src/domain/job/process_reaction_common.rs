@@ -869,8 +869,7 @@ async fn pending_messages_to_event_lines<W: PersonCapability + Sync>(
         };
 
         lines.push(format!(
-            "At {}, in the current scene, {} said: \"{}\" [NEW MESSAGE EVENT]",
-            message.sent_at,
+            "In the current scene, {} said: \"{}\" [NEW MESSAGE EVENT]",
             sender_label,
             normalize_message_content(&message.content)
         ));

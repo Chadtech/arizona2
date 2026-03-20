@@ -242,19 +242,19 @@ impl PersonReaction {
         for (key, value) in arguments {
             match key.as_str() {
                 "reflection" => {
-                    maybe_reflection = value.as_str().map(|s| s.to_string());
+                    maybe_reflection = normalized_non_empty_string(&value);
                 }
                 "action" => {
-                    maybe_action = value.as_str().map(|s| s.to_string());
+                    maybe_action = normalized_non_empty_string(&value);
                 }
                 "comment" => {
-                    maybe_comment = value.as_str().map(|s| s.to_string());
+                    maybe_comment = normalized_non_empty_string(&value);
                 }
                 "destination_scene_name" => {
-                    maybe_destination_scene_name = value.as_str().map(|s| s.to_string());
+                    maybe_destination_scene_name = normalized_non_empty_string(&value);
                 }
                 "scene_name" => {
-                    maybe_scene_name = value.as_str().map(|s| s.to_string());
+                    maybe_scene_name = normalized_non_empty_string(&value);
                 }
                 "duration" => {
                     if let Some(dur) = value.as_u64() {
@@ -352,4 +352,81 @@ fn tool_args_to_json(args: &[(String, serde_json::Value)]) -> serde_json::Value 
         map.insert(key.clone(), value.clone());
     }
     serde_json::Value::Object(map)
+}
+
+fn normalized_non_empty_string(value: &serde_json::Value) -> Option<String> {
+    let trimmed = value.as_str()?.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn choose_action_call(arguments: Vec<(String, serde_json::Value)>) -> ToolCall {
+        ToolCall {
+            name: "choose_action".to_string(),
+            arguments,
+        }
+    }
+
+    #[test]
+    fn test_blank_destination_scene_name_becomes_none() {
+        let reaction = PersonReaction::from_open_ai_tool_call(choose_action_call(vec![
+            ("reflection".to_string(), json!("no_reflection")),
+            ("action".to_string(), json!("say in scene")),
+            ("comment".to_string(), json!("hello there")),
+            ("destination_scene_name".to_string(), json!("   ")),
+        ]))
+        .unwrap();
+
+        match reaction.action {
+            PersonAction::SayInScene {
+                destination_scene_name,
+                ..
+            } => {
+                assert_eq!(destination_scene_name, None);
+            }
+            other => panic!("unexpected action: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_blank_move_scene_name_is_rejected() {
+        let err = PersonReaction::from_open_ai_tool_call(choose_action_call(vec![
+            ("reflection".to_string(), json!("no_reflection")),
+            ("action".to_string(), json!("move to scene")),
+            ("scene_name".to_string(), json!("   ")),
+        ]))
+        .unwrap_err();
+
+        match err {
+            PersonActionError::ParameterMissing { parameter_name, .. } => {
+                assert_eq!(parameter_name, "scene_name");
+            }
+            other => panic!("unexpected error: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_scene_name_is_trimmed() {
+        let reaction = PersonReaction::from_open_ai_tool_call(choose_action_call(vec![
+            ("reflection".to_string(), json!("no_reflection")),
+            ("action".to_string(), json!("move to scene")),
+            ("scene_name".to_string(), json!("  kitchen  ")),
+        ]))
+        .unwrap();
+
+        match reaction.action {
+            PersonAction::MoveToScene { scene_name } => {
+                assert_eq!(scene_name, "kitchen");
+            }
+            other => panic!("unexpected action: {:?}", other),
+        }
+    }
 }

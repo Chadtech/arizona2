@@ -22,30 +22,18 @@ impl Event {
                 speaker_name,
                 comment,
                 message_uuid: _,
-            } => {
-                format!(
-                    "At {}, in scene {}, {} said: \"{}\"",
-                    self.timestamp, scene_name, speaker_name, comment
-                )
-            }
+            } => format!(
+                "In scene {}, {} said: \"{}\"",
+                scene_name, speaker_name, comment
+            ),
             EventType::Entered {
                 person_name,
                 scene_name,
-            } => {
-                format!(
-                    "At {}, {} entered scene {}",
-                    self.timestamp, person_name, scene_name
-                )
-            }
+            } => format!("{} entered scene {}", person_name, scene_name),
             EventType::Left {
                 person_name,
                 scene_name,
-            } => {
-                format!(
-                    "At {}, {} left scene {}",
-                    self.timestamp, person_name, scene_name
-                )
-            }
+            } => format!("{} left scene {}", person_name, scene_name),
         }
     }
 
