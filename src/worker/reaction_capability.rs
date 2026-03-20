@@ -275,15 +275,6 @@ async fn get_first_pass_reaction_text(
         .as_str(),
     );
 
-    worker.logger.log(
-        Level::Info,
-        format!(
-            "Sending completion request with user prompt:\n{}",
-            prompts.thinking_user_prompt
-        )
-        .as_str(),
-    );
-
     let response = completion
         .send_request(&worker.open_ai_key, reqwest::Client::new())
         .await

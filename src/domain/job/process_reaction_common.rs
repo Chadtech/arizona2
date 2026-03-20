@@ -19,7 +19,6 @@ use crate::capability::state_of_mind::StateOfMindCapability;
 use crate::domain::event::{Event, EventType};
 use crate::domain::job::person_action_handler;
 use crate::domain::job::person_action_handler::ActionHandleError;
-use crate::domain::logger::Level;
 use crate::domain::memory::Memory;
 use crate::domain::memory_uuid::MemoryUuid;
 use crate::domain::message::{Message, MessageSender};
@@ -333,16 +332,6 @@ pub async fn run_scene_reaction<
             person_uuid.to_uuid(),
             scene_uuid.to_uuid()
         );
-        worker.log(
-            Level::Info,
-            format!(
-                "{} for person {} in scene {}: person is disabled",
-                skip_reason,
-                person_uuid.to_uuid(),
-                scene_uuid.to_uuid()
-            )
-            .as_str(),
-        );
         return Ok(());
     }
 
@@ -381,16 +370,6 @@ pub async fn run_scene_reaction<
             person_uuid.to_uuid(),
             scene_uuid.to_uuid()
         );
-        worker.log(
-            Level::Info,
-            format!(
-                "{} for person {} in scene {}: person is hibernating",
-                skip_reason,
-                person_uuid.to_uuid(),
-                scene_uuid.to_uuid()
-            )
-            .as_str(),
-        );
         return Ok(());
     }
 
@@ -405,15 +384,6 @@ pub async fn run_scene_reaction<
             "Skipping reaction for person {} in scene {}: no new messages",
             person_uuid.to_uuid(),
             scene_uuid.to_uuid()
-        );
-        worker.log(
-            Level::Info,
-            format!(
-                "Skipping reaction for person {} in scene {}: no new messages",
-                person_uuid.to_uuid(),
-                scene_uuid.to_uuid()
-            )
-            .as_str(),
         );
         return Ok(());
     }
