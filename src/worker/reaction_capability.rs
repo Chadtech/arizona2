@@ -15,8 +15,10 @@ use crate::person_actions::{
     PersonAction, PersonActionError, PersonActionKind, PersonReaction, ReflectionDecision,
 };
 use crate::worker::Worker;
+use serde::Deserialize;
 
 const INTERNAL_REACTION_PLACEHOLDER: &str = "<internal reaction text placeholder>";
+const REACTION_VALIDATION_RETRY_LIMIT: usize = 1;
 
 pub enum Error {
     CompletionError(CompletionError),
@@ -169,6 +171,97 @@ async fn get_reaction_helper(
         INTERNAL_REACTION_PLACEHOLDER,
     );
 
+    let first_pass_text = get_first_pass_reaction_text(worker, &prompts, &person_uuid).await?;
+
+    let mut candidate =
+        choose_reaction(worker, &prompts, &first_pass_text, None, &person_uuid).await?;
+
+    for retry_index in 0..=REACTION_VALIDATION_RETRY_LIMIT {
+        let validation = match validate_reaction_candidate(
+            worker,
+            &prompts,
+            &first_pass_text,
+            &candidate,
+            &person_uuid,
+        )
+        .await
+        {
+            Ok(validation) => validation,
+            Err(err) => {
+                worker.logger.log(
+                    Level::Error,
+                    format!(
+                        "Reaction validator failed for person {}: {}. Returning unvalidated action.",
+                        person_uuid.to_uuid(),
+                        err
+                    )
+                    .as_str(),
+                );
+                return Ok(candidate);
+            }
+        };
+
+        if validation.is_valid {
+            worker.logger.log(
+                Level::Info,
+                format!(
+                    "Validated reaction for person {}: {} (reflection: {})",
+                    person_uuid.to_uuid(),
+                    describe_action(&candidate.action),
+                    describe_reflection(&candidate.reflection)
+                )
+                .as_str(),
+            );
+            return Ok(candidate);
+        }
+
+        worker.logger.log(
+            Level::Info,
+            format!(
+                "Rejected reaction for person {} on validation attempt {}: {} (candidate: {}, reflection: {})",
+                person_uuid.to_uuid(),
+                retry_index + 1,
+                validation.reason,
+                describe_action(&candidate.action),
+                describe_reflection(&candidate.reflection)
+            )
+            .as_str(),
+        );
+
+        if retry_index < REACTION_VALIDATION_RETRY_LIMIT {
+            candidate = choose_reaction(
+                worker,
+                &prompts,
+                &first_pass_text,
+                Some(validation.reason.as_str()),
+                &person_uuid,
+            )
+            .await?;
+            continue;
+        }
+
+        let fallback = fallback_reaction();
+        worker.logger.log(
+            Level::Info,
+            format!(
+                "Falling back to safe reaction for person {} after validator rejection: {} (reflection: {})",
+                person_uuid.to_uuid(),
+                describe_action(&fallback.action),
+                describe_reflection(&fallback.reflection)
+            )
+            .as_str(),
+        );
+        return Ok(fallback);
+    }
+
+    Ok(fallback_reaction())
+}
+
+async fn get_first_pass_reaction_text(
+    worker: &Worker,
+    prompts: &ReactionPromptPreview,
+    person_uuid: &PersonUuid,
+) -> Result<String, Error> {
     let mut completion = Completion::new();
     completion.add_message(Role::System, prompts.thinking_system_prompt.as_str());
     completion.add_message(Role::User, prompts.thinking_user_prompt.as_str());
@@ -210,12 +303,20 @@ async fn get_reaction_helper(
         .as_str(),
     );
 
-    // Second LLM call
+    Ok(text)
+}
 
+async fn choose_reaction(
+    worker: &Worker,
+    prompts: &ReactionPromptPreview,
+    first_pass_text: &str,
+    validation_feedback: Option<&str>,
+    person_uuid: &PersonUuid,
+) -> Result<PersonReaction, Error> {
     let mut action_completion = Completion::new();
-    let action_user_prompt = prompts
-        .action_user_prompt
-        .replace(INTERNAL_REACTION_PLACEHOLDER, text.as_str());
+    let action_user_prompt =
+        build_action_user_prompt(prompts, first_pass_text, validation_feedback);
+
     worker.logger.log(
         Level::Info,
         format!(
@@ -261,7 +362,7 @@ async fn get_reaction_helper(
                 worker.logger.log(
                     Level::Info,
                     format!(
-                        "Dual-layer reaction for person {}: {} (reflection: {})",
+                        "Candidate reaction for person {}: {} (reflection: {})",
                         person_uuid.to_uuid(),
                         describe_action(&first.action),
                         describe_reflection(&first.reflection)
@@ -272,6 +373,123 @@ async fn get_reaction_helper(
             }
         }
     }
+}
+
+async fn validate_reaction_candidate(
+    worker: &Worker,
+    prompts: &ReactionPromptPreview,
+    first_pass_text: &str,
+    candidate: &PersonReaction,
+    person_uuid: &PersonUuid,
+) -> Result<ReactionValidationResult, String> {
+    let mut completion = Completion::new();
+    completion.add_message(
+        Role::System,
+        "You validate whether a single already-selected action is actually possible in Arizona2's action model. Be strict. The only real effects available are speaking in scene, moving to another scene, waiting, hibernating, or idling. Reject any chosen action that implies doing something else in the world, such as writing or editing a document, inspecting files, changing memory/state directly, manipulating objects, performing physical tasks, running a procedure, or otherwise claiming off-screen effects that Arizona2 cannot perform. For 'say in scene', the comment must be plausible spoken dialogue only, not narration of extra actions or claims that those actions were performed. Do not judge style, usefulness, or strategy beyond whether the chosen action is actually representable. Do not propose a replacement action. Return JSON only with keys is_valid (boolean) and reason (string). Keep reason brief and concrete.",
+    );
+
+    let action_user_prompt = build_action_user_prompt(prompts, first_pass_text, None);
+    let validator_user_prompt = format!(
+        "Action system prompt:\n{}\n\nAction user prompt:\n{}\n\nChosen reaction JSON:\n{}\n\nReturn JSON only.",
+        prompts.action_system_prompt,
+        action_user_prompt,
+        reaction_to_json(candidate)
+    );
+    completion.add_message(Role::User, validator_user_prompt.as_str());
+
+    let response = completion
+        .send_request(&worker.open_ai_key, reqwest::Client::new())
+        .await
+        .map_err(|err| err.message())?;
+
+    worker.logger.log(
+        Level::Info,
+        format!(
+            "Reaction validator raw JSON response for person {}:\n{}",
+            person_uuid.to_uuid(),
+            response.as_pretty_json()
+        )
+        .as_str(),
+    );
+
+    let message = response.as_message().map_err(|err| err.message())?;
+    serde_json::from_str::<ReactionValidationResult>(message.as_str()).map_err(|err| {
+        format!(
+            "Failed to decode reaction validator response as JSON: {}. Response text: {}",
+            err, message
+        )
+    })
+}
+
+fn build_action_user_prompt(
+    prompts: &ReactionPromptPreview,
+    first_pass_text: &str,
+    validation_feedback: Option<&str>,
+) -> String {
+    let mut action_user_prompt = prompts
+        .action_user_prompt
+        .replace(INTERNAL_REACTION_PLACEHOLDER, first_pass_text);
+
+    if let Some(feedback) = validation_feedback {
+        action_user_prompt.push_str(
+            format!(
+                "\n\nValidator feedback on your previous rejected action:\n{}\n\nChoose a different action that fixes this problem. Remember that Arizona2 can only speak, move scenes, wait, hibernate, or idle. Do not imply that any other action was performed. Choose exactly one tool call and do not output any plain text.",
+                feedback
+            )
+            .as_str(),
+        );
+    }
+
+    action_user_prompt
+}
+
+fn reaction_to_json(reaction: &PersonReaction) -> String {
+    serde_json::json!({
+        "reflection": reaction.reflection.to_name(),
+        "action": action_to_json(&reaction.action),
+    })
+    .to_string()
+}
+
+fn action_to_json(action: &PersonAction) -> serde_json::Value {
+    match action {
+        PersonAction::Wait { duration } => serde_json::json!({
+            "type": "wait",
+            "duration": duration,
+        }),
+        PersonAction::Hibernate { duration } => serde_json::json!({
+            "type": "hibernate",
+            "duration": duration,
+        }),
+        PersonAction::Idle => serde_json::json!({
+            "type": "idle",
+        }),
+        PersonAction::SayInScene {
+            comment,
+            destination_scene_name,
+        } => serde_json::json!({
+            "type": "say in scene",
+            "comment": comment,
+            "destination_scene_name": destination_scene_name,
+        }),
+        PersonAction::MoveToScene { scene_name } => serde_json::json!({
+            "type": "move to scene",
+            "scene_name": scene_name,
+        }),
+    }
+}
+
+fn fallback_reaction() -> PersonReaction {
+    PersonReaction {
+        action: PersonAction::Idle,
+        reflection: ReflectionDecision::NoReflection,
+    }
+}
+
+#[derive(Deserialize)]
+struct ReactionValidationResult {
+    is_valid: bool,
+    reason: String,
 }
 
 fn build_prompts(
@@ -313,7 +531,7 @@ Your response should make clear:
 		);
 
     let action_system_prompt = format!(
-		"You ARE $name$.\n\nPerson identity:\n{}\n\nYou ARE Porygon.
+		"You ARE $name$.\n\nPerson identity:\n{}\n\n
 
 You only know what is explicitly in this prompt. You can only act through the available tool calls.
 
