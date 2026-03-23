@@ -31,6 +31,19 @@ impl ReflectionDecision {
             ReflectionDecision::Reflection.to_name(),
         ]
     }
+
+    pub fn from_optional_tool_value(value: Option<String>) -> Result<Self, PersonActionError> {
+        match value {
+            Some(name) => match name.as_str() {
+                "reflection" => Ok(ReflectionDecision::Reflection),
+                "no_reflection" => Ok(ReflectionDecision::NoReflection),
+                _ => Err(PersonActionError::UnrecognizedReflection {
+                    reflection_name: name,
+                }),
+            },
+            None => Ok(ReflectionDecision::NoReflection),
+        }
+    }
 }
 
 impl PersonActionKind {
@@ -276,20 +289,7 @@ impl PersonReaction {
             }
         }
 
-        let reflection = match maybe_reflection {
-            Some(value) => match value.as_str() {
-                "reflection" => ReflectionDecision::Reflection,
-                "no_reflection" => ReflectionDecision::NoReflection,
-                _ => Err(PersonActionError::UnrecognizedReflection {
-                    reflection_name: value,
-                })?,
-            },
-            None => Err(PersonActionError::ParameterMissing {
-                action_name: tool_call_name.clone(),
-                parameter_name: "reflection".to_string(),
-                arguments: arguments_json.clone(),
-            })?,
-        };
+        let reflection = ReflectionDecision::from_optional_tool_value(maybe_reflection)?;
 
         let action = maybe_action.ok_or_else(|| PersonActionError::ParameterMissing {
             action_name: tool_call_name.clone(),
@@ -427,6 +427,37 @@ mod tests {
                 assert_eq!(scene_name, "kitchen");
             }
             other => panic!("unexpected action: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_missing_reflection_defaults_to_no_reflection() {
+        let reaction = PersonReaction::from_open_ai_tool_call(choose_action_call(vec![
+            ("action".to_string(), json!("idle")),
+        ]))
+        .unwrap();
+
+        match reaction.reflection {
+            ReflectionDecision::NoReflection => {}
+            ReflectionDecision::Reflection => {
+                panic!("unexpected reflection value");
+            }
+        }
+    }
+
+    #[test]
+    fn test_unrecognized_reflection_is_rejected() {
+        let err = PersonReaction::from_open_ai_tool_call(choose_action_call(vec![
+            ("reflection".to_string(), json!("maybe")),
+            ("action".to_string(), json!("idle")),
+        ]))
+        .unwrap_err();
+
+        match err {
+            PersonActionError::UnrecognizedReflection { reflection_name } => {
+                assert_eq!(reflection_name, "maybe");
+            }
+            other => panic!("unexpected error: {:?}", other),
         }
     }
 }
