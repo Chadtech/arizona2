@@ -456,6 +456,9 @@ fn action_to_json(action: &PersonAction) -> serde_json::Value {
         PersonAction::Idle => serde_json::json!({
             "type": "idle",
         }),
+        PersonAction::GazeInScene => serde_json::json!({
+            "type": "gaze in scene",
+        }),
         PersonAction::SayInScene {
             comment,
             destination_scene_name,
@@ -545,7 +548,7 @@ Stay in character as a person, not a document. Prefer brief, natural behavior ov
 Your job is to choose the single action $name$ would take right now, based on the latest messages, the first-pass internal reaction text, and the available tools.
 
 Rules:
-- Available actions are only: `say in scene`, `move to scene`, `wait`, `hibernate`, and `idle`.
+- Available actions are only: `say in scene`, `move to scene`, `gaze in scene`, `wait`, `hibernate`, and `idle`.
 - Prioritize the newest message over older context.
 - Use the first-pass internal reaction text as the main guide to intent, unless it conflicts with newer information in this prompt.
 - Choose exactly one tool call.
@@ -576,6 +579,7 @@ fn describe_action(action: &PersonAction) -> String {
         PersonAction::Wait { duration } => format!("wait for {} ms", duration),
         PersonAction::Hibernate { duration } => format!("hibernate for {} ms", duration),
         PersonAction::Idle => "idle".to_string(),
+        PersonAction::GazeInScene => "gaze in scene".to_string(),
         PersonAction::SayInScene {
             comment,
             destination_scene_name,

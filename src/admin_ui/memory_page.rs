@@ -67,8 +67,7 @@ pub enum Msg {
     GeneratedPromptAndSearched(Result<MemoryQueryResult, String>),
 }
 
-#[derive(Serialize, Deserialize, Debug)]
-#[derive(Default)]
+#[derive(Serialize, Deserialize, Debug, Default)]
 pub struct Storage {
     #[serde(default)]
     name_field: String,
@@ -89,7 +88,6 @@ pub struct Storage {
     #[serde(default)]
     query_situation_field: String,
 }
-
 
 impl Model {
     pub fn new(storage: &Storage) -> Self {
@@ -116,8 +114,10 @@ impl Model {
             w::text_input("", &self.memory_field).on_input(Msg::MemoryFieldChanged),
             w::row![
                 w::button("Create Memory").on_press(Msg::ClickedCreateMemory),
-                w::button("Create Memory For Everyone").on_press(Msg::ClickedCreateMemoryForEveryone),
-            ].spacing(s::S4),
+                w::button("Create Memory For Everyone")
+                    .on_press(Msg::ClickedCreateMemoryForEveryone),
+            ]
+            .spacing(s::S4),
             status_view(&self.status),
             w::horizontal_rule(1),
             w::text("Memory Query Prompt Generator").size(20),

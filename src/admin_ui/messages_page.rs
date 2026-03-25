@@ -319,8 +319,9 @@ impl Model {
                 // Only allow sending if we have a loaded scene and message content
                 if let SceneLoadStatus::Loaded(scene) = &self.scene_load_status {
                     if !scene.is_real_world_user_in_scene {
-                        self.send_status =
-                            SendStatus::Error("You must be in this scene to send messages.".to_string());
+                        self.send_status = SendStatus::Error(
+                            "You must be in this scene to send messages.".to_string(),
+                        );
                         return Task::none();
                     }
 
@@ -563,7 +564,8 @@ impl Model {
             SceneLoadStatus::Ready => w::text("").into(),
             SceneLoadStatus::Loading => w::text("Loading scene...").into(),
             SceneLoadStatus::Loaded(scene) => {
-                let message_composer = self.view_message_composer(scene.is_real_world_user_in_scene);
+                let message_composer =
+                    self.view_message_composer(scene.is_real_world_user_in_scene);
                 let auto_refresh_button = self.view_auto_refresh_button();
                 let refresh_status = view_refresh_status(&scene.messages);
 
@@ -599,22 +601,21 @@ impl Model {
                     }
                 };
 
-                let set_me_out_of_scene_button: Element<'_, Msg> = match scene
-                    .real_world_user_presence_status
-                {
-                    RealWorldUserPresenceStatus::Updating => {
-                        w::button("Set Me Out Of Scene").into()
-                    }
-                    _ => {
-                        if scene.is_real_world_user_in_scene {
-                            w::button("Set Me Out Of Scene")
-                                .on_press(Msg::ClickedSetRealWorldUserInScene(false))
-                                .into()
-                        } else {
+                let set_me_out_of_scene_button: Element<'_, Msg> =
+                    match scene.real_world_user_presence_status {
+                        RealWorldUserPresenceStatus::Updating => {
                             w::button("Set Me Out Of Scene").into()
                         }
-                    }
-                };
+                        _ => {
+                            if scene.is_real_world_user_in_scene {
+                                w::button("Set Me Out Of Scene")
+                                    .on_press(Msg::ClickedSetRealWorldUserInScene(false))
+                                    .into()
+                            } else {
+                                w::button("Set Me Out Of Scene").into()
+                            }
+                        }
+                    };
 
                 let my_presence_status_text = match &scene.real_world_user_presence_status {
                     RealWorldUserPresenceStatus::Ready => {
@@ -851,8 +852,10 @@ fn view_refresh_status(messages_status: &MessagesStatus) -> Element<'_, Msg> {
 }
 
 fn has_real_world_user(participants: &[SceneParticipant]) -> bool {
-    participants.iter().any(|participant| match participant.actor_uuid {
-        ActorUuid::RealWorldUser => true,
-        ActorUuid::AiPerson(_) => false,
-    })
+    participants
+        .iter()
+        .any(|participant| match participant.actor_uuid {
+            ActorUuid::RealWorldUser => true,
+            ActorUuid::AiPerson(_) => false,
+        })
 }

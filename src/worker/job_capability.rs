@@ -13,9 +13,7 @@ impl JobCapability for Worker {
         let job_data = job.to_data()?;
         let run_at_active_ms = match &job {
             JobKind::PersonWaiting(wait_job) => Some(wait_job.run_at_active_ms()),
-            JobKind::PersonHibernating(hibernation_job) => {
-                Some(hibernation_job.run_at_active_ms())
-            }
+            JobKind::PersonHibernating(hibernation_job) => Some(hibernation_job.run_at_active_ms()),
             _ => None,
         };
 
@@ -85,9 +83,7 @@ impl JobCapability for Worker {
             Some(ret_rec) => {
                 let job =
                     PoppedJob::parse(JobUuid::from_uuid(job_uuid), ret_rec.name, ret_rec.data)
-                        .map_err(|err| {
-                            format!("Error parsing job\n{}", err.to_nice_error())
-                        })?;
+                        .map_err(|err| format!("Error parsing job\n{}", err.to_nice_error()))?;
 
                 Ok(Some(job))
             }

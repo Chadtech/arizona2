@@ -1,6 +1,6 @@
+use crate::capability::person_identity::PersonIdentityCapability;
 use crate::domain::logger::Logger;
 use crate::nice_display::NiceDisplay;
-use crate::capability::person_identity::PersonIdentityCapability;
 use crate::worker;
 
 pub enum Error {

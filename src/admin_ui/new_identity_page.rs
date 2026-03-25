@@ -30,15 +30,13 @@ enum SaveStatus {
     Error(String),
 }
 
-#[derive(Serialize, Deserialize, Debug)]
-#[derive(Default)]
+#[derive(Serialize, Deserialize, Debug, Default)]
 pub struct Storage {
     #[serde(default)]
     identity_field: String,
     #[serde(default)]
     name_field: String,
 }
-
 
 #[derive(Debug, Clone)]
 pub enum Msg {

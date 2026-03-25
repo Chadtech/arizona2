@@ -118,8 +118,7 @@ pub enum SceneLookUpMsg {
     GotRefreshedParticipantsAfterRealWorldUserUpdate(Result<Vec<SceneParticipant>, String>),
 }
 
-#[derive(Serialize, Deserialize, Debug)]
-#[derive(Default)]
+#[derive(Serialize, Deserialize, Debug, Default)]
 pub struct Storage {
     #[serde(default)]
     new_scene_name: String,
@@ -128,7 +127,6 @@ pub struct Storage {
     #[serde(default)]
     look_up_scene_name: String,
 }
-
 
 impl SceneModel {
     fn init(scene_agg: SceneAggregate) -> Self {
@@ -222,9 +220,9 @@ impl SceneModel {
             SceneLookUpMsg::ClickedSetRealWorldUserInScene(is_in_scene) => {
                 match self.real_world_user_presence_status {
                     RealWorldUserPresenceStatus::Updating => Task::none(),
-                    RealWorldUserPresenceStatus::Ready
-                    | RealWorldUserPresenceStatus::Error(_) => {
-                        self.real_world_user_presence_status = RealWorldUserPresenceStatus::Updating;
+                    RealWorldUserPresenceStatus::Ready | RealWorldUserPresenceStatus::Error(_) => {
+                        self.real_world_user_presence_status =
+                            RealWorldUserPresenceStatus::Updating;
                         let scene_uuid = self.scene_uuid.clone();
                         Task::perform(
                             async move {
@@ -248,8 +246,7 @@ impl SceneModel {
                     )
                 }
                 Err(err) => {
-                    self.real_world_user_presence_status =
-                        RealWorldUserPresenceStatus::Error(err);
+                    self.real_world_user_presence_status = RealWorldUserPresenceStatus::Error(err);
                     Task::none()
                 }
             },
@@ -437,53 +434,50 @@ fn scene_loaded_view(scene_model: &SceneModel) -> Element<'_, SceneLookUpMsg> {
             .into(),
     };
 
-    let real_world_user_presence_status: Element<SceneLookUpMsg> =
-        match &scene_model.real_world_user_presence_status {
-            RealWorldUserPresenceStatus::Ready => {
-                let text = if scene_model.is_real_world_user_in_scene {
-                    "You are in this scene."
+    let real_world_user_presence_status: Element<SceneLookUpMsg> = match &scene_model
+        .real_world_user_presence_status
+    {
+        RealWorldUserPresenceStatus::Ready => {
+            let text = if scene_model.is_real_world_user_in_scene {
+                "You are in this scene."
+            } else {
+                "You are not in this scene."
+            };
+            w::text(text).into()
+        }
+        RealWorldUserPresenceStatus::Updating => w::text("Updating your scene presence...").into(),
+        RealWorldUserPresenceStatus::Error(err) => {
+            w::text(format!("Error updating your scene presence: {}", err)).into()
+        }
+    };
+
+    let set_me_in_scene_button: Element<SceneLookUpMsg> =
+        match scene_model.real_world_user_presence_status {
+            RealWorldUserPresenceStatus::Updating => w::button("Set Me In Scene").into(),
+            _ => {
+                if scene_model.is_real_world_user_in_scene {
+                    w::button("Set Me In Scene").into()
                 } else {
-                    "You are not in this scene."
-                };
-                w::text(text).into()
-            }
-            RealWorldUserPresenceStatus::Updating => {
-                w::text("Updating your scene presence...").into()
-            }
-            RealWorldUserPresenceStatus::Error(err) => {
-                w::text(format!("Error updating your scene presence: {}", err)).into()
+                    w::button("Set Me In Scene")
+                        .on_press(SceneLookUpMsg::ClickedSetRealWorldUserInScene(true))
+                        .into()
+                }
             }
         };
 
-    let set_me_in_scene_button: Element<SceneLookUpMsg> = match scene_model
-        .real_world_user_presence_status
-    {
-        RealWorldUserPresenceStatus::Updating => w::button("Set Me In Scene").into(),
-        _ => {
-            if scene_model.is_real_world_user_in_scene {
-                w::button("Set Me In Scene").into()
-            } else {
-                w::button("Set Me In Scene")
-                    .on_press(SceneLookUpMsg::ClickedSetRealWorldUserInScene(true))
-                    .into()
+    let set_me_out_of_scene_button: Element<SceneLookUpMsg> =
+        match scene_model.real_world_user_presence_status {
+            RealWorldUserPresenceStatus::Updating => w::button("Set Me Out Of Scene").into(),
+            _ => {
+                if scene_model.is_real_world_user_in_scene {
+                    w::button("Set Me Out Of Scene")
+                        .on_press(SceneLookUpMsg::ClickedSetRealWorldUserInScene(false))
+                        .into()
+                } else {
+                    w::button("Set Me Out Of Scene").into()
+                }
             }
-        }
-    };
-
-    let set_me_out_of_scene_button: Element<SceneLookUpMsg> = match scene_model
-        .real_world_user_presence_status
-    {
-        RealWorldUserPresenceStatus::Updating => w::button("Set Me Out Of Scene").into(),
-        _ => {
-            if scene_model.is_real_world_user_in_scene {
-                w::button("Set Me Out Of Scene")
-                    .on_press(SceneLookUpMsg::ClickedSetRealWorldUserInScene(false))
-                    .into()
-            } else {
-                w::button("Set Me Out Of Scene").into()
-            }
-        }
-    };
+        };
 
     w::column![
         w::text("Scene Name"),

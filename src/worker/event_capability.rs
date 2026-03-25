@@ -169,7 +169,9 @@ impl EventCapability for Worker {
                     )
                     .fetch_all(&self.sqlx)
                     .await
-                    .map_err(|err| format!("Error fetching person-scoped scene messages: {}", err))?;
+                    .map_err(|err| {
+                        format!("Error fetching person-scoped scene messages: {}", err)
+                    })?;
 
                     for msg in scene_messages {
                         let speaker_name = match msg.sender_person_uuid {

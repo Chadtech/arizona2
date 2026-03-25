@@ -7,6 +7,7 @@ pub enum PersonActionKind {
     Wait,
     Hibernate,
     Idle,
+    GazeInScene,
     SayInScene,
     MoveToScene,
 }
@@ -52,6 +53,7 @@ impl PersonActionKind {
             PersonActionKind::Wait => "wait".to_string(),
             PersonActionKind::Hibernate => "hibernate".to_string(),
             PersonActionKind::Idle => "idle".to_string(),
+            PersonActionKind::GazeInScene => "gaze in scene".to_string(),
             PersonActionKind::SayInScene => "say in scene".to_string(),
             PersonActionKind::MoveToScene => "move to scene".to_string(),
         }
@@ -62,6 +64,7 @@ impl PersonActionKind {
             PersonActionKind::Wait.to_name(),
             PersonActionKind::Hibernate.to_name(),
             PersonActionKind::Idle.to_name(),
+            PersonActionKind::GazeInScene.to_name(),
             PersonActionKind::SayInScene.to_name(),
             PersonActionKind::MoveToScene.to_name(),
         ]
@@ -126,6 +129,7 @@ pub enum PersonAction {
         duration: u64,
     },
     Idle,
+    GazeInScene,
     SayInScene {
         comment: String,
         destination_scene_name: Option<String>,
@@ -145,6 +149,7 @@ impl PersonAction {
                 format!("Hibernated for {} seconds.", duration)
             }
             PersonAction::Idle => "Did nothing.".to_string(),
+            PersonAction::GazeInScene => "Gazed around the current scene.".to_string(),
             PersonAction::SayInScene {
                 comment,
                 destination_scene_name,
@@ -328,6 +333,7 @@ impl PersonReaction {
                 PersonAction::Hibernate { duration }
             }
             "idle" => PersonAction::Idle,
+            "gaze in scene" => PersonAction::GazeInScene,
             "move to scene" => {
                 let scene_name =
                     maybe_scene_name.ok_or_else(|| PersonActionError::ParameterMissing {
@@ -459,6 +465,20 @@ mod tests {
                 assert_eq!(reflection_name, "maybe");
             }
             other => panic!("unexpected error: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_gaze_in_scene_action_parses() {
+        let reaction = PersonReaction::from_open_ai_tool_call(choose_action_call(vec![(
+            "action".to_string(),
+            json!("gaze in scene"),
+        )]))
+        .unwrap();
+
+        match reaction.action {
+            PersonAction::GazeInScene => {}
+            other => panic!("unexpected action: {:?}", other),
         }
     }
 }

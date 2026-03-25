@@ -14,8 +14,7 @@ use crate::capability::reflection::ReflectionCapability;
 use crate::capability::scene::SceneCapability;
 use crate::capability::state_of_mind::StateOfMindCapability;
 use crate::domain::job::{
-    person_hibernating, person_waiting, process_message, process_person_join,
-    process_scene_gaze,
+    person_hibernating, person_waiting, process_message, process_person_join, process_scene_gaze,
     send_message_to_scene, JobKind, PoppedJob,
 };
 use crate::domain::job_uuid::JobUuid;

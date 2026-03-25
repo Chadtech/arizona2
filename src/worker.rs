@@ -64,9 +64,7 @@ impl Worker {
     pub async fn new(logger: Logger) -> Result<Self, InitError> {
         let open_ai_key = OpenAiKey::from_env().map_err(InitError::OpenAiKey)?;
 
-        let db_info = db::Config::load()
-            .await
-            .map_err(InitError::DbConfig)?;
+        let db_info = db::Config::load().await.map_err(InitError::DbConfig)?;
 
         let sqlx_pool = {
             let postgres_conn_url = format!(

@@ -96,11 +96,7 @@ pub trait SceneCapability {
         let basis_scene_description = self.get_scene_description(&basis_scene_uuid).await?;
 
         let mut description = match basis_scene_description {
-            Some(desc) => format!(
-                "A new place connected to {}.\n\n{}",
-                basis_scene_name,
-                desc
-            ),
+            Some(desc) => format!("A new place connected to {}.\n\n{}", basis_scene_name, desc),
             None => format!(
                 "A new place connected to {}.\n\nIt feels distinct but nearby.",
                 basis_scene_name
@@ -110,8 +106,7 @@ pub trait SceneCapability {
         if !description.contains("\n\n") {
             description = format!(
                 "{}\n\n{}",
-                description,
-                "It has clear visual details and a practical purpose."
+                description, "It has clear visual details and a practical purpose."
             );
         }
 

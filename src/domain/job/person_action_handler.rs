@@ -8,6 +8,7 @@ use crate::domain::actor_uuid::ActorUuid;
 use crate::domain::job::person_hibernating::PersonHibernatingJob;
 use crate::domain::job::person_waiting::PersonWaitingJob;
 use crate::domain::job::process_person_join::ProcessPersonJoinJob;
+use crate::domain::job::process_scene_gaze::ProcessSceneGazeJob;
 use crate::domain::job::send_message_to_scene::send_scene_message_and_enqueue_recipients;
 use crate::domain::job::JobKind;
 use crate::domain::logger::Level;
@@ -25,6 +26,7 @@ pub enum ActionHandleError {
     ReactionLog(String),
     PersonName(String),
     SceneMissing(String),
+    GazeInScene(String),
     Say {
         scene_uuid: SceneUuid,
         details: String,
@@ -52,6 +54,9 @@ impl NiceDisplay for ActionHandleError {
             }
             ActionHandleError::SceneMissing(details) => {
                 format!("Could not get person's scene: {}", details)
+            }
+            ActionHandleError::GazeInScene(details) => {
+                format!("Person could not gaze in scene: {}", details)
             }
             ActionHandleError::Say {
                 scene_uuid,
@@ -107,6 +112,16 @@ pub async fn handle_person_action<
                 current_active_ms,
             )
             .await
+        }
+        PersonAction::GazeInScene => {
+            enqueue_scene_gaze(worker, person_uuid, current_active_ms).await?;
+
+            worker
+                .record_reaction(person_uuid, "gaze_in_scene")
+                .await
+                .map_err(ActionHandleError::ReactionLog)?;
+
+            Ok(())
         }
         PersonAction::SayInScene {
             comment,
@@ -290,6 +305,37 @@ async fn move_person_to_scene<
 
     enqueue_wait(worker, person_uuid, POST_MOVE_WAIT_MS, current_active_ms).await?;
     enqueue_person_join_jobs(worker, &scene.uuid, person_uuid).await?;
+
+    Ok(())
+}
+
+async fn enqueue_scene_gaze<
+    W: SceneCapability
+        + JobCapability
+        + PersonCapability
+        + MessageCapability
+        + ReactionHistoryCapability
+        + LogCapability
+        + Sync,
+>(
+    worker: &W,
+    person_uuid: &PersonUuid,
+    current_active_ms: i64,
+) -> Result<(), ActionHandleError> {
+    let scene_uuid = worker
+        .get_persons_current_scene_uuid(person_uuid)
+        .await
+        .map_err(ActionHandleError::SceneMissing)?
+        .ok_or_else(|| ActionHandleError::GazeInScene("Person is not in any scene".to_string()))?;
+
+    let gaze_job = JobKind::ProcessSceneGaze(ProcessSceneGazeJob {
+        scene_uuid,
+        gazing_person_uuid: person_uuid.clone(),
+    });
+    worker
+        .unshift_job(gaze_job)
+        .await
+        .map_err(ActionHandleError::GazeInScene)?;
 
     Ok(())
 }

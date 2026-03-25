@@ -30,10 +30,10 @@ use crate::domain::situation;
 use crate::domain::situation::Situation;
 use crate::domain::state_of_mind::StateOfMind;
 use crate::domain::state_of_mind_uuid::StateOfMindUuid;
+use crate::nice_display::NiceDisplay;
 use crate::person_actions::ReflectionDecision;
 use crate::text_utils::normalize_message_content;
 use crate::{capability::message::MessageCapability, capability::scene::SceneCapability};
-use crate::nice_display::NiceDisplay;
 use std::collections::HashSet;
 
 struct ReflectionInput {
@@ -636,9 +636,7 @@ async fn build_reaction_execution_input<
         SceneReactionTrigger::PersonJoined { .. } => {
             "New join events (newest; primary reaction target):"
         }
-        SceneReactionTrigger::SceneDescriptionGaze => {
-            "Scene gaze event (primary reaction target):"
-        }
+        SceneReactionTrigger::SceneDescriptionGaze => "Scene gaze event (primary reaction target):",
     };
 
     let new_event_section_text = match trigger {
@@ -662,32 +660,34 @@ async fn build_reaction_execution_input<
             )
         }
         SceneReactionTrigger::SceneDescriptionGaze => {
-            let scene_name = match worker
-                .get_scene_name(scene_uuid)
-                .await
-                .map_err(|err| Error::FailedToGetSceneName {
+            let scene_name = match worker.get_scene_name(scene_uuid).await.map_err(|err| {
+                Error::FailedToGetSceneName {
                     scene_uuid: scene_uuid.clone(),
                     details: err,
-                })?
-            {
+                }
+            })? {
                 Some(scene_name) => scene_name,
-                None => return Err(Error::SceneNameNotFound {
-                    scene_uuid: scene_uuid.clone(),
-                }),
+                None => {
+                    return Err(Error::SceneNameNotFound {
+                        scene_uuid: scene_uuid.clone(),
+                    })
+                }
             };
-            let scene_description = match worker
-                .get_scene_description(scene_uuid)
-                .await
-                .map_err(|err| Error::FailedToGetSceneDescription {
-                    scene_uuid: scene_uuid.clone(),
-                    details: err,
-                })?
-            {
-                Some(scene_description) => scene_description,
-                None => return Err(Error::SceneDescriptionNotFound {
-                    scene_uuid: scene_uuid.clone(),
-                }),
-            };
+            let scene_description =
+                match worker
+                    .get_scene_description(scene_uuid)
+                    .await
+                    .map_err(|err| Error::FailedToGetSceneDescription {
+                        scene_uuid: scene_uuid.clone(),
+                        details: err,
+                    })? {
+                    Some(scene_description) => scene_description,
+                    None => {
+                        return Err(Error::SceneDescriptionNotFound {
+                            scene_uuid: scene_uuid.clone(),
+                        })
+                    }
+                };
             format!(
                 "In the current scene \"{}\", the environment is described as:\n{}\n[SCENE GAZE EVENT]",
                 scene_name, scene_description

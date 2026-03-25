@@ -30,15 +30,13 @@ pub enum Msg {
     CreatedStateOfMind(Result<StateOfMindUuid, String>),
 }
 
-#[derive(Serialize, Deserialize, Debug)]
-#[derive(Default)]
+#[derive(Serialize, Deserialize, Debug, Default)]
 pub struct Storage {
     #[serde(default)]
     name_field: String,
     #[serde(default)]
     state_of_mind_field: String,
 }
-
 
 impl Model {
     pub fn new(storage: &Storage) -> Self {
