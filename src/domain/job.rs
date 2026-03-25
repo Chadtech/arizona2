@@ -1,21 +1,21 @@
 pub mod person_action_handler;
 pub mod person_hibernating;
 pub mod person_waiting;
-pub mod process_person_join;
 pub mod process_message;
+pub mod process_person_join;
 pub mod process_reaction_common;
 pub mod process_scene_gaze;
 pub mod send_message_to_scene;
 
 use super::job_uuid::JobUuid;
-use crate::domain::job::person_waiting::PersonWaitingJob;
 use crate::domain::job::person_hibernating::PersonHibernatingJob;
-use process_person_join::ProcessPersonJoinJob;
-use process_scene_gaze::ProcessSceneGazeJob;
+use crate::domain::job::person_waiting::PersonWaitingJob;
 use crate::domain::job::send_message_to_scene::SendMessageToSceneJob;
 use crate::nice_display::NiceDisplay;
 use chrono::{DateTime, Utc};
 use process_message::ProcessMessageJob;
+use process_person_join::ProcessPersonJoinJob;
+use process_scene_gaze::ProcessSceneGazeJob;
 use serde_json;
 use std::fmt::Display;
 
@@ -122,9 +122,8 @@ impl JobKind {
                 Ok(Some(data))
             }
             JobKind::PersonHibernating(job) => {
-                let data = serde_json::to_value(job).map_err(|err| {
-                    format!("Failed to serialize PersonHibernatingJob: {}", err)
-                })?;
+                let data = serde_json::to_value(job)
+                    .map_err(|err| format!("Failed to serialize PersonHibernatingJob: {}", err))?;
                 Ok(Some(data))
             }
         }

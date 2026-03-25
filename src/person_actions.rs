@@ -72,7 +72,7 @@ impl PersonActionKind {
             ToolFunctionParameter::StringEnum {
                 name: "reflection".to_string(),
                 description: "Whether the person should reflect after acting.".to_string(),
-                required: true,
+                required: false,
                 values: ReflectionDecision::all_names(),
             },
             ToolFunctionParameter::StringEnum {
@@ -432,9 +432,10 @@ mod tests {
 
     #[test]
     fn test_missing_reflection_defaults_to_no_reflection() {
-        let reaction = PersonReaction::from_open_ai_tool_call(choose_action_call(vec![
-            ("action".to_string(), json!("idle")),
-        ]))
+        let reaction = PersonReaction::from_open_ai_tool_call(choose_action_call(vec![(
+            "action".to_string(),
+            json!("idle"),
+        )]))
         .unwrap();
 
         match reaction.reflection {

@@ -252,11 +252,7 @@ async fn move_person_to_scene<
         }
     };
 
-    if from_scene_uuid
-        .as_ref()
-        .map(|uuid| uuid.to_uuid())
-        == Some(scene.uuid.to_uuid())
-    {
+    if from_scene_uuid.as_ref().map(|uuid| uuid.to_uuid()) == Some(scene.uuid.to_uuid()) {
         return Ok(());
     }
 

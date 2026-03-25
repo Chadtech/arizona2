@@ -501,6 +501,7 @@ Rules:
 - Use only the information explicitly present in this prompt.
 - Do not assume abilities beyond the available tool calls.
 - Focus on the newest message events first; use older context only to interpret them.
+- Treat the person's current task as the strongest default signal for what they intend to do, unless the latest situation clearly overrides it.
 - Treat the person as having stable drives, but not as mechanically repeating themselves.
 - Prefer concrete immediate intent over general personality description.
 - When multiple goals conflict, resolve them by choosing the action that best fits the person’s highest-priority drives and current constraints.
