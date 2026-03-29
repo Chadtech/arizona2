@@ -92,6 +92,14 @@ COMMIT;"#
 }
 
 pub async fn run() -> Result<(), RunError> {
+    run_for_database("arizona2").await
+}
+
+pub async fn run_test() -> Result<(), RunError> {
+    run_for_database("arizona2_test").await
+}
+
+async fn run_for_database(database_name: &str) -> Result<(), RunError> {
     // Get migrations
     let migrations: Vec<Migration> = get_migrations().map_err(RunError::GetMigrations)?;
     let migrations_len = migrations.len();
@@ -100,8 +108,8 @@ pub async fn run() -> Result<(), RunError> {
     let config = db::Config::load().await.map_err(RunError::DbConfig)?;
 
     println!(
-        "Should I run migrations at host {} with password {}? (Y/n): ",
-        config.host, config.password
+        "Should I run migrations against database '{}' at host {} with password {}? (Y/n): ",
+        database_name, config.host, config.password
     );
 
     let mut input = String::new();
@@ -117,8 +125,8 @@ pub async fn run() -> Result<(), RunError> {
 
     let (client, connection) = {
         let connect_string = format!(
-            "host={} user={} password={} dbname=arizona2",
-            config.host, config.user, config.password
+            "host={} user={} password={} dbname={}",
+            config.host, config.user, config.password, database_name
         );
 
         tokio_postgres::connect(connect_string.as_str(), NoTls)

@@ -6,6 +6,10 @@ pub struct OpenAiKey {
 }
 
 impl OpenAiKey {
+    pub fn from_string(key: String) -> Self {
+        OpenAiKey { key }
+    }
+
     pub fn from_env() -> Result<Self, VarError> {
         std::env::var("OPEN_AI_API_KEY").map(|key| OpenAiKey { key })
     }

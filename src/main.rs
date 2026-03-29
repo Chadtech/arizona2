@@ -29,6 +29,7 @@ use clap::Parser;
 enum Cmd {
     NewMigration { migration_name: String },
     RunMigrations,
+    RunTestMigrations,
     AdminUi,
     RunJobRunner,
     SummarizePersonIdentities,
@@ -66,6 +67,7 @@ impl Cmd {
         match self {
             Cmd::NewMigration { .. } => "migrations",
             Cmd::RunMigrations => "migrations",
+            Cmd::RunTestMigrations => "test-migrations",
             Cmd::AdminUi => "admin-ui",
             Cmd::RunJobRunner => "job-runner",
             Cmd::SummarizePersonIdentities => "summarize-person-identities",
@@ -129,6 +131,7 @@ async fn nice_main(cmd: Cmd) -> Result<(), Error> {
             .await
             .map_err(Error::NewMigration),
         Cmd::RunMigrations => migrations::run().await.map_err(Error::RunMigrations),
+        Cmd::RunTestMigrations => migrations::run_test().await.map_err(Error::RunMigrations),
         Cmd::AdminUi => admin_ui::run().await.map_err(Error::AdminUi),
         Cmd::RunJobRunner => job_runner::run().await.map_err(Error::JobRunner),
         Cmd::SummarizePersonIdentities => tasks::summarize_person_identities::run()

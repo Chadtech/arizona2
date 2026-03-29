@@ -554,13 +554,6 @@ mod tests {
             Ok(())
         }
 
-        async fn get_messages_in_scene(
-            &self,
-            _scene_uuid: &SceneUuid,
-        ) -> Result<Vec<Message>, String> {
-            Ok(vec![])
-        }
-
         async fn get_messages_in_scene_page(
             &self,
             _scene_uuid: &SceneUuid,
@@ -814,7 +807,7 @@ mod tests {
 
         async fn get_motivations_for_person(
             &self,
-            _person_uuid: PersonUuid,
+            _person_uuid: &PersonUuid,
         ) -> Result<Vec<Motivation>, String> {
             Ok(vec![])
         }
@@ -842,8 +835,8 @@ mod tests {
             _person_recalling: &PersonName,
             _message_type_args: MessageTypeArgs,
             _recent_events: Vec<String>,
-            _state_of_mind: &String,
-            _situation: &String,
+            _state_of_mind: &str,
+            _situation: &str,
         ) -> Result<MemoryQueryPrompt, String> {
             Ok(MemoryQueryPrompt {
                 prompt: String::new(),
@@ -863,6 +856,10 @@ mod tests {
     impl PersonCapability for MockWorker {
         async fn create_person(&self, _new_person: NewPerson) -> Result<PersonUuid, String> {
             Ok(PersonUuid::new())
+        }
+
+        async fn get_all_person_uuids(&self) -> Result<Vec<PersonUuid>, String> {
+            Ok(vec![])
         }
 
         async fn get_persons_name(&self, _person_uuid: PersonUuid) -> Result<PersonName, String> {

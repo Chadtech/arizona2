@@ -63,24 +63,28 @@ impl NiceDisplay for InitError {
 impl Worker {
     pub async fn new(logger: Logger) -> Result<Self, InitError> {
         let open_ai_key = OpenAiKey::from_env().map_err(InitError::OpenAiKey)?;
-
         let db_info = db::Config::load().await.map_err(InitError::DbConfig)?;
+        let postgres_conn_url = format!(
+            "postgres://{}:{}@{}/arizona2",
+            db_info.user, db_info.password, db_info.host
+        );
 
-        let sqlx_pool = {
-            let postgres_conn_url = format!(
-                "postgres://{}:{}@{}/arizona2",
-                db_info.user, db_info.password, db_info.host
-            );
+        Self::from_connection_string(logger, &postgres_conn_url, open_ai_key).await
+    }
 
-            PgPoolOptions::new()
-                .min_connections(2)
-                .idle_timeout(Duration::from_secs(600))
-                .max_connections(19)
-                .test_before_acquire(true)
-                .connect(&postgres_conn_url)
-                .await
-                .map_err(InitError::PoolConnection)?
-        };
+    pub async fn from_connection_string(
+        logger: Logger,
+        connection_string: &str,
+        open_ai_key: OpenAiKey,
+    ) -> Result<Self, InitError> {
+        let sqlx_pool = PgPoolOptions::new()
+            .min_connections(2)
+            .idle_timeout(Duration::from_secs(600))
+            .max_connections(19)
+            .test_before_acquire(true)
+            .connect(connection_string)
+            .await
+            .map_err(InitError::PoolConnection)?;
 
         sqlx::query("SELECT 1")
             .execute(&sqlx_pool)
