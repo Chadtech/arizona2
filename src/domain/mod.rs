@@ -12,6 +12,7 @@ pub mod motivation_uuid;
 pub mod person_identity_uuid;
 pub mod person_name;
 pub mod person_task;
+pub mod person_task_uuid;
 pub mod person_uuid;
 pub mod random_seed;
 pub mod scene_participant_uuid;

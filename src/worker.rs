@@ -8,6 +8,7 @@ mod message_capability;
 mod motivation_capability;
 mod person_capability;
 mod person_identity_capability;
+mod person_task_capability;
 mod reaction_capability;
 mod reaction_history_capability;
 mod reflection_capability;

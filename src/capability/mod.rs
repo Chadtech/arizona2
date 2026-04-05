@@ -8,6 +8,7 @@ pub mod message;
 pub mod motivation;
 pub mod person;
 pub mod person_identity;
+pub mod person_task;
 pub mod reaction;
 pub mod reaction_history;
 pub mod reflection;

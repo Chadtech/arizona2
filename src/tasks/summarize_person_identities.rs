@@ -36,8 +36,8 @@ pub async fn run() -> Result<(), Error> {
             SELECT
                 p.uuid AS person_uuid,
                 p.name AS person_name,
-                latest_identity.uuid AS person_identity_uuid,
-                latest_identity.identity
+                latest_identity.uuid AS "person_identity_uuid?",
+                latest_identity.identity AS "identity?"
             FROM person p
             LEFT JOIN LATERAL (
                 SELECT pi.uuid, pi.identity

@@ -6,7 +6,6 @@ use crate::capability::state_of_mind::StateOfMindCapability;
 use crate::domain::logger::Level;
 use crate::domain::memory::Memory;
 use crate::domain::motivation::Motivation;
-use crate::domain::person_task::PersonTask;
 use crate::domain::person_uuid::PersonUuid;
 use crate::nice_display::NiceDisplay;
 use crate::open_ai::completion::{Completion, CompletionError};
@@ -522,10 +521,7 @@ Your response should make clear:
     let memories_list_text = Memory::many_to_list_text(memories);
     let motivations_list_text = Motivation::many_to_list_text(motivations);
 
-    let current_person_task_text: String = match Some(PersonTask::dev().to_string()) {
-        Some(task_text) => format!("\n\nCurrent Task:\n {}", task_text),
-        None => String::new(),
-    };
+    let current_person_task_text = String::new();
 
     let thinking_user_prompt = format!(
         "Describe this person's immediate intention and current thinking in plain text.\n\nName: \n{}\n\nMemories:\n{}\n\nBackground drives:\n{}\n\nPerson identity:\n{}\n\nState of mind:\n{}\n\nSituation:\n{}{}",
