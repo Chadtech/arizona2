@@ -157,14 +157,16 @@ impl Model {
 
                 let content = self.content_input.trim();
                 if content.is_empty() {
-                    self.create_status = CreateStatus::Error("Task content cannot be empty".to_string());
+                    self.create_status =
+                        CreateStatus::Error("Task content cannot be empty".to_string());
                     return Task::none();
                 }
 
                 let priority = match self.priority_input.trim().parse::<i32>() {
                     Ok(priority) => priority,
                     Err(_) => {
-                        self.create_status = CreateStatus::Error("Priority must be a number".to_string());
+                        self.create_status =
+                            CreateStatus::Error("Priority must be a number".to_string());
                         return Task::none();
                     }
                 };
@@ -180,7 +182,11 @@ impl Model {
 
                 self.create_status = CreateStatus::Creating;
                 Task::perform(
-                    async move { worker.set_persons_current_active_task(new_person_task).await },
+                    async move {
+                        worker
+                            .set_persons_current_active_task(new_person_task)
+                            .await
+                    },
                     Msg::TaskCreated,
                 )
             }
@@ -225,13 +231,21 @@ impl Model {
         let create_section: Element<'_, Msg> = match &self.load_status {
             LoadStatus::Loaded { .. } => w::column![
                 w::text("New Current Task"),
-                w::text_input("Task content", &self.content_input)
-                    .on_input(Msg::ContentChanged),
-                w::text_input("Success condition (optional)", &self.success_condition_input)
+                w::text_input("Task content", &self.content_input).on_input(Msg::ContentChanged),
+                w::text_input(
+                    "Success condition (optional)",
+                    &self.success_condition_input
+                )
                 .on_input(Msg::SuccessConditionChanged),
-                w::text_input("Abandon condition (optional)", &self.abandon_condition_input)
+                w::text_input(
+                    "Abandon condition (optional)",
+                    &self.abandon_condition_input
+                )
                 .on_input(Msg::AbandonConditionChanged),
-                w::text_input("Failure condition (optional)", &self.failure_condition_input)
+                w::text_input(
+                    "Failure condition (optional)",
+                    &self.failure_condition_input
+                )
                 .on_input(Msg::FailureConditionChanged),
                 w::text_input("Priority (0-100)", &self.priority_input)
                     .on_input(Msg::PriorityChanged),

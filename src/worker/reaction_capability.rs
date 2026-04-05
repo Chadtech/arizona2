@@ -188,15 +188,23 @@ async fn get_reaction_helper(
     );
 
     let first_pass_text = get_first_pass_reaction_text(worker, &prompts, &person_uuid).await?;
+    let reformulated_action_prompt =
+        reformulate_action_prompt(worker, &prompts, &first_pass_text, &person_uuid).await?;
 
-    let mut candidate =
-        choose_reaction(worker, &prompts, &first_pass_text, None, &person_uuid).await?;
+    let mut candidate = choose_reaction(
+        worker,
+        &prompts,
+        reformulated_action_prompt.as_str(),
+        None,
+        &person_uuid,
+    )
+    .await?;
 
     for retry_index in 0..=REACTION_VALIDATION_RETRY_LIMIT {
         let validation = match validate_reaction_candidate(
             worker,
             &prompts,
-            &first_pass_text,
+            reformulated_action_prompt.as_str(),
             &candidate,
             &person_uuid,
         )
@@ -248,7 +256,7 @@ async fn get_reaction_helper(
             candidate = choose_reaction(
                 worker,
                 &prompts,
-                &first_pass_text,
+                reformulated_action_prompt.as_str(),
                 Some(validation.reason.as_str()),
                 &person_uuid,
             )
@@ -271,6 +279,59 @@ async fn get_reaction_helper(
     }
 
     Ok(fallback_reaction())
+}
+
+async fn reformulate_action_prompt(
+    worker: &Worker,
+    prompts: &ReactionPromptPreview,
+    first_pass_text: &str,
+    person_uuid: &PersonUuid,
+) -> Result<String, Error> {
+    let base_action_user_prompt = build_base_action_user_prompt(prompts, first_pass_text);
+
+    worker.logger.log(
+        Level::Info,
+        format!(
+            "=== ACTION USER PROMPT REFORMULATION INPUT ===\n{}",
+            base_action_user_prompt
+        )
+        .as_str(),
+    );
+
+    let mut completion = Completion::new();
+    completion.add_message(
+        Role::System,
+        "You rewrite action user prompts for another model. Compress aggressively. Keep only information that is directly relevant to choosing the person's single next action right now. Center the rewrite on what the person is deciding, what immediate actions are plausible, what constraints matter, and what newest facts override older context. Remove low-signal background detail, repetition, and anything that does not affect the immediate next action. Preserve concrete facts that materially change the decision. Keep references to the internal reaction text only insofar as they clarify immediate intent. Do not rewrite or restate any system prompt. Return only the rewritten user prompt as plain text.",
+    );
+    completion.add_message(
+        Role::User,
+        format!(
+            "Rewrite this action user prompt into a much shorter action-focused user prompt.\n\n{}",
+            base_action_user_prompt
+        )
+        .as_str(),
+    );
+
+    let response = completion
+        .send_request(&worker.open_ai_key, worker.reqwest_client.clone())
+        .await
+        .map_err(Error::CompletionError)?;
+
+    let reformulated_prompt = response
+        .as_message()
+        .map_err(|err| Error::CompletionError(err.into()))?;
+
+    worker.logger.log(
+        Level::Info,
+        format!(
+            "Reformulated action prompt for person {}:\n{}",
+            person_uuid.to_uuid(),
+            reformulated_prompt
+        )
+        .as_str(),
+    );
+
+    Ok(reformulated_prompt)
 }
 
 async fn get_first_pass_reaction_text(
@@ -316,13 +377,13 @@ async fn get_first_pass_reaction_text(
 async fn choose_reaction(
     worker: &Worker,
     prompts: &ReactionPromptPreview,
-    first_pass_text: &str,
+    reformulated_action_prompt: &str,
     validation_feedback: Option<&str>,
     person_uuid: &PersonUuid,
 ) -> Result<PersonReaction, Error> {
     let mut action_completion = Completion::new();
     let action_user_prompt =
-        build_action_user_prompt(prompts, first_pass_text, validation_feedback);
+        build_action_user_prompt(reformulated_action_prompt, validation_feedback);
 
     worker.logger.log(
         Level::Info,
@@ -385,7 +446,7 @@ async fn choose_reaction(
 async fn validate_reaction_candidate(
     worker: &Worker,
     prompts: &ReactionPromptPreview,
-    first_pass_text: &str,
+    reformulated_action_prompt: &str,
     candidate: &PersonReaction,
     person_uuid: &PersonUuid,
 ) -> Result<ReactionValidationResult, String> {
@@ -395,7 +456,7 @@ async fn validate_reaction_candidate(
         "You validate whether a single already-selected action is actually possible in Arizona2's action model. Be strict. The only real effects available are speaking in scene, moving to another scene, waiting, hibernating, or idling. Reject any chosen action that implies doing something else in the world, such as writing or editing a document, inspecting files, changing memory/state directly, manipulating objects, performing physical tasks, running a procedure, or otherwise claiming off-screen effects that Arizona2 cannot perform. For 'say in scene', the comment must be plausible spoken dialogue only, not narration of extra actions or claims that those actions were performed. Do not judge style, usefulness, or strategy beyond whether the chosen action is actually representable. Do not propose a replacement action. Return JSON only with keys is_valid (boolean) and reason (string). Keep reason brief and concrete.",
     );
 
-    let action_user_prompt = build_action_user_prompt(prompts, first_pass_text, None);
+    let action_user_prompt = build_action_user_prompt(reformulated_action_prompt, None);
     let validator_user_prompt = format!(
         "Action system prompt:\n{}\n\nAction user prompt:\n{}\n\nChosen reaction JSON:\n{}\n\nReturn JSON only.",
         prompts.action_system_prompt,
@@ -428,14 +489,17 @@ async fn validate_reaction_candidate(
     })
 }
 
+fn build_base_action_user_prompt(prompts: &ReactionPromptPreview, first_pass_text: &str) -> String {
+    prompts
+        .action_user_prompt
+        .replace(INTERNAL_REACTION_PLACEHOLDER, first_pass_text)
+}
+
 fn build_action_user_prompt(
-    prompts: &ReactionPromptPreview,
-    first_pass_text: &str,
+    base_action_user_prompt: &str,
     validation_feedback: Option<&str>,
 ) -> String {
-    let mut action_user_prompt = prompts
-        .action_user_prompt
-        .replace(INTERNAL_REACTION_PLACEHOLDER, first_pass_text);
+    let mut action_user_prompt = base_action_user_prompt.to_string();
 
     if let Some(feedback) = validation_feedback {
         action_user_prompt.push_str(
@@ -610,6 +674,49 @@ fn describe_reflection(reflection: &ReflectionDecision) -> String {
     match reflection {
         ReflectionDecision::Reflection => "reflection".to_string(),
         ReflectionDecision::NoReflection => "no_reflection".to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample_prompts() -> ReactionPromptPreview {
+        ReactionPromptPreview {
+            thinking_system_prompt: "thinking-system".to_string(),
+            thinking_user_prompt: "thinking-user".to_string(),
+            action_system_prompt: "action-system".to_string(),
+            action_user_prompt: format!(
+                "Recent events:\nalpha\n\nInternal reaction text:\n{}\n\nChoose one action.",
+                INTERNAL_REACTION_PLACEHOLDER
+            ),
+        }
+    }
+
+    #[test]
+    fn test_build_base_action_user_prompt_inserts_first_pass_text() {
+        let prompts = sample_prompts();
+
+        let result = build_base_action_user_prompt(&prompts, "Focus on Bob's question.");
+
+        assert!(result.contains("Focus on Bob's question."));
+        assert!(!result.contains(INTERNAL_REACTION_PLACEHOLDER));
+    }
+
+    #[test]
+    fn test_build_action_user_prompt_appends_validator_feedback() {
+        let result = build_action_user_prompt("short action prompt", Some("too much narration"));
+
+        assert!(result.contains("short action prompt"));
+        assert!(result.contains("too much narration"));
+        assert!(result.contains("Choose a different action"));
+    }
+
+    #[test]
+    fn test_build_action_user_prompt_without_feedback_returns_base_prompt() {
+        let result = build_action_user_prompt("short action prompt", None);
+
+        assert_eq!(result, "short action prompt");
     }
 }
 
