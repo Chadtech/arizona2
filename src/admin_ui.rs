@@ -5,6 +5,7 @@ mod messages_page;
 mod motivation_page;
 mod new_identity_page;
 mod person_page;
+mod person_task_page;
 mod prompt_lab_page;
 mod reaction_page;
 mod scene_page;
@@ -34,6 +35,7 @@ struct Model {
     person_page: person_page::Model,
     memory_page: memory_page::Model,
     motivation_page: motivation_page::Model,
+    person_task_page: person_task_page::Model,
     messages_page: messages_page::Model,
     state_of_mind_page: state_of_mind_page::Model,
     scene_page: scene_page::Model,
@@ -57,6 +59,7 @@ impl Model {
             person: self.person_page.to_storage(),
             memory: self.memory_page.to_storage(),
             motivation: self.motivation_page.to_storage(),
+            person_task: self.person_task_page.to_storage(),
             messages: self.messages_page.to_storage(),
             state_of_mind: self.state_of_mind_page.to_storage(),
             scene: self.scene_page.to_storage(),
@@ -102,6 +105,8 @@ struct Storage {
     memory: memory_page::Storage,
     #[serde(default, alias = "goal")]
     motivation: motivation_page::Storage,
+    #[serde(default)]
+    person_task: person_task_page::Storage,
     #[serde(default)]
     messages: messages_page::Storage,
     #[serde(default)]
@@ -158,6 +163,7 @@ impl Storage {
             person: person_page::Storage::default(),
             memory: memory_page::Storage::default(),
             motivation: motivation_page::Storage::default(),
+            person_task: person_task_page::Storage::default(),
             messages: messages_page::Storage::default(),
             state_of_mind: state_of_mind_page::Storage::default(),
             scene: scene_page::Storage::default(),
@@ -179,6 +185,7 @@ enum Tab {
     Memory,
     #[serde(alias = "Goal")]
     Motivation,
+    PersonTask,
     Messages,
     StateOfMind,
     Scene,
@@ -195,6 +202,7 @@ impl Tab {
             Tab::Person => "Person".to_string(),
             Tab::Memory => "Memory".to_string(),
             Tab::Motivation => "Motivation".to_string(),
+            Tab::PersonTask => "Person Task".to_string(),
             Tab::Messages => "Messages".to_string(),
             Tab::StateOfMind => "State of Mind".to_string(),
             Tab::Scene => "Scene".to_string(),
@@ -213,6 +221,7 @@ impl Tab {
             Tab::Person,
             Tab::Memory,
             Tab::Motivation,
+            Tab::PersonTask,
             Tab::StateOfMind,
             Tab::Scene,
         ]
@@ -258,6 +267,7 @@ enum Msg {
     PersonPage(person_page::Msg),
     MemoryPage(memory_page::Msg),
     MotivationPage(motivation_page::Msg),
+    PersonTaskPage(person_task_page::Msg),
     MessagesPage(messages_page::Msg),
     StateOfMindPage(state_of_mind_page::Msg),
     ScenePage(scene_page::Msg),
@@ -314,6 +324,7 @@ impl Model {
             person_page: person_page::Model::new(&flags.storage.person),
             memory_page: memory_page::Model::new(&flags.storage.memory),
             motivation_page: motivation_page::Model::new(&flags.storage.motivation),
+            person_task_page: person_task_page::Model::new(&flags.storage.person_task),
             messages_page: messages_page::Model::new(&flags.storage.messages),
             scene_page: scene_page::Model::new(&flags.storage.scene),
             job_page: job_page::Model::new(&flags.storage.job),
@@ -446,6 +457,15 @@ impl Model {
                 }
 
                 task.map(Msg::MotivationPage)
+            }
+            Msg::PersonTaskPage(sub_msg) => {
+                let task = self.person_task_page.update(self.worker.clone(), sub_msg);
+
+                if let Err(err) = self.to_storage().save_to_file_system() {
+                    self.error = Some(err);
+                }
+
+                task.map(Msg::PersonTaskPage)
             }
             Msg::MessagesPage(sub_msg) => {
                 let task = self.messages_page.update(self.worker.clone(), sub_msg);
@@ -654,6 +674,7 @@ impl Model {
             Tab::Person => self.person_page.view().map(Msg::PersonPage),
             Tab::Memory => self.memory_page.view().map(Msg::MemoryPage),
             Tab::Motivation => self.motivation_page.view().map(Msg::MotivationPage),
+            Tab::PersonTask => self.person_task_page.view().map(Msg::PersonTaskPage),
             Tab::Messages => self.messages_page.view().map(Msg::MessagesPage),
             Tab::StateOfMind => self.state_of_mind_page.view().map(Msg::StateOfMindPage),
             Tab::Scene => self.scene_page.view().map(Msg::ScenePage),
