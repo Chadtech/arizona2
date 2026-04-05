@@ -12,10 +12,11 @@ This is a Rust workspace with source in `src/`. Core areas include:
 
 ## Build, Test, and Development Commands
 - `cargo build` builds the project.
+- `cargo fmt` formats the codebase; run it after completing code changes.
 - `cargo run -- run` starts the web server (port 1754).
 - `cargo run -- admin-ui` launches the desktop UI.
 - `cargo run -- run-job-runner` runs the background job processor.
-- `cargo run -- new-migration <name>` creates a migration file in `db/migrations/`.
+- `cargo run -- new-migration <name>` creates a migration file in `db/migrations/`; use this command instead of creating migration files manually so timestamps stay consistent.
 - `cargo run -- run-migrations` applies pending migrations.
 - `cargo test` runs all tests; `cargo test <module_or_test>` scopes execution.
 
