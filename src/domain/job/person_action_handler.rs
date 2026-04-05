@@ -76,6 +76,7 @@ impl NiceDisplay for ActionHandleError {
 }
 
 const IDLE_DURATION_MS: i64 = 4 * 60 * 1000;
+const POST_MESSAGE_WAIT_MS: u64 = 0;
 const POST_MOVE_WAIT_MS: u64 = 30 * 1000;
 
 pub async fn handle_person_action<
@@ -178,6 +179,8 @@ pub async fn handle_person_action<
                 .record_reaction(person_uuid, reaction_kind)
                 .await
                 .map_err(ActionHandleError::ReactionLog)?;
+
+            enqueue_wait(worker, person_uuid, POST_MESSAGE_WAIT_MS, current_active_ms).await?;
 
             Ok(())
         }

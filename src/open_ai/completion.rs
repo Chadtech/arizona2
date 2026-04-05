@@ -241,14 +241,17 @@ impl Completion {
             body["parallel_tool_calls"] = serde_json::json!(false);
         }
 
-        let res = client
+        let response = client
             .post("https://api.openai.com/v1/chat/completions")
             .header("Content-Type", "application/json")
             .header("Authorization", open_ai_key.to_header())
             .json(&body)
             .send()
             .await
-            .map_err(|err| CompletionError::Request(err.to_string()))?
+            .map_err(|err| CompletionError::Request(err.to_string()))?;
+
+        let status = response.status();
+        let res = response
             .text()
             .await
             .map_err(|err| CompletionError::Response(err.to_string()))?;
@@ -256,6 +259,28 @@ impl Completion {
         let res_json: serde_json::Value = serde_json::from_str(&res)
             .map_err(|err| CompletionError::ResponseJsonDecode(err.to_string()))?;
 
+        if !status.is_success() {
+            return Err(CompletionError::Response(format!(
+                "open ai returned HTTP {}: {}",
+                status,
+                extract_open_ai_error_message(&res_json)
+            )));
+        }
+
+        if let Some(api_error) = maybe_open_ai_error_message(&res_json) {
+            return Err(CompletionError::Response(api_error));
+        }
+
         Ok(Response::new(res_json))
     }
+}
+
+fn maybe_open_ai_error_message(json: &serde_json::Value) -> Option<String> {
+    let error_json = json.get("error")?;
+    let message = error_json.get("message")?.as_str()?;
+    Some(message.to_string())
+}
+
+fn extract_open_ai_error_message(json: &serde_json::Value) -> String {
+    maybe_open_ai_error_message(json).unwrap_or_else(|| format_json(json))
 }

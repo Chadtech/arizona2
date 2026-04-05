@@ -1821,6 +1821,16 @@ mod tests {
         assert!(process_message_jobs.contains(&bob_uuid.to_uuid()));
         assert!(process_message_jobs.contains(&charlie_uuid.to_uuid()));
 
+        let wait_jobs = state
+            .jobs
+            .iter()
+            .filter_map(|job| match job {
+                JobKind::PersonWaiting(wait_job) => Some(wait_job.run_at_active_ms()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(wait_jobs, vec![120_000]);
+
         assert_eq!(state.reaction_kinds, vec!["say_in_scene".to_string()]);
         assert_eq!(state.handled_message_ids, vec![vec![pending_uuid]]);
         assert_eq!(state.memory_descriptions.len(), 1);
