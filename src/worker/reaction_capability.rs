@@ -1,6 +1,7 @@
 use crate::capability::motivation::MotivationCapability;
 use crate::capability::person::PersonCapability;
 use crate::capability::person_identity::PersonIdentityCapability;
+use crate::capability::person_task::PersonTaskCapability;
 use crate::capability::reaction::{ReactionCapability, ReactionPromptPreview};
 use crate::capability::state_of_mind::StateOfMindCapability;
 use crate::domain::logger::Level;
@@ -95,6 +96,10 @@ impl ReactionCapability for Worker {
             ))?
         };
 
+        let current_person_task_text = get_current_person_task_text(self, &person_uuid)
+            .await
+            .map_err(|err| format!("Failed to get current person task: {}", err))?;
+
         let prompts = build_prompts(
             person_name.as_str(),
             &memories,
@@ -102,6 +107,7 @@ impl ReactionCapability for Worker {
             person_identity.as_str(),
             state_of_mind.content.as_str(),
             situation.as_str(),
+            current_person_task_text.as_str(),
             INTERNAL_REACTION_PLACEHOLDER,
         );
         Ok(prompts)
@@ -161,6 +167,15 @@ async fn get_reaction_helper(
         .await
         .map_err(Error::FailedToGetMotivations)?;
 
+    let current_person_task_text = get_current_person_task_text(worker, &person_uuid)
+        .await
+        .map_err(|err| {
+            Error::FailedToGetReactionDualLayer(format!(
+                "Failed to get current person task: {}",
+                err
+            ))
+        })?;
+
     let prompts = build_prompts(
         person_name.as_str(),
         &memories,
@@ -168,6 +183,7 @@ async fn get_reaction_helper(
         person_identity.as_str(),
         state_of_mind.as_str(),
         situation.as_str(),
+        current_person_task_text.as_str(),
         INTERNAL_REACTION_PLACEHOLDER,
     );
 
@@ -493,6 +509,7 @@ fn build_prompts(
     person_identity: &str,
     state_of_mind: &str,
     situation: &str,
+    current_person_task_text: &str,
     first_pass_text: &str,
 ) -> ReactionPromptPreview {
     let thinking_system_prompt = "You are simulating a real person’s immediate inner reasoning at a single moment in time.
@@ -520,8 +537,6 @@ Your response should make clear:
 ".to_string();
     let memories_list_text = Memory::many_to_list_text(memories);
     let motivations_list_text = Motivation::many_to_list_text(motivations);
-
-    let current_person_task_text = String::new();
 
     let thinking_user_prompt = format!(
         "Describe this person's immediate intention and current thinking in plain text.\n\nName: \n{}\n\nMemories:\n{}\n\nBackground drives:\n{}\n\nPerson identity:\n{}\n\nState of mind:\n{}\n\nSituation:\n{}{}",
@@ -623,5 +638,15 @@ async fn get_person_identity_summary(
             "No person identity found for person_uuid: {}",
             person_uuid.to_uuid()
         ))
+    }
+}
+
+async fn get_current_person_task_text(
+    worker: &Worker,
+    person_uuid: &PersonUuid,
+) -> Result<String, String> {
+    match worker.get_persons_current_active_task(person_uuid).await? {
+        Some(person_task) => Ok(format!("\n\nCurrent Task:\n{}", person_task)),
+        None => Ok(String::new()),
     }
 }
