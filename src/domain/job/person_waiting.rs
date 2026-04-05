@@ -54,9 +54,9 @@ pub enum Error {
     Action(ActionHandleError),
 }
 
-pub enum WaitOutcome {
-    Ready,
-    NotReady,
+pub enum WaitDecision {
+    FinishedWaiting,
+    ContinueWaiting,
 }
 
 impl NiceDisplay for Error {
@@ -144,7 +144,7 @@ impl PersonWaitingJob {
         worker: &W,
         random_seed: RandomSeed,
         current_active_ms: i64,
-    ) -> Result<WaitOutcome, Error> {
+    ) -> Result<WaitDecision, Error> {
         let person_uuid = self.person_uuid.clone().ok_or(Error::MissingPersonUuid)?;
         let started_at = self.started_at.ok_or(Error::MissingStartedAt)?;
         let is_hibernating = worker
@@ -152,7 +152,7 @@ impl PersonWaitingJob {
             .await
             .map_err(Error::FailedToGetHibernationState)?;
         if is_hibernating {
-            return Ok(WaitOutcome::Ready);
+            return Ok(WaitDecision::FinishedWaiting);
         }
 
         let is_enabled = worker
@@ -160,7 +160,7 @@ impl PersonWaitingJob {
             .await
             .map_err(Error::FailedToGetEnabledState)?;
         if !is_enabled {
-            return Ok(WaitOutcome::Ready);
+            return Ok(WaitDecision::FinishedWaiting);
         }
 
         let elapsed = current_active_ms.saturating_sub(self.start_active_ms);
@@ -174,7 +174,7 @@ impl PersonWaitingJob {
             let has_recent_events = events.iter().any(|event| event.timestamp >= started_at);
 
             if has_recent_events {
-                return Ok(WaitOutcome::Ready);
+                return Ok(WaitDecision::FinishedWaiting);
             }
 
             let reacted_since_wait = worker
@@ -183,7 +183,7 @@ impl PersonWaitingJob {
                 .map_err(Error::FailedToGetReactionHistory)?;
 
             if reacted_since_wait {
-                return Ok(WaitOutcome::Ready);
+                return Ok(WaitDecision::FinishedWaiting);
             }
 
             let persons_name: PersonName = worker
@@ -270,9 +270,9 @@ impl PersonWaitingJob {
             .await
             .map_err(Error::Action)?;
 
-            Ok(WaitOutcome::Ready)
+            Ok(WaitDecision::FinishedWaiting)
         } else {
-            Ok(WaitOutcome::NotReady)
+            Ok(WaitDecision::ContinueWaiting)
         }
     }
 }

@@ -412,8 +412,8 @@ async fn run_job<
                 .await
                 .map_err(RunJobError::PersonWaitingError)?
             {
-                person_waiting::WaitOutcome::Ready => Ok(RunJobOutcome::Completed),
-                person_waiting::WaitOutcome::NotReady => {
+                person_waiting::WaitDecision::FinishedWaiting => Ok(RunJobOutcome::Completed),
+                person_waiting::WaitDecision::ContinueWaiting => {
                     worker
                         .reset_job(&job.uuid)
                         .await
