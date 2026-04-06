@@ -10,6 +10,7 @@ use std::sync::Arc;
 pub struct Model {
     new_scene_name: String,
     new_scene_description: String,
+    scene_list_status: SceneListStatus,
     look_up_scene: LookUpScene,
     look_up_scene_name: String,
     status: NewSceneStatus,
@@ -63,6 +64,13 @@ enum NewSceneStatus {
     ErrorCreatingScene(String),
 }
 
+enum SceneListStatus {
+    NotLoaded,
+    Loading,
+    Loaded(Vec<String>),
+    Error(String),
+}
+
 #[derive(Debug, Clone)]
 pub struct SceneAggregate {
     scene: Scene,
@@ -99,8 +107,9 @@ pub enum Msg {
     NewSceneDescriptionChanged(String),
     ClickedCreateScene,
     SceneCreated(Result<SceneUuid, String>),
-    SceneNameChanged(String),
-    ClickedLookUpScene,
+    LoadSceneList,
+    SceneListLoaded(Result<Vec<Scene>, String>),
+    SceneDropdownSelected(String),
     SceneLookUpMsg(SceneLookUpMsg),
     LookedUpScene(Result<Option<SceneAggregate>, String>),
 }
@@ -272,6 +281,7 @@ impl Model {
         Self {
             new_scene_name: storage.new_scene_name.clone(),
             new_scene_description: storage.new_scene_description.clone(),
+            scene_list_status: SceneListStatus::NotLoaded,
             look_up_scene_name: storage.look_up_scene_name.clone(),
             look_up_scene: LookUpScene::Ready,
             status: NewSceneStatus::Ready,
@@ -285,15 +295,18 @@ impl Model {
         }
     }
 
+    pub fn on_tab_activated(&mut self, worker: Arc<Worker>) -> Task<Msg> {
+        self.load_scene_list(worker)
+    }
+
     pub fn view(&self) -> Element<'_, Msg> {
         w::column![
             new_scene_view(self),
             w::text("Look Up Scene"),
-            w::row![
-                w::text_input("Scene Name", self.look_up_scene_name.as_str())
-                    .on_input(Msg::SceneNameChanged),
-                w::button("Look Up Scene").on_press(Msg::ClickedLookUpScene),
-            ]
+            w::row![scene_picker(
+                &self.scene_list_status,
+                &self.look_up_scene_name
+            ),]
             .spacing(s::S4),
             scene_look_up_view(&self.look_up_scene).map(Msg::SceneLookUpMsg),
         ]
@@ -331,7 +344,12 @@ impl Model {
                     Ok(_scene_uuid) => NewSceneStatus::Done,
                     Err(err) => NewSceneStatus::ErrorCreatingScene(err),
                 };
-                Task::none()
+                match self.status {
+                    NewSceneStatus::Done => self.load_scene_list(worker),
+                    NewSceneStatus::Ready
+                    | NewSceneStatus::CreatingScene
+                    | NewSceneStatus::ErrorCreatingScene(_) => Task::none(),
+                }
             }
             Msg::SceneLookUpMsg(sub_msg) => {
                 if let LookUpScene::LoadedScene(scene_model) = &mut self.look_up_scene {
@@ -341,23 +359,25 @@ impl Model {
                     Task::none()
                 }
             }
-            Msg::SceneNameChanged(field) => {
-                self.look_up_scene_name = field;
+            Msg::LoadSceneList => self.load_scene_list(worker),
+            Msg::SceneListLoaded(result) => {
+                self.scene_list_status = match result {
+                    Ok(scenes) => {
+                        let mut scene_names = scenes
+                            .into_iter()
+                            .map(|scene| scene.name)
+                            .collect::<Vec<_>>();
+                        scene_names.sort();
+                        SceneListStatus::Loaded(scene_names)
+                    }
+                    Err(err) => SceneListStatus::Error(err),
+                };
                 Task::none()
             }
-            Msg::ClickedLookUpScene => match self.look_up_scene {
-                LookUpScene::LookingUpScene => Task::none(),
-                LookUpScene::Ready
-                | LookUpScene::LoadedScene(_)
-                | LookUpScene::ErrorLookingUpScene(_) => {
-                    self.look_up_scene = LookUpScene::LookingUpScene;
-                    let scene_name = self.look_up_scene_name.clone();
-                    Task::perform(
-                        async move { SceneAggregate::get(worker, scene_name).await },
-                        Msg::LookedUpScene,
-                    )
-                }
-            },
+            Msg::SceneDropdownSelected(scene_name) => {
+                self.look_up_scene_name = scene_name;
+                self.look_up_scene(worker)
+            }
             Msg::LookedUpScene(result) => {
                 self.look_up_scene = match result {
                     Ok(Some(scene_agg)) => LookUpScene::LoadedScene(SceneModel::init(scene_agg)),
@@ -367,6 +387,63 @@ impl Model {
                 Task::none()
             }
         }
+    }
+
+    fn load_scene_list(&mut self, worker: Arc<Worker>) -> Task<Msg> {
+        match self.scene_list_status {
+            SceneListStatus::Loading => Task::none(),
+            SceneListStatus::NotLoaded | SceneListStatus::Loaded(_) | SceneListStatus::Error(_) => {
+                self.scene_list_status = SceneListStatus::Loading;
+                Task::perform(
+                    async move { worker.get_scenes().await },
+                    Msg::SceneListLoaded,
+                )
+            }
+        }
+    }
+
+    fn look_up_scene(&mut self, worker: Arc<Worker>) -> Task<Msg> {
+        match self.look_up_scene {
+            LookUpScene::LookingUpScene => Task::none(),
+            LookUpScene::Ready
+            | LookUpScene::LoadedScene(_)
+            | LookUpScene::ErrorLookingUpScene(_) => {
+                self.look_up_scene = LookUpScene::LookingUpScene;
+                let scene_name = self.look_up_scene_name.clone();
+                Task::perform(
+                    async move { SceneAggregate::get(worker, scene_name).await },
+                    Msg::LookedUpScene,
+                )
+            }
+        }
+    }
+}
+
+fn scene_picker<'a>(
+    scene_list_status: &'a SceneListStatus,
+    selected_scene_name: &'a str,
+) -> Element<'a, Msg> {
+    match scene_list_status {
+        SceneListStatus::NotLoaded => w::button("Load Scene List")
+            .on_press(Msg::LoadSceneList)
+            .into(),
+        SceneListStatus::Loading => w::text("Loading scenes...").into(),
+        SceneListStatus::Loaded(scene_names) => {
+            let selected = scene_names
+                .iter()
+                .find(|name| name.as_str() == selected_scene_name)
+                .cloned();
+
+            w::pick_list(scene_names.clone(), selected, Msg::SceneDropdownSelected)
+                .placeholder("Select scene")
+                .into()
+        }
+        SceneListStatus::Error(err) => w::column![
+            w::text(format!("Error loading scene list: {}", err)),
+            w::button("Retry Scene List").on_press(Msg::LoadSceneList),
+        ]
+        .spacing(s::S1)
+        .into(),
     }
 }
 

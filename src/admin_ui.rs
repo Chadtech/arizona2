@@ -353,6 +353,14 @@ impl Model {
         } else {
             Task::none()
         };
+        let scene_tab_task = if tab == Tab::Scene {
+            model
+                .scene_page
+                .on_tab_activated(model.worker.clone())
+                .map(Msg::ScenePage)
+        } else {
+            Task::none()
+        };
 
         (
             model,
@@ -370,6 +378,7 @@ impl Model {
                 ),
                 tab_task,
                 messages_tab_task,
+                scene_tab_task,
             ]),
         )
     }
@@ -418,6 +427,10 @@ impl Model {
                         .messages_page
                         .on_tab_activated(self.worker.clone())
                         .map(Msg::MessagesPage),
+                    Tab::Scene => self
+                        .scene_page
+                        .on_tab_activated(self.worker.clone())
+                        .map(Msg::ScenePage),
                     _ => Task::none(),
                 };
                 Task::batch(vec![init_task, tab_task])
