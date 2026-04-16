@@ -326,7 +326,7 @@ impl Model {
         ]
         .spacing(s::S2);
 
-        w::column![create_section, lookup_section]
+        w::column![lookup_section, create_section]
             .spacing(s::S4)
             .into()
     }
