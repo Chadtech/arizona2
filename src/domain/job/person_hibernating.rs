@@ -49,6 +49,10 @@ impl PersonHibernatingJob {
         self.start_active_ms.saturating_add(self.duration_ms.max(0))
     }
 
+    pub fn person_uuid(&self) -> &PersonUuid {
+        &self.person_uuid
+    }
+
     pub async fn run<W: PersonCapability>(
         &self,
         worker: &W,

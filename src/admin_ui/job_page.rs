@@ -1,10 +1,13 @@
 use super::s;
 use crate::capability::job::JobCapability;
 use crate::capability::message::MessageCapability;
+use crate::capability::person::PersonCapability;
 use crate::capability::reaction::ReactionPromptPreview;
 use crate::domain::job::process_reaction_common::{self, SceneReactionTrigger};
 use crate::domain::job::{Job, JobKind, JobStatus};
 use crate::domain::job_uuid::JobUuid;
+use crate::domain::message::MessageSender;
+use crate::domain::person_uuid::PersonUuid;
 use crate::job_runner::{self, RunNextJobResult};
 use crate::nice_display::NiceDisplay;
 use crate::worker::Worker;
@@ -59,6 +62,7 @@ enum ProcessNextStatus {
     Failed(String),
 }
 
+#[derive(Debug, Clone)]
 enum ResetJobStatus {
     Ready,
     Resetting,
@@ -80,13 +84,16 @@ enum SelectedJobStatus {
     Error(String),
 }
 
-struct SelectedJobModel {
+#[derive(Debug, Clone)]
+pub(super) struct SelectedJobModel {
     job: Job,
+    related_people: Vec<String>,
     delete_status: DeleteStatus,
     reset_status: ResetJobStatus,
     preview_status: PromptPreviewStatus,
 }
 
+#[derive(Debug, Clone)]
 enum PromptPreviewStatus {
     Ready,
     Loading,
@@ -94,6 +101,7 @@ enum PromptPreviewStatus {
     Error(String),
 }
 
+#[derive(Debug, Clone)]
 enum DeleteStatus {
     Ready,
     Confirming,
@@ -115,7 +123,7 @@ pub enum Msg {
     ResetAllFailedJobs(Result<(), String>),
     LoadedRecent(Result<Vec<Job>, String>),
     ClickedSelectJob(JobUuid),
-    LoadedJob(Result<Option<Job>, String>),
+    LoadedJob(Result<Option<SelectedJobModel>, String>),
     ClickedDeleteSelected,
     ClickedConfirmDelete(JobUuid),
     ClickedCancelDelete,
@@ -232,7 +240,10 @@ impl Model {
                     if let SelectedJobStatus::Loaded(selected_job) = &self.selected_job_status {
                         if selected_job.job.uuid() == &job_uuid {
                             let worker = worker.clone();
-                            tasks.push(Task::perform(get_job(worker, job_uuid), Msg::LoadedJob));
+                            tasks.push(Task::perform(
+                                get_selected_job(worker, job_uuid),
+                                Msg::LoadedJob,
+                            ));
                         }
                     }
 
@@ -263,7 +274,7 @@ impl Model {
                     if let SelectedJobStatus::Loaded(selected_job) = &self.selected_job_status {
                         let worker = worker.clone();
                         tasks.push(Task::perform(
-                            get_job(worker, selected_job.job.uuid().clone()),
+                            get_selected_job(worker, selected_job.job.uuid().clone()),
                             Msg::LoadedJob,
                         ));
                     }
@@ -297,16 +308,11 @@ impl Model {
             Msg::ClickedSelectJob(job_uuid) => {
                 self.selected_job_status = SelectedJobStatus::Loading;
                 let worker = worker.clone();
-                Task::perform(get_job(worker, job_uuid), Msg::LoadedJob)
+                Task::perform(get_selected_job(worker, job_uuid), Msg::LoadedJob)
             }
             Msg::LoadedJob(res) => {
                 self.selected_job_status = match res {
-                    Ok(Some(job)) => SelectedJobStatus::Loaded(Box::new(SelectedJobModel {
-                        job,
-                        delete_status: DeleteStatus::Ready,
-                        reset_status: ResetJobStatus::Ready,
-                        preview_status: PromptPreviewStatus::Ready,
-                    })),
+                    Ok(Some(selected_job)) => SelectedJobStatus::Loaded(Box::new(selected_job)),
                     Ok(None) => SelectedJobStatus::Error("Job not found".to_string()),
                     Err(err) => SelectedJobStatus::Error(err),
                 };
@@ -325,7 +331,10 @@ impl Model {
                     self.selected_job_status = SelectedJobStatus::Loading;
 
                     let worker = worker.clone();
-                    return Task::perform(get_job(worker, selected_job_uuid), Msg::LoadedJob);
+                    return Task::perform(
+                        get_selected_job(worker, selected_job_uuid),
+                        Msg::LoadedJob,
+                    );
                 }
                 Task::none()
             }
@@ -601,6 +610,15 @@ fn selected_job_view(selected: &SelectedJobStatus) -> Element<'_, Msg> {
                 None => "Error: none".to_string(),
             };
 
+            let related_people_text = if selected_job.related_people.is_empty() {
+                None
+            } else {
+                Some(format!(
+                    "Related people:\n{}",
+                    selected_job.related_people.join("\n")
+                ))
+            };
+
             let data_text = match selected_job.job.data() {
                 Ok(Some(data)) => match serde_json::to_string_pretty(&data) {
                     Ok(pretty) => format!("Data:\n{}", pretty),
@@ -681,7 +699,7 @@ fn selected_job_view(selected: &SelectedJobStatus) -> Element<'_, Msg> {
                 .into(),
             };
 
-            w::column![
+            let mut details = w::column![
                 w::row![
                     w::text("Selected Job"),
                     w::button("Refresh")
@@ -708,12 +726,18 @@ fn selected_job_view(selected: &SelectedJobStatus) -> Element<'_, Msg> {
                 w::text(finished_at),
                 w::text(deleted_at),
                 w::text(error_text),
-                w::text(data_text),
-                action_row,
-                preview_controls
             ]
-            .spacing(s::S2)
-            .into()
+            .spacing(s::S2);
+
+            if let Some(related_people_text) = related_people_text {
+                details = details.push(w::text(related_people_text));
+            }
+
+            details = details.push(w::text(data_text));
+            details = details.push(action_row);
+            details = details.push(preview_controls);
+
+            details.into()
         }
     };
 
@@ -815,11 +839,19 @@ async fn reset_all_failed_jobs(worker: Arc<Worker>) -> Result<(), String> {
         .map_err(|err| format!("Error resetting failed jobs:\n{}", err))
 }
 
-async fn get_job(worker: Arc<Worker>, job_uuid: JobUuid) -> Result<Option<Job>, String> {
-    worker
+async fn get_selected_job(
+    worker: Arc<Worker>,
+    job_uuid: JobUuid,
+) -> Result<Option<SelectedJobModel>, String> {
+    let maybe_job = worker
         .get_job_by_uuid(&job_uuid)
         .await
-        .map_err(|err| format!("Error fetching job:\n{}", err))
+        .map_err(|err| format!("Error fetching job:\n{}", err))?;
+
+    match maybe_job {
+        Some(job) => Ok(Some(build_selected_job_model(worker.as_ref(), job).await)),
+        None => Ok(None),
+    }
 }
 
 async fn delete_job(worker: Arc<Worker>, job_uuid: JobUuid) -> Result<JobUuid, String> {
@@ -877,5 +909,81 @@ async fn preview_job_prompts(
             "Prompt preview is currently supported only for process message, process person join, and process scene gaze jobs."
                 .to_string(),
         ),
+    }
+}
+
+async fn build_selected_job_model(worker: &Worker, job: Job) -> SelectedJobModel {
+    let related_people = describe_related_people(worker, &job).await;
+
+    SelectedJobModel {
+        job,
+        related_people,
+        delete_status: DeleteStatus::Ready,
+        reset_status: ResetJobStatus::Ready,
+        preview_status: PromptPreviewStatus::Ready,
+    }
+}
+
+async fn describe_related_people(worker: &Worker, job: &Job) -> Vec<String> {
+    match job.kind() {
+        JobKind::Ping => vec![],
+        JobKind::SendMessageToScene(send_message_to_scene_job) => {
+            match &send_message_to_scene_job.sender {
+                MessageSender::AiPerson(person_uuid) => {
+                    vec![format!(
+                        "Sender: {}",
+                        format_person_label(worker, person_uuid).await
+                    )]
+                }
+                MessageSender::RealWorldUser => vec!["Sender: Real World User".to_string()],
+            }
+        }
+        JobKind::ProcessPersonJoin(process_person_join_job) => {
+            vec![
+                format!(
+                    "Recipient: {}",
+                    format_person_label(worker, &process_person_join_job.recipient_person_uuid)
+                        .await
+                ),
+                format!(
+                    "Joined person: {}",
+                    format_person_label(worker, &process_person_join_job.joined_person_uuid).await
+                ),
+            ]
+        }
+        JobKind::ProcessMessage(process_message_job) => {
+            vec![format!(
+                "Recipient: {}",
+                format_person_label(worker, &process_message_job.recipient_person_uuid).await
+            )]
+        }
+        JobKind::ProcessSceneGaze(process_scene_gaze_job) => {
+            vec![format!(
+                "Gazing person: {}",
+                format_person_label(worker, &process_scene_gaze_job.gazing_person_uuid).await
+            )]
+        }
+        JobKind::PersonWaiting(person_waiting_job) => match person_waiting_job.person_uuid() {
+            Some(person_uuid) => {
+                vec![format!(
+                    "Waiting person: {}",
+                    format_person_label(worker, person_uuid).await
+                )]
+            }
+            None => vec!["Waiting person: missing person uuid".to_string()],
+        },
+        JobKind::PersonHibernating(person_hibernating_job) => {
+            vec![format!(
+                "Hibernating person: {}",
+                format_person_label(worker, person_hibernating_job.person_uuid()).await
+            )]
+        }
+    }
+}
+
+async fn format_person_label(worker: &Worker, person_uuid: &PersonUuid) -> String {
+    match worker.get_persons_name(person_uuid.clone()).await {
+        Ok(person_name) => format!("{} ({})", person_name, person_uuid.to_uuid()),
+        Err(_) => person_uuid.to_uuid().to_string(),
     }
 }

@@ -140,6 +140,10 @@ impl PersonWaitingJob {
         self.start_active_ms.saturating_add(self.duration_ms.max(0))
     }
 
+    pub fn person_uuid(&self) -> Option<&PersonUuid> {
+        self.person_uuid.as_ref()
+    }
+
     pub async fn run<
         W: JobCapability
             + SceneCapability
