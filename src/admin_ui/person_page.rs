@@ -1,8 +1,10 @@
 use crate::admin_ui::s;
 use crate::capability::person::{NewPerson, PersonCapability};
 use crate::capability::person_identity::{NewPersonIdentity, PersonIdentityCapability};
+use crate::capability::person_task::PersonTaskCapability;
 use crate::domain::person_identity_uuid::PersonIdentityUuid;
 use crate::domain::person_name::PersonName;
+use crate::domain::person_task::PersonTask;
 use crate::domain::person_uuid::PersonUuid;
 use crate::worker::Worker;
 use iced::{clipboard, widget as w, Element, Task};
@@ -32,6 +34,7 @@ enum LookupStatus {
     Loaded {
         person_uuid: PersonUuid,
         identity: Option<String>,
+        current_task: Option<PersonTask>,
         is_hibernating: bool,
         hibernation_status: HibernationStatus,
         is_enabled: bool,
@@ -44,6 +47,7 @@ enum LookupStatus {
 pub struct LoadedPersonLookupData {
     person_uuid: PersonUuid,
     identity: Option<String>,
+    current_task: Option<PersonTask>,
     is_hibernating: bool,
     is_enabled: bool,
 }
@@ -191,11 +195,13 @@ impl Model {
                     Ok(LoadedPersonLookupData {
                         person_uuid,
                         identity,
+                        current_task,
                         is_hibernating,
                         is_enabled,
                     }) => LookupStatus::Loaded {
                         person_uuid,
                         identity,
+                        current_task,
                         is_hibernating,
                         hibernation_status: HibernationStatus::Ready,
                         is_enabled,
@@ -348,6 +354,7 @@ fn lookup_status_view(status: &LookupStatus) -> Element<'_, Msg> {
         LookupStatus::Loaded {
             person_uuid,
             identity,
+            current_task,
             is_hibernating,
             hibernation_status,
             is_enabled,
@@ -363,6 +370,7 @@ fn lookup_status_view(status: &LookupStatus) -> Element<'_, Msg> {
                     .into(),
                 None => w::text("").into(),
             };
+            let current_task_view = person_current_task_view(current_task);
             let hibernation_state_text = if *is_hibernating {
                 "Hibernation: On"
             } else {
@@ -447,6 +455,7 @@ fn lookup_status_view(status: &LookupStatus) -> Element<'_, Msg> {
                 w::text(format!("Person UUID: {}", person_uuid.to_uuid())),
                 w::text(identity_text),
                 copy_button,
+                current_task_view,
                 w::text(enabled_state_text),
                 w::row![enable_button, disable_button].spacing(s::S1),
                 enabled_status_view,
@@ -458,6 +467,36 @@ fn lookup_status_view(status: &LookupStatus) -> Element<'_, Msg> {
             .into()
         }
         LookupStatus::Error(err) => w::text(format!("Error: {}", err)).into(),
+    }
+}
+
+fn person_current_task_view(current_task: &Option<PersonTask>) -> Element<'_, Msg> {
+    match current_task {
+        Some(task) => {
+            let created_at = task.created_at.format("%Y-%m-%d %H:%M:%S").to_string();
+            w::column![
+                w::text("Current Task"),
+                w::text(format!("Created: {}", created_at)).size(s::S3),
+                w::text(format!("Priority: {}", task.priority)).size(s::S3),
+                w::text(format!("UUID: {}", task.uuid.to_uuid())).size(s::S3),
+                w::text(&task.content),
+                optional_condition_view("Success", task.success_condition.as_deref()),
+                optional_condition_view("Abandon", task.abandon_condition.as_deref()),
+                optional_condition_view("Failure", task.failure_condition.as_deref()),
+            ]
+            .spacing(s::S1)
+            .into()
+        }
+        None => w::column![w::text("Current Task"), w::text("No active task found.")]
+            .spacing(s::S1)
+            .into(),
+    }
+}
+
+fn optional_condition_view<'a>(label: &'static str, value: Option<&'a str>) -> Element<'a, Msg> {
+    match value {
+        Some(value) => w::text(format!("{}: {}", label, value)).size(s::S3).into(),
+        None => w::text(format!("{}: none", label)).size(s::S3).into(),
     }
 }
 
@@ -484,11 +523,13 @@ async fn load_person_lookup_data(
         .get_person_uuid_by_name(PersonName::from_string(person_name))
         .await?;
     let identity = worker.get_person_identity(&person_uuid).await?;
+    let current_task = worker.get_persons_current_active_task(&person_uuid).await?;
     let is_hibernating = worker.is_person_hibernating(&person_uuid).await?;
     let is_enabled = worker.is_person_enabled(&person_uuid).await?;
     Ok(LoadedPersonLookupData {
         person_uuid,
         identity,
+        current_task,
         is_hibernating,
         is_enabled,
     })
