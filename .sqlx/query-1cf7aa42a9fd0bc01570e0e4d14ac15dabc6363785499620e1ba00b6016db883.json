@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                        UPDATE person\n                        SET current_person_task_uuid = NULL,\n                            updated_at = NOW()\n                        WHERE uuid = $1::UUID\n                          AND current_person_task_uuid = $2::UUID;\n                    ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "1cf7aa42a9fd0bc01570e0e4d14ac15dabc6363785499620e1ba00b6016db883"
+}

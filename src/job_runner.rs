@@ -8,6 +8,7 @@ use crate::capability::message::MessageCapability;
 use crate::capability::motivation::MotivationCapability;
 use crate::capability::person::PersonCapability;
 use crate::capability::person_identity::PersonIdentityCapability;
+use crate::capability::person_task::PersonTaskCapability;
 use crate::capability::reaction::ReactionCapability;
 use crate::capability::reaction_history::ReactionHistoryCapability;
 use crate::capability::reflection::ReflectionCapability;
@@ -311,6 +312,7 @@ async fn run_next_job<
         + EventCapability
         + StateOfMindCapability
         + PersonIdentityCapability
+        + PersonTaskCapability
         + ReactionHistoryCapability
         + LogEventCapability
         + ReflectionCapability
@@ -355,6 +357,7 @@ async fn run_job<
         + EventCapability
         + StateOfMindCapability
         + PersonIdentityCapability
+        + PersonTaskCapability
         + ReactionHistoryCapability
         + LogEventCapability
         + ReflectionCapability
@@ -480,6 +483,7 @@ mod tests {
     use crate::capability::motivation::{MotivationCapability, NewMotivation};
     use crate::capability::person::{NewPerson, PersonCapability};
     use crate::capability::person_identity::{NewPersonIdentity, PersonIdentityCapability};
+    use crate::capability::person_task::{NewPersonTask, PersonTaskCapability};
     use crate::capability::reaction::ReactionCapability;
     use crate::capability::reaction_history::ReactionHistoryCapability;
     use crate::capability::reflection::{ReflectionCapability, ReflectionChange};
@@ -499,6 +503,10 @@ mod tests {
     use crate::domain::motivation_uuid::MotivationUuid;
     use crate::domain::person_identity_uuid::PersonIdentityUuid;
     use crate::domain::person_name::PersonName;
+    use crate::domain::person_task::{
+        PersonTask, PersonTaskOutcomeCheck, PersonTaskTerminalOutcome,
+    };
+    use crate::domain::person_task_uuid::PersonTaskUuid;
     use crate::domain::person_uuid::PersonUuid;
     use crate::domain::scene_participant_uuid::SceneParticipantUuid;
     use crate::domain::scene_uuid::SceneUuid;
@@ -763,6 +771,40 @@ mod tests {
                 action: PersonAction::Idle,
                 reflection: ReflectionDecision::NoReflection,
             })
+        }
+
+        async fn classify_current_task_outcome(
+            &self,
+            _task: PersonTask,
+            _situation: String,
+            _action_summary: Option<String>,
+        ) -> Result<PersonTaskOutcomeCheck, String> {
+            Ok(PersonTaskOutcomeCheck::StillActive)
+        }
+    }
+
+    impl PersonTaskCapability for MockWorker {
+        async fn get_persons_current_active_task(
+            &self,
+            _person_uuid: &PersonUuid,
+        ) -> Result<Option<PersonTask>, String> {
+            Ok(None)
+        }
+
+        async fn set_persons_current_active_task(
+            &self,
+            _new_person_task: NewPersonTask,
+        ) -> Result<PersonTaskUuid, String> {
+            Ok(PersonTaskUuid::new())
+        }
+
+        async fn transition_person_task(
+            &self,
+            _person_uuid: &PersonUuid,
+            _person_task_uuid: &PersonTaskUuid,
+            _outcome: PersonTaskTerminalOutcome,
+        ) -> Result<(), String> {
+            Ok(())
         }
     }
 

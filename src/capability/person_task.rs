@@ -1,4 +1,5 @@
 use crate::domain::person_task::PersonTask;
+use crate::domain::person_task::PersonTaskTerminalOutcome;
 use crate::domain::person_task_uuid::PersonTaskUuid;
 use crate::domain::person_uuid::PersonUuid;
 
@@ -21,4 +22,11 @@ pub trait PersonTaskCapability {
         &self,
         new_person_task: NewPersonTask,
     ) -> Result<PersonTaskUuid, String>;
+
+    async fn transition_person_task(
+        &self,
+        person_uuid: &PersonUuid,
+        person_task_uuid: &PersonTaskUuid,
+        outcome: PersonTaskTerminalOutcome,
+    ) -> Result<(), String>;
 }

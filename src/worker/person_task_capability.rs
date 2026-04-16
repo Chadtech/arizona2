@@ -1,5 +1,6 @@
 use crate::capability::person_task::{NewPersonTask, PersonTaskCapability};
-use crate::domain::person_task::PersonTask;
+use crate::domain::logger::Level;
+use crate::domain::person_task::{PersonTask, PersonTaskTerminalOutcome};
 use crate::domain::person_task_uuid::PersonTaskUuid;
 use crate::domain::person_uuid::PersonUuid;
 use crate::worker::Worker;
@@ -72,7 +73,65 @@ impl PersonTaskCapability for Worker {
                 abandoned_at: row.abandoned_at,
                 failed_at: row.failed_at,
             })),
-            None => Ok(None),
+            None => {
+                let stale_task_state = sqlx::query!(
+                    r#"
+                        SELECT completed_at,
+                               abandoned_at,
+                               failed_at
+                        FROM person_task
+                        WHERE uuid = $1::UUID
+                          AND person_uuid = $2::UUID;
+                    "#,
+                    person_task_uuid.to_uuid(),
+                    person_uuid.to_uuid()
+                )
+                .fetch_optional(&self.sqlx)
+                .await
+                .map_err(|err| format!("Error checking stale current person task: {}", err))?;
+
+                sqlx::query!(
+                    r#"
+                        UPDATE person
+                        SET current_person_task_uuid = NULL,
+                            updated_at = NOW()
+                        WHERE uuid = $1::UUID
+                          AND current_person_task_uuid = $2::UUID;
+                    "#,
+                    person_uuid.to_uuid(),
+                    person_task_uuid.to_uuid()
+                )
+                .execute(&self.sqlx)
+                .await
+                .map_err(|err| {
+                    format!("Error clearing stale current person task pointer: {}", err)
+                })?;
+
+                let stale_reason = match stale_task_state {
+                    Some(task_state) if task_state.completed_at.is_some() => {
+                        "task was already completed"
+                    }
+                    Some(task_state) if task_state.abandoned_at.is_some() => {
+                        "task was already abandoned"
+                    }
+                    Some(task_state) if task_state.failed_at.is_some() => "task was already failed",
+                    Some(_) => "task record existed but was not returned as active",
+                    None => "task record was missing",
+                };
+
+                self.logger.log(
+                    Level::Warning,
+                    format!(
+                        "Cleared stale current task pointer for person {} to task {} because {}.",
+                        person_uuid.to_uuid(),
+                        person_task_uuid.to_uuid(),
+                        stale_reason
+                    )
+                    .as_str(),
+                );
+
+                Ok(None)
+            }
         }
     }
 
@@ -151,5 +210,134 @@ impl PersonTaskCapability for Worker {
             .map_err(|err| format!("Error committing person task transaction: {}", err))?;
 
         Ok(person_task_uuid)
+    }
+
+    async fn transition_person_task(
+        &self,
+        person_uuid: &PersonUuid,
+        person_task_uuid: &PersonTaskUuid,
+        outcome: PersonTaskTerminalOutcome,
+    ) -> Result<(), String> {
+        let mut transaction =
+            self.sqlx.begin().await.map_err(|err| {
+                format!("Error starting person task transition transaction: {}", err)
+            })?;
+
+        let task_state = sqlx::query!(
+            r#"
+                SELECT completed_at,
+                       abandoned_at,
+                       failed_at
+                FROM person_task
+                WHERE uuid = $1::UUID
+                  AND person_uuid = $2::UUID;
+            "#,
+            person_task_uuid.to_uuid(),
+            person_uuid.to_uuid()
+        )
+        .fetch_optional(&mut *transaction)
+        .await
+        .map_err(|err| format!("Error fetching person task for transition: {}", err))?;
+
+        let task_state = match task_state {
+            Some(task_state) => task_state,
+            None => {
+                return Err(format!(
+                    "Task {} for person {} not found",
+                    person_task_uuid.to_uuid(),
+                    person_uuid.to_uuid()
+                ));
+            }
+        };
+
+        if task_state.completed_at.is_some()
+            || task_state.abandoned_at.is_some()
+            || task_state.failed_at.is_some()
+        {
+            return Err(format!(
+                "Task {} is already terminal",
+                person_task_uuid.to_uuid()
+            ));
+        }
+
+        let transition_result = match outcome {
+            PersonTaskTerminalOutcome::Completed => sqlx::query!(
+                r#"
+                    UPDATE person_task
+                    SET completed_at = NOW()
+                        WHERE uuid = $1::UUID
+                          AND person_uuid = $2::UUID
+                          AND completed_at IS NULL
+                          AND abandoned_at IS NULL
+                          AND failed_at IS NULL;
+                    "#,
+                person_task_uuid.to_uuid(),
+                person_uuid.to_uuid()
+            )
+            .execute(&mut *transaction)
+            .await
+            .map_err(|err| format!("Error completing person task: {}", err))?,
+            PersonTaskTerminalOutcome::Failed => sqlx::query!(
+                r#"
+                    UPDATE person_task
+                    SET failed_at = NOW()
+                    WHERE uuid = $1::UUID
+                      AND person_uuid = $2::UUID
+                      AND completed_at IS NULL
+                      AND abandoned_at IS NULL
+                      AND failed_at IS NULL;
+                "#,
+                person_task_uuid.to_uuid(),
+                person_uuid.to_uuid()
+            )
+            .execute(&mut *transaction)
+            .await
+            .map_err(|err| format!("Error failing person task: {}", err))?,
+            PersonTaskTerminalOutcome::Abandoned => sqlx::query!(
+                r#"
+                    UPDATE person_task
+                    SET abandoned_at = NOW()
+                    WHERE uuid = $1::UUID
+                      AND person_uuid = $2::UUID
+                      AND completed_at IS NULL
+                      AND abandoned_at IS NULL
+                      AND failed_at IS NULL;
+                "#,
+                person_task_uuid.to_uuid(),
+                person_uuid.to_uuid()
+            )
+            .execute(&mut *transaction)
+            .await
+            .map_err(|err| format!("Error abandoning person task: {}", err))?,
+        };
+
+        if transition_result.rows_affected() != 1 {
+            return Err(format!(
+                "Expected one task row to transition for {}",
+                person_task_uuid.to_uuid()
+            ));
+        }
+
+        sqlx::query!(
+            r#"
+                UPDATE person
+                SET current_person_task_uuid = NULL,
+                    updated_at = NOW()
+                WHERE uuid = $1::UUID
+                  AND current_person_task_uuid = $2::UUID;
+            "#,
+            person_uuid.to_uuid(),
+            person_task_uuid.to_uuid()
+        )
+        .execute(&mut *transaction)
+        .await
+        .map_err(|err| format!("Error clearing current person task pointer: {}", err))?;
+
+        transaction.commit().await.map_err(|err| {
+            format!(
+                "Error committing person task transition transaction: {}",
+                err
+            )
+        })
     }
 }

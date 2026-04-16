@@ -9,6 +9,7 @@ use crate::capability::motivation::MotivationCapability;
 use crate::capability::motivation::NewMotivation;
 use crate::capability::person::PersonCapability;
 use crate::capability::person_identity::PersonIdentityCapability;
+use crate::capability::person_task::PersonTaskCapability;
 use crate::capability::reaction::ReactionCapability;
 use crate::capability::reaction::ReactionPromptPreview;
 use crate::capability::reaction_history::ReactionHistoryCapability;
@@ -23,6 +24,7 @@ use crate::domain::memory::Memory;
 use crate::domain::memory_uuid::MemoryUuid;
 use crate::domain::message::{Message, MessageSender};
 use crate::domain::person_name::PersonName;
+use crate::domain::person_task::PersonTaskOutcomeCheck;
 use crate::domain::person_uuid::PersonUuid;
 use crate::domain::random_seed::RandomSeed;
 use crate::domain::scene_uuid::SceneUuid;
@@ -113,6 +115,9 @@ pub enum Error {
     FailedToCreateReflectionMemory(String),
     FailedToCreateReflectionMotivation(String),
     FailedToDeleteReflectionMotivation(String),
+    FailedToGetCurrentTask(String),
+    TaskOutcomeClassification(String),
+    TaskTransition(String),
     Action(ActionHandleError),
     Reflection(String),
 }
@@ -254,6 +259,15 @@ impl NiceDisplay for Error {
             Error::FailedToDeleteReflectionMotivation(err) => {
                 format!("Failed to delete reflection motivation:\n{}", err)
             }
+            Error::FailedToGetCurrentTask(err) => {
+                format!("Failed to get current task:\n{}", err)
+            }
+            Error::TaskOutcomeClassification(err) => {
+                format!("Task outcome classification failed:\n{}", err)
+            }
+            Error::TaskTransition(err) => {
+                format!("Task transition failed:\n{}", err)
+            }
             Error::Action(err) => err.to_nice_error().to_string(),
             Error::Reflection(err) => {
                 format!("Reflection error:\n{}", err)
@@ -276,6 +290,7 @@ pub async fn run_scene_reaction<
         + LogEventCapability
         + MotivationCapability
         + ReactionHistoryCapability
+        + PersonTaskCapability
         + JobCapability
         + Sync,
 >(
@@ -419,6 +434,14 @@ pub async fn run_scene_reaction<
     .await
     .map_err(Error::Action)?;
 
+    maybe_transition_current_task(
+        worker,
+        person_uuid,
+        reaction_input.situation.to_string(),
+        Some(action.summarize()),
+    )
+    .await?;
+
     match reaction.reflection {
         ReflectionDecision::Reflection => {
             let reflection_recent_events = get_recent_events_text(
@@ -492,6 +515,36 @@ pub async fn run_scene_reaction<
     }
 
     Ok(())
+}
+
+async fn maybe_transition_current_task<W: PersonTaskCapability + ReactionCapability + Sync>(
+    worker: &W,
+    person_uuid: &PersonUuid,
+    situation: String,
+    action_summary: Option<String>,
+) -> Result<(), Error> {
+    let maybe_current_task = worker
+        .get_persons_current_active_task(person_uuid)
+        .await
+        .map_err(Error::FailedToGetCurrentTask)?;
+
+    let current_task = match maybe_current_task {
+        Some(current_task) => current_task,
+        None => return Ok(()),
+    };
+
+    let outcome = worker
+        .classify_current_task_outcome(current_task.clone(), situation, action_summary)
+        .await
+        .map_err(Error::TaskOutcomeClassification)?;
+
+    match outcome {
+        PersonTaskOutcomeCheck::StillActive => Ok(()),
+        PersonTaskOutcomeCheck::Terminal(outcome) => worker
+            .transition_person_task(person_uuid, &current_task.uuid, outcome)
+            .await
+            .map_err(Error::TaskTransition),
+    }
 }
 
 pub async fn preview_scene_reaction_prompts<
@@ -1068,6 +1121,7 @@ mod tests {
     use crate::capability::motivation::{MotivationCapability, NewMotivation};
     use crate::capability::person::{NewPerson, PersonCapability};
     use crate::capability::person_identity::{NewPersonIdentity, PersonIdentityCapability};
+    use crate::capability::person_task::{NewPersonTask, PersonTaskCapability};
     use crate::capability::reaction::ReactionCapability;
     use crate::capability::reaction_history::ReactionHistoryCapability;
     use crate::capability::reflection::{ReflectionCapability, ReflectionChange};
@@ -1086,6 +1140,10 @@ mod tests {
     use crate::domain::motivation::Motivation;
     use crate::domain::motivation_uuid::MotivationUuid;
     use crate::domain::person_identity_uuid::PersonIdentityUuid;
+    use crate::domain::person_task::{
+        PersonTask, PersonTaskOutcomeCheck, PersonTaskTerminalOutcome,
+    };
+    use crate::domain::person_task_uuid::PersonTaskUuid;
     use crate::domain::scene_participant_uuid::SceneParticipantUuid;
     use crate::nice_display::NiceDisplay;
     use crate::person_actions::{PersonAction, PersonReaction, ReflectionDecision};
@@ -1413,6 +1471,40 @@ mod tests {
             let mut state = self.state.lock().await;
             state.reaction_situations.push(situation);
             Ok(state.reaction_to_return.clone())
+        }
+
+        async fn classify_current_task_outcome(
+            &self,
+            _task: PersonTask,
+            _situation: String,
+            _action_summary: Option<String>,
+        ) -> Result<PersonTaskOutcomeCheck, String> {
+            Ok(PersonTaskOutcomeCheck::StillActive)
+        }
+    }
+
+    impl PersonTaskCapability for MockWorker {
+        async fn get_persons_current_active_task(
+            &self,
+            _person_uuid: &PersonUuid,
+        ) -> Result<Option<PersonTask>, String> {
+            Ok(None)
+        }
+
+        async fn set_persons_current_active_task(
+            &self,
+            _new_person_task: NewPersonTask,
+        ) -> Result<PersonTaskUuid, String> {
+            Ok(PersonTaskUuid::new())
+        }
+
+        async fn transition_person_task(
+            &self,
+            _person_uuid: &PersonUuid,
+            _person_task_uuid: &PersonTaskUuid,
+            _outcome: PersonTaskTerminalOutcome,
+        ) -> Result<(), String> {
+            Ok(())
         }
     }
 

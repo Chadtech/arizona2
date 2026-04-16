@@ -7,6 +7,7 @@ use crate::capability::message::MessageCapability;
 use crate::capability::motivation::MotivationCapability;
 use crate::capability::person::PersonCapability;
 use crate::capability::person_identity::PersonIdentityCapability;
+use crate::capability::person_task::PersonTaskCapability;
 use crate::capability::reaction::ReactionCapability;
 use crate::capability::reaction_history::ReactionHistoryCapability;
 use crate::capability::reflection::ReflectionCapability;
@@ -47,6 +48,7 @@ impl ProcessSceneGazeJob {
             + EventCapability
             + StateOfMindCapability
             + PersonIdentityCapability
+            + PersonTaskCapability
             + ReflectionCapability
             + LogCapability
             + LogEventCapability

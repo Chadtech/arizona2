@@ -1,4 +1,6 @@
 use crate::domain::memory::Memory;
+use crate::domain::person_task::PersonTask;
+use crate::domain::person_task::PersonTaskOutcomeCheck;
 use crate::domain::person_uuid::PersonUuid;
 use crate::person_actions::PersonReaction;
 
@@ -25,4 +27,11 @@ pub trait ReactionCapability {
         state_of_mind: String,
         situation: String,
     ) -> Result<PersonReaction, String>;
+
+    async fn classify_current_task_outcome(
+        &self,
+        task: PersonTask,
+        situation: String,
+        action_summary: Option<String>,
+    ) -> Result<PersonTaskOutcomeCheck, String>;
 }

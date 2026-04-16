@@ -7,10 +7,12 @@ use crate::capability::state_of_mind::StateOfMindCapability;
 use crate::domain::logger::Level;
 use crate::domain::memory::Memory;
 use crate::domain::motivation::Motivation;
+use crate::domain::person_task::{PersonTask, PersonTaskOutcomeCheck, PersonTaskTerminalOutcome};
 use crate::domain::person_uuid::PersonUuid;
 use crate::nice_display::NiceDisplay;
 use crate::open_ai::completion::{Completion, CompletionError};
 use crate::open_ai::role::Role;
+use crate::open_ai::tool::{Tool, ToolFunction, ToolFunctionParameter};
 use crate::open_ai::tool_call::ToolCall;
 use crate::person_actions::{
     PersonAction, PersonActionError, PersonActionKind, PersonReaction, ReflectionDecision,
@@ -25,6 +27,8 @@ pub enum Error {
     CompletionError(CompletionError),
     FailedToGetMotivations(String),
     FailedToGetReactionDualLayer(String),
+    FailedToClassifyTaskOutcome(String),
+    InvalidTaskOutcomeToolCall(String),
     NoPersonActionFound,
     MoreThanOnePersonActionFound(Vec<PersonReaction>),
 }
@@ -134,6 +138,8 @@ impl ReactionCapability for Worker {
             Error::CompletionError(completion_err) => completion_err.message(),
             Error::FailedToGetMotivations(message) => message,
             Error::FailedToGetReactionDualLayer(message) => message,
+            Error::FailedToClassifyTaskOutcome(message) => message,
+            Error::InvalidTaskOutcomeToolCall(message) => message,
             Error::NoPersonActionFound => "No person action found".to_string(),
             Error::MoreThanOnePersonActionFound(actions) => {
                 let actions_str = actions
@@ -144,6 +150,32 @@ impl ReactionCapability for Worker {
                 format!("More than one person action found: \n{}", actions_str)
             }
         })
+    }
+
+    async fn classify_current_task_outcome(
+        &self,
+        task: PersonTask,
+        situation: String,
+        action_summary: Option<String>,
+    ) -> Result<PersonTaskOutcomeCheck, String> {
+        classify_task_outcome_helper(self, &task.person_uuid, &task, situation, action_summary)
+            .await
+            .map_err(|err| match err {
+                Error::CompletionError(completion_err) => completion_err.message(),
+                Error::FailedToGetMotivations(message) => message,
+                Error::FailedToGetReactionDualLayer(message) => message,
+                Error::FailedToClassifyTaskOutcome(message) => message,
+                Error::InvalidTaskOutcomeToolCall(message) => message,
+                Error::NoPersonActionFound => "No person action found".to_string(),
+                Error::MoreThanOnePersonActionFound(actions) => {
+                    let actions_str = actions
+                        .into_iter()
+                        .map(|action| format!("{:?}", action))
+                        .collect::<Vec<String>>()
+                        .join(",\n");
+                    format!("More than one person action found: \n{}", actions_str)
+                }
+            })
     }
 }
 
@@ -279,6 +311,184 @@ async fn get_reaction_helper(
     }
 
     Ok(fallback_reaction())
+}
+
+async fn classify_task_outcome_helper(
+    worker: &Worker,
+    person_uuid: &PersonUuid,
+    task: &PersonTask,
+    situation: String,
+    action_summary: Option<String>,
+) -> Result<PersonTaskOutcomeCheck, Error> {
+    let mut completion = Completion::new();
+    completion.add_message(
+        Role::System,
+        "You classify whether a person's current task is still active, completed, failed, or abandoned.\n\nUse the provided tool call exactly once.\n\nRules:\n- Use only the evidence in the prompt.\n- If the evidence is ambiguous, return `still_active`.\n- `completed` means the task's success condition is clearly met.\n- `failed` means the task's failure condition is clearly met, or the task is no longer achievable because of explicit evidence.\n- `abandoned` means the person clearly stopped pursuing the task, deprioritized it, or switched away from it without completing it.\n- Do not infer completion from vague progress.",
+    );
+    completion.add_tool_call(classify_task_outcome_tool());
+
+    let action_summary_text = match action_summary {
+        Some(summary) => summary,
+        None => "None.".to_string(),
+    };
+
+    completion.add_message(
+        Role::User,
+        format!(
+            "Person UUID: {}\n\nCurrent task:\n{}\n\nSuccess condition:\n{}\n\nFailure condition:\n{}\n\nAbandon condition:\n{}\n\nLatest situation:\n{}\n\nLatest action taken:\n{}",
+            person_uuid.to_uuid(),
+            task.content,
+            optional_condition_text(task.success_condition.as_deref()),
+            optional_condition_text(task.failure_condition.as_deref()),
+            optional_condition_text(task.abandon_condition.as_deref()),
+            situation,
+            action_summary_text
+        )
+        .as_str(),
+    );
+
+    let response = completion
+        .send_request(&worker.open_ai_key, worker.reqwest_client.clone())
+        .await
+        .map_err(|err| {
+            Error::FailedToClassifyTaskOutcome(format!(
+                "Failed to request task outcome classification: {}",
+                err.message()
+            ))
+        })?;
+
+    let tool_calls = response.as_tool_calls().map_err(|err| {
+        Error::FailedToClassifyTaskOutcome(format!(
+            "Failed to decode task outcome classifier tool calls: {}",
+            err.message()
+        ))
+    })?;
+    let classification = tool_calls_into_task_outcomes(tool_calls)?;
+
+    worker.logger.log(
+        Level::Info,
+        format!(
+            "Task outcome classification for person {} task {}: {:?} ({})",
+            person_uuid.to_uuid(),
+            task.uuid.to_uuid(),
+            classification.outcome,
+            classification.reason
+        )
+        .as_str(),
+    );
+
+    Ok(classification.outcome)
+}
+
+struct TaskOutcomeClassification {
+    outcome: PersonTaskOutcomeCheck,
+    reason: String,
+}
+
+fn classify_task_outcome_tool() -> Tool {
+    Tool::FunctionCall(ToolFunction::new(
+        "classify_task_outcome".to_string(),
+        "Classify whether the person's current task is still active, completed, failed, or abandoned.".to_string(),
+        vec![
+            ToolFunctionParameter::StringEnum {
+                name: "outcome".to_string(),
+                description: "The task outcome classification.".to_string(),
+                required: true,
+                values: task_outcome_check_names(),
+            },
+            ToolFunctionParameter::String {
+                name: "reason".to_string(),
+                description: "Short evidence-based explanation for the classification.".to_string(),
+                required: true,
+            },
+        ],
+    ))
+}
+
+fn tool_calls_into_task_outcomes(
+    tool_calls: Vec<ToolCall>,
+) -> Result<TaskOutcomeClassification, Error> {
+    if tool_calls.is_empty() {
+        return Err(Error::InvalidTaskOutcomeToolCall(
+            "Task outcome classifier returned no tool calls".to_string(),
+        ));
+    }
+
+    if tool_calls.len() > 1 {
+        return Err(Error::InvalidTaskOutcomeToolCall(format!(
+            "Task outcome classifier returned {} tool calls; expected exactly one",
+            tool_calls.len()
+        )));
+    }
+
+    let tool_call = tool_calls.into_iter().next().expect("checked len above");
+    if tool_call.name.as_str() != "classify_task_outcome" {
+        return Err(Error::InvalidTaskOutcomeToolCall(format!(
+            "Unexpected tool name from task outcome classifier: {}",
+            tool_call.name
+        )));
+    }
+
+    let mut maybe_outcome: Option<PersonTaskOutcomeCheck> = None;
+    let mut maybe_reason: Option<String> = None;
+
+    for (key, value) in tool_call.arguments {
+        match key.as_str() {
+            "outcome" => {
+                let value = value.as_str().ok_or_else(|| {
+                    Error::InvalidTaskOutcomeToolCall(
+                        "Task outcome `outcome` argument was not a string".to_string(),
+                    )
+                })?;
+                maybe_outcome = Some(
+                    task_outcome_check_from_tool_value(value)
+                        .map_err(Error::InvalidTaskOutcomeToolCall)?,
+                );
+            }
+            "reason" => {
+                let value = value.as_str().ok_or_else(|| {
+                    Error::InvalidTaskOutcomeToolCall(
+                        "Task outcome `reason` argument was not a string".to_string(),
+                    )
+                })?;
+                maybe_reason = Some(value.to_string());
+            }
+            unexpected => {
+                return Err(Error::InvalidTaskOutcomeToolCall(format!(
+                    "Unexpected task outcome classifier argument: {}",
+                    unexpected
+                )));
+            }
+        }
+    }
+
+    let outcome = maybe_outcome.ok_or_else(|| {
+        Error::InvalidTaskOutcomeToolCall(
+            "Task outcome classifier omitted required `outcome` argument".to_string(),
+        )
+    })?;
+    let reason = maybe_reason.ok_or_else(|| {
+        Error::InvalidTaskOutcomeToolCall(
+            "Task outcome classifier omitted required `reason` argument".to_string(),
+        )
+    })?;
+
+    Ok(TaskOutcomeClassification { outcome, reason })
+}
+
+fn task_outcome_check_names() -> Vec<String> {
+    let mut names = vec!["still_active".to_string()];
+    names.extend(PersonTaskTerminalOutcome::all_names());
+    names
+}
+
+fn task_outcome_check_from_tool_value(value: &str) -> Result<PersonTaskOutcomeCheck, String> {
+    match value {
+        "still_active" => Ok(PersonTaskOutcomeCheck::StillActive),
+        _ => {
+            PersonTaskTerminalOutcome::from_tool_value(value).map(PersonTaskOutcomeCheck::Terminal)
+        }
+    }
 }
 
 async fn reformulate_action_prompt(
@@ -755,5 +965,12 @@ async fn get_current_person_task_text(
     match worker.get_persons_current_active_task(person_uuid).await? {
         Some(person_task) => Ok(format!("\n\nCurrent Task:\n{}", person_task)),
         None => Ok(String::new()),
+    }
+}
+
+fn optional_condition_text(value: Option<&str>) -> &str {
+    match value {
+        Some(text) if !text.trim().is_empty() => text,
+        _ => "None.",
     }
 }

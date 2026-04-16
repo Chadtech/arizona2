@@ -5,6 +5,7 @@ use crate::capability::memory::{MemoryCapability, MessageTypeArgs};
 use crate::capability::message::MessageCapability;
 use crate::capability::person::PersonCapability;
 use crate::capability::person_identity::PersonIdentityCapability;
+use crate::capability::person_task::PersonTaskCapability;
 use crate::capability::reaction::ReactionCapability;
 use crate::capability::reaction_history::ReactionHistoryCapability;
 use crate::capability::scene::SceneCapability;
@@ -13,6 +14,7 @@ use crate::domain::job::person_action_handler::{self, ActionHandleError};
 use crate::domain::memory::Memory;
 use crate::domain::message::MessageSender;
 use crate::domain::person_name::PersonName;
+use crate::domain::person_task::PersonTaskOutcomeCheck;
 use crate::domain::person_uuid::PersonUuid;
 use crate::domain::random_seed::RandomSeed;
 use crate::domain::state_of_mind::StateOfMind;
@@ -51,6 +53,9 @@ pub enum Error {
         person_uuid: PersonUuid,
         details: String,
     },
+    FailedToGetCurrentTask(String),
+    TaskOutcomeClassification(String),
+    TaskTransition(String),
     Action(ActionHandleError),
 }
 
@@ -107,6 +112,15 @@ impl NiceDisplay for Error {
                     details
                 )
             }
+            Error::FailedToGetCurrentTask(err) => {
+                format!("Failed to get current task: {}", err)
+            }
+            Error::TaskOutcomeClassification(err) => {
+                format!("Task outcome classification failed: {}", err)
+            }
+            Error::TaskTransition(err) => {
+                format!("Task transition failed: {}", err)
+            }
             Error::Action(err) => err.to_nice_error().to_string(),
         }
     }
@@ -136,6 +150,7 @@ impl PersonWaitingJob {
             + EventCapability
             + StateOfMindCapability
             + PersonIdentityCapability
+            + PersonTaskCapability
             + ReactionHistoryCapability
             + LogCapability
             + Sync,
@@ -253,7 +268,7 @@ impl PersonWaitingJob {
                     memories,
                     person_uuid.clone(),
                     state_of_mind.content,
-                    situation,
+                    situation.clone(),
                 )
                 .await
                 .map_err(Error::GetPersonReaction)?;
@@ -270,9 +285,47 @@ impl PersonWaitingJob {
             .await
             .map_err(Error::Action)?;
 
+            maybe_transition_current_task(
+                worker,
+                &person_uuid,
+                situation,
+                Some(action.summarize()),
+            )
+            .await?;
+
             Ok(WaitDecision::FinishedWaiting)
         } else {
             Ok(WaitDecision::ContinueWaiting)
         }
+    }
+}
+
+async fn maybe_transition_current_task<W: PersonTaskCapability + ReactionCapability + Sync>(
+    worker: &W,
+    person_uuid: &PersonUuid,
+    situation: String,
+    action_summary: Option<String>,
+) -> Result<(), Error> {
+    let maybe_current_task = worker
+        .get_persons_current_active_task(person_uuid)
+        .await
+        .map_err(Error::FailedToGetCurrentTask)?;
+
+    let current_task = match maybe_current_task {
+        Some(current_task) => current_task,
+        None => return Ok(()),
+    };
+
+    let outcome = worker
+        .classify_current_task_outcome(current_task.clone(), situation, action_summary)
+        .await
+        .map_err(Error::TaskOutcomeClassification)?;
+
+    match outcome {
+        PersonTaskOutcomeCheck::StillActive => Ok(()),
+        PersonTaskOutcomeCheck::Terminal(outcome) => worker
+            .transition_person_task(person_uuid, &current_task.uuid, outcome)
+            .await
+            .map_err(Error::TaskTransition),
     }
 }
