@@ -7,6 +7,7 @@ use crate::open_ai::tool_call;
 use crate::open_ai::tool_call::ToolCall;
 use crate::open_ai_key::OpenAiKey;
 use crate::person_actions::PersonActionError;
+use reqwest::header::CONTENT_TYPE;
 
 pub struct Completion {
     history: History,
@@ -251,21 +252,45 @@ impl Completion {
             .map_err(|err| CompletionError::Request(err.to_string()))?;
 
         let status = response.status();
+        let content_type = response
+            .headers()
+            .get(CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .map(|value| value.to_string());
         let res = response
             .text()
             .await
             .map_err(|err| CompletionError::Response(err.to_string()))?;
 
-        let res_json: serde_json::Value = serde_json::from_str(&res)
-            .map_err(|err| CompletionError::ResponseJsonDecode(err.to_string()))?;
-
         if !status.is_success() {
-            return Err(CompletionError::Response(format!(
-                "open ai returned HTTP {}: {}",
-                status,
-                extract_open_ai_error_message(&res_json)
-            )));
+            let maybe_res_json: Result<serde_json::Value, serde_json::Error> =
+                serde_json::from_str(&res);
+
+            return match maybe_res_json {
+                Ok(res_json) => Err(CompletionError::Response(format!(
+                    "open ai returned HTTP {}: {}",
+                    status,
+                    extract_open_ai_error_message(&res_json)
+                ))),
+                Err(err) => Err(CompletionError::Response(format!(
+                    "open ai returned HTTP {} with a non-JSON body: {}",
+                    status,
+                    describe_json_decode_failure(
+                        content_type.as_deref(),
+                        res.as_str(),
+                        err.to_string().as_str()
+                    )
+                ))),
+            };
         }
+
+        let res_json: serde_json::Value = serde_json::from_str(&res).map_err(|err| {
+            CompletionError::ResponseJsonDecode(describe_json_decode_failure(
+                content_type.as_deref(),
+                res.as_str(),
+                err.to_string().as_str(),
+            ))
+        })?;
 
         if let Some(api_error) = maybe_open_ai_error_message(&res_json) {
             return Err(CompletionError::Response(api_error));
@@ -283,4 +308,76 @@ fn maybe_open_ai_error_message(json: &serde_json::Value) -> Option<String> {
 
 fn extract_open_ai_error_message(json: &serde_json::Value) -> String {
     maybe_open_ai_error_message(json).unwrap_or_else(|| format_json(json))
+}
+
+fn describe_json_decode_failure(
+    content_type: Option<&str>,
+    response_body: &str,
+    serde_error: &str,
+) -> String {
+    let content_type_text = match content_type {
+        Some(value) => format!("content-type `{}`", value),
+        None => "missing content-type".to_string(),
+    };
+    let body_preview = preview_response_body(response_body);
+
+    format!(
+        "{}; {}; body preview: {}",
+        serde_error, content_type_text, body_preview
+    )
+}
+
+fn preview_response_body(response_body: &str) -> String {
+    let trimmed = response_body.trim();
+    if trimmed.is_empty() {
+        return "<empty>".to_string();
+    }
+
+    let mut preview = String::new();
+    let mut char_count = 0usize;
+    for ch in trimmed.chars() {
+        if char_count == 200 {
+            preview.push_str("...");
+            break;
+        }
+
+        match ch {
+            '\n' | '\r' | '\t' => preview.push(' '),
+            _ => preview.push(ch),
+        }
+        char_count += 1;
+    }
+
+    preview
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_preview_response_body_reports_empty_body() {
+        assert_eq!(preview_response_body("   \n\t "), "<empty>");
+    }
+
+    #[test]
+    fn test_preview_response_body_normalizes_whitespace() {
+        assert_eq!(
+            preview_response_body("alpha\nbeta\tgamma"),
+            "alpha beta gamma"
+        );
+    }
+
+    #[test]
+    fn test_describe_json_decode_failure_includes_content_type_and_preview() {
+        let message = describe_json_decode_failure(
+            Some("text/html"),
+            "<html>bad gateway</html>",
+            "expected value at line 1 column 1",
+        );
+
+        assert!(message.contains("expected value at line 1 column 1"));
+        assert!(message.contains("content-type `text/html`"));
+        assert!(message.contains("<html>bad gateway</html>"));
+    }
 }
