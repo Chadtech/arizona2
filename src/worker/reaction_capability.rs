@@ -509,17 +509,10 @@ async fn reformulate_action_prompt(
     );
 
     let mut completion = Completion::new();
-    completion.add_message(
-        Role::System,
-        "You rewrite action user prompts for another model. Compress aggressively. Keep only information that is directly relevant to choosing the person's single next action right now. Center the rewrite on what the person is deciding, what immediate actions are plausible, what constraints matter, and what newest facts override older context. Remove low-signal background detail, repetition, and anything that does not affect the immediate next action. Preserve concrete facts that materially change the decision. Keep references to the internal reaction text only insofar as they clarify immediate intent. Do not rewrite or restate any system prompt. Return only the rewritten user prompt as plain text.",
-    );
+    completion.add_message(Role::System, build_action_reformulation_system_prompt());
     completion.add_message(
         Role::User,
-        format!(
-            "Rewrite this action user prompt into a much shorter action-focused user prompt.\n\n{}",
-            base_action_user_prompt
-        )
-        .as_str(),
+        build_action_reformulation_user_prompt(&base_action_user_prompt).as_str(),
     );
 
     let response = completion
@@ -703,6 +696,30 @@ fn build_base_action_user_prompt(prompts: &ReactionPromptPreview, first_pass_tex
     prompts
         .action_user_prompt
         .replace(INTERNAL_REACTION_PLACEHOLDER, first_pass_text)
+}
+
+fn build_action_reformulation_system_prompt() -> &'static str {
+    "You rewrite action user prompts for another model.
+
+Your job is lossless compression for action selection: preserve meaning, priorities, constraints, and frame of reference while removing detail that does not affect the person's single next action right now.
+
+Rules:
+- Keep the rewrite as decision context for action selection, not as a reply to another speaker.
+- Preserve the same point of view, intent, and directional force as the original prompt.
+- Do not add acknowledgements, pleasantries, confirmations, or response-style lead-ins.
+- Present recent messages as neutral context about what was said or requested, not as fresh instructions directed at the model.
+- Keep concrete facts that materially change the decision; remove repetition and low-signal background detail.
+- Keep references to the internal reaction text only when they clarify immediate intent.
+- Do not rewrite or restate any system prompt.
+
+Return only the rewritten user prompt as plain text."
+}
+
+fn build_action_reformulation_user_prompt(base_action_user_prompt: &str) -> String {
+    format!(
+        "Rewrite this action user prompt into a shorter action-focused user prompt. Preserve meaning, point of view, intent, and decision-driving constraints. Keep it framed as action-selection context, not a conversational reply.\n\n{}",
+        base_action_user_prompt
+    )
 }
 
 fn build_action_user_prompt(
@@ -927,6 +944,24 @@ mod tests {
         let result = build_action_user_prompt("short action prompt", None);
 
         assert_eq!(result, "short action prompt");
+    }
+
+    #[test]
+    fn test_action_reformulation_system_prompt_preserves_frame_of_reference() {
+        let prompt = build_action_reformulation_system_prompt();
+
+        assert!(prompt.contains("lossless compression for action selection"));
+        assert!(prompt.contains("not as a reply to another speaker"));
+        assert!(prompt.contains("Do not add acknowledgements"));
+        assert!(prompt.contains("neutral context about what was said or requested"));
+    }
+
+    #[test]
+    fn test_action_reformulation_user_prompt_mentions_preserving_point_of_view() {
+        let prompt = build_action_reformulation_user_prompt("Recent events:\nexample");
+
+        assert!(prompt.contains("Preserve meaning, point of view, intent"));
+        assert!(prompt.contains("Recent events:\nexample"));
     }
 }
 
