@@ -656,7 +656,7 @@ async fn validate_reaction_candidate(
     let mut completion = Completion::new();
     completion.add_message(
         Role::System,
-        "You validate whether a single already-selected action is actually possible in Arizona2's action model. Be strict. The only real effects available are speaking in scene, moving to another scene, waiting, hibernating, or idling. Reject any chosen action that implies doing something else in the world, such as writing or editing a document, inspecting files, changing memory/state directly, manipulating objects, performing physical tasks, running a procedure, or otherwise claiming off-screen effects that Arizona2 cannot perform. For 'say in scene', the comment must be plausible spoken dialogue only, not narration of extra actions or claims that those actions were performed. Do not judge style, usefulness, or strategy beyond whether the chosen action is actually representable. Do not propose a replacement action. Return JSON only with keys is_valid (boolean) and reason (string). Keep reason brief and concrete.",
+        "You validate whether a single already-selected action is actually possible in Arizona2's action model. Be strict. The only real effects available are speaking in scene, moving to another scene, gazing at the current scene, waiting, hibernating, or idling. Reject any chosen action that implies doing something else in the world, such as writing or editing a document, inspecting files, changing memory/state directly, manipulating objects, performing physical tasks, running a procedure, or otherwise claiming off-screen effects that Arizona2 cannot perform. For 'say in scene', the comment must be plausible spoken dialogue only, not narration of extra actions or claims that those actions were performed. Do not judge style, usefulness, or strategy beyond whether the chosen action is actually representable. Do not propose a replacement action. Return JSON only with keys is_valid (boolean) and reason (string). Keep reason brief and concrete.",
     );
 
     let action_user_prompt = build_action_user_prompt(reformulated_action_prompt, None);
@@ -731,7 +731,7 @@ fn build_action_user_prompt(
     if let Some(feedback) = validation_feedback {
         action_user_prompt.push_str(
             format!(
-                "\n\nValidator feedback on your previous rejected action:\n{}\n\nChoose a different action that fixes this problem. Remember that Arizona2 can only speak, move scenes, wait, hibernate, or idle. Do not imply that any other action was performed. Choose exactly one tool call and do not output any plain text.",
+                "\n\nValidator feedback on your previous rejected action:\n{}\n\nChoose a different action that fixes this problem. Remember that Arizona2 can only speak, move scenes, gaze at the current scene, wait, hibernate, or idle. Do not imply that any other action was performed. Choose exactly one tool call and do not output any plain text.",
                 feedback
             )
             .as_str(),
