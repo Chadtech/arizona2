@@ -810,6 +810,8 @@ Your job is to infer this person’s current attention, what they believe is hap
 Rules:
 - Use only the information explicitly present in this prompt.
 - Do not assume abilities beyond the available tool calls.
+- Infer only intentions that this person could actually carry out within Arizona2's available capabilities: `say in scene`, `move to scene`, `gaze in scene`, `wait`, `hibernate`, and `idle`.
+- Do not infer intentions that depend on impossible abilities, hidden operations outside those capabilities, or claims that something has already been done when the person could not actually have done it yet.
 - Focus on the newest message events first; use older context only to interpret them.
 - Treat the person's current task as the strongest default signal for what they intend to do, unless the latest situation clearly overrides it.
 - Treat the person as having stable drives, but not as mechanically repeating themselves.
