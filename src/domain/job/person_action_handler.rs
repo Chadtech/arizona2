@@ -115,7 +115,7 @@ pub async fn handle_person_action<
             .await
         }
         PersonAction::GazeInScene => {
-            enqueue_scene_gaze(worker, person_uuid, current_active_ms).await?;
+            enqueue_scene_gaze(worker, person_uuid).await?;
 
             worker
                 .record_reaction(person_uuid, "gaze_in_scene")
@@ -323,7 +323,6 @@ async fn enqueue_scene_gaze<
 >(
     worker: &W,
     person_uuid: &PersonUuid,
-    current_active_ms: i64,
 ) -> Result<(), ActionHandleError> {
     let scene_uuid = worker
         .get_persons_current_scene_uuid(person_uuid)
