@@ -14,6 +14,7 @@ pub struct Model {
     person_name_input: String,
     load_status: LoadStatus,
     content_input: String,
+    state_input: String,
     success_condition_input: String,
     abandon_condition_input: String,
     failure_condition_input: String,
@@ -44,6 +45,7 @@ pub enum Msg {
     ClickedLoadPerson,
     PersonTaskDataLoaded(Result<(PersonUuid, Option<PersonTask>), String>),
     ContentChanged(String),
+    StateChanged(String),
     SuccessConditionChanged(String),
     AbandonConditionChanged(String),
     FailureConditionChanged(String),
@@ -58,6 +60,8 @@ pub struct Storage {
     person_name_input: String,
     #[serde(default)]
     content_input: String,
+    #[serde(default)]
+    state_input: String,
     #[serde(default)]
     success_condition_input: String,
     #[serde(default)]
@@ -74,6 +78,7 @@ impl Model {
             person_name_input: storage.person_name_input.clone(),
             load_status: LoadStatus::Ready,
             content_input: storage.content_input.clone(),
+            state_input: storage.state_input.clone(),
             success_condition_input: storage.success_condition_input.clone(),
             abandon_condition_input: storage.abandon_condition_input.clone(),
             failure_condition_input: storage.failure_condition_input.clone(),
@@ -86,6 +91,7 @@ impl Model {
         Storage {
             person_name_input: self.person_name_input.clone(),
             content_input: self.content_input.clone(),
+            state_input: self.state_input.clone(),
             success_condition_input: self.success_condition_input.clone(),
             abandon_condition_input: self.abandon_condition_input.clone(),
             failure_condition_input: self.failure_condition_input.clone(),
@@ -126,6 +132,11 @@ impl Model {
             }
             Msg::ContentChanged(value) => {
                 self.content_input = value;
+                self.create_status = CreateStatus::Ready;
+                Task::none()
+            }
+            Msg::StateChanged(value) => {
+                self.state_input = value;
                 self.create_status = CreateStatus::Ready;
                 Task::none()
             }
@@ -174,6 +185,7 @@ impl Model {
                 let new_person_task = NewPersonTask {
                     person_uuid,
                     content: content.to_string(),
+                    state: optional_string(&self.state_input),
                     success_condition: optional_string(&self.success_condition_input),
                     abandon_condition: optional_string(&self.abandon_condition_input),
                     failure_condition: optional_string(&self.failure_condition_input),
@@ -194,6 +206,7 @@ impl Model {
                 Ok(person_task_uuid) => {
                     self.create_status = CreateStatus::Done(person_task_uuid);
                     self.content_input.clear();
+                    self.state_input.clear();
                     self.success_condition_input.clear();
                     self.abandon_condition_input.clear();
                     self.failure_condition_input.clear();
@@ -232,6 +245,8 @@ impl Model {
             LoadStatus::Loaded { .. } => w::column![
                 w::text("New Current Task"),
                 w::text_input("Task content", &self.content_input).on_input(Msg::ContentChanged),
+                w::text_input("Initial state (optional)", &self.state_input)
+                    .on_input(Msg::StateChanged),
                 w::text_input(
                     "Success condition (optional)",
                     &self.success_condition_input
@@ -307,6 +322,7 @@ fn current_task_view(status: &LoadStatus) -> Element<'_, Msg> {
                     w::text(format!("Created: {}", created_at)).size(s::S3),
                     w::text(format!("UUID: {}", task.uuid.to_uuid())).size(s::S3),
                     w::text(&task.content),
+                    optional_condition_view("State", task.state.as_deref()),
                     optional_condition_view("Success", task.success_condition.as_deref()),
                     optional_condition_view("Abandon", task.abandon_condition.as_deref()),
                     optional_condition_view("Failure", task.failure_condition.as_deref()),

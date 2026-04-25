@@ -1,0 +1,21 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                INSERT INTO person_task (\n                    uuid,\n                    person_uuid,\n                    content,\n                    state,\n                    success_condition,\n                    abandon_condition,\n                    failure_condition,\n                    priority\n                )\n                VALUES (\n                    $1::UUID,\n                    $2::UUID,\n                    $3::TEXT,\n                    $4::TEXT,\n                    $5::TEXT,\n                    $6::TEXT,\n                    $7::TEXT,\n                    $8::INTEGER\n                );\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "dc80e5f88b08ebd5f8c6f75c9e50b3d2b81ea1c1cb0b44fbcbbbe22c51192d95"
+}

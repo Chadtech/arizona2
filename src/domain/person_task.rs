@@ -8,6 +8,7 @@ pub struct PersonTask {
     pub uuid: PersonTaskUuid,
     pub person_uuid: PersonUuid,
     pub content: String,
+    pub state: Option<String>,
     pub success_condition: Option<String>,
     pub abandon_condition: Option<String>,
     pub failure_condition: Option<String>,
