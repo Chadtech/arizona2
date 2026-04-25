@@ -909,6 +909,24 @@ fn describe_reflection(reflection: &ReflectionDecision) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::Utc;
+
+    fn sample_person_task(state: Option<&str>) -> PersonTask {
+        PersonTask {
+            uuid: crate::domain::person_task_uuid::PersonTaskUuid::new(),
+            person_uuid: crate::domain::person_uuid::PersonUuid::new(),
+            content: "Check whether Bob needs help.".to_string(),
+            state: state.map(|value| value.to_string()),
+            success_condition: None,
+            abandon_condition: None,
+            failure_condition: None,
+            priority: 75,
+            created_at: Utc::now(),
+            completed_at: None,
+            abandoned_at: None,
+            failed_at: None,
+        }
+    }
 
     fn sample_prompts() -> ReactionPromptPreview {
         ReactionPromptPreview {
@@ -965,6 +983,25 @@ mod tests {
         assert!(prompt.contains("Preserve meaning, point of view, intent"));
         assert!(prompt.contains("Recent events:\nexample"));
     }
+
+    #[test]
+    fn test_format_current_person_task_text_includes_state_under_heading() {
+        let formatted = format_current_person_task_text(&sample_person_task(Some("waiting")));
+
+        assert!(formatted.contains("\n\nCurrent Task: Check whether Bob needs help."));
+        assert!(formatted.contains("\nCurrent Task State: waiting"));
+        assert!(formatted.contains("\nCurrent Task Priority: 75"));
+        assert!(formatted.contains("Check whether Bob needs help."));
+    }
+
+    #[test]
+    fn test_format_current_person_task_text_omits_blank_state() {
+        let formatted = format_current_person_task_text(&sample_person_task(Some("   ")));
+
+        assert!(formatted.contains("\n\nCurrent Task: Check whether Bob needs help."));
+        assert!(formatted.contains("\nCurrent Task Priority: 75"));
+        assert!(!formatted.contains("Current Task State:"));
+    }
 }
 
 fn tool_calls_into_reactions(
@@ -1000,8 +1037,23 @@ async fn get_current_person_task_text(
     person_uuid: &PersonUuid,
 ) -> Result<String, String> {
     match worker.get_persons_current_active_task(person_uuid).await? {
-        Some(person_task) => Ok(format!("\n\nCurrent Task:\n{}", person_task)),
+        Some(person_task) => Ok(format_current_person_task_text(&person_task)),
         None => Ok(String::new()),
+    }
+}
+
+fn format_current_person_task_text(person_task: &PersonTask) -> String {
+    match person_task.state.as_deref() {
+        Some(state) if !state.trim().is_empty() => format!(
+            "\n\nCurrent Task: {}\nCurrent Task State: {}\nCurrent Task Priority: {}",
+            person_task.content,
+            state.trim(),
+            person_task.priority
+        ),
+        _ => format!(
+            "\n\nCurrent Task: {}\nCurrent Task Priority: {}",
+            person_task.content, person_task.priority
+        ),
     }
 }
 
