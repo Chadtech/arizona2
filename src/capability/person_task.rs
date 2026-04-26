@@ -30,4 +30,11 @@ pub trait PersonTaskCapability {
         person_task_uuid: &PersonTaskUuid,
         outcome: PersonTaskTerminalOutcome,
     ) -> Result<(), String>;
+
+    async fn update_person_task_state(
+        &self,
+        person_uuid: &PersonUuid,
+        person_task_uuid: &PersonTaskUuid,
+        state: String,
+    ) -> Result<(), String>;
 }

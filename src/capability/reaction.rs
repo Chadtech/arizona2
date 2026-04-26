@@ -34,4 +34,11 @@ pub trait ReactionCapability {
         situation: String,
         action_summary: Option<String>,
     ) -> Result<PersonTaskOutcomeCheck, String>;
+
+    async fn infer_updated_task_state(
+        &self,
+        task: PersonTask,
+        situation: String,
+        action_summary: Option<String>,
+    ) -> Result<String, String>;
 }

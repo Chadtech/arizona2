@@ -781,6 +781,15 @@ mod tests {
         ) -> Result<PersonTaskOutcomeCheck, String> {
             Ok(PersonTaskOutcomeCheck::StillActive)
         }
+
+        async fn infer_updated_task_state(
+            &self,
+            _task: PersonTask,
+            _situation: String,
+            _action_summary: Option<String>,
+        ) -> Result<String, String> {
+            Ok("mock updated state".to_string())
+        }
     }
 
     impl PersonTaskCapability for MockWorker {
@@ -803,6 +812,15 @@ mod tests {
             _person_uuid: &PersonUuid,
             _person_task_uuid: &PersonTaskUuid,
             _outcome: PersonTaskTerminalOutcome,
+        ) -> Result<(), String> {
+            Ok(())
+        }
+
+        async fn update_person_task_state(
+            &self,
+            _person_uuid: &PersonUuid,
+            _person_task_uuid: &PersonTaskUuid,
+            _state: String,
         ) -> Result<(), String> {
             Ok(())
         }

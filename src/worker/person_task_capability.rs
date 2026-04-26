@@ -345,4 +345,43 @@ impl PersonTaskCapability for Worker {
             )
         })
     }
+
+    async fn update_person_task_state(
+        &self,
+        person_uuid: &PersonUuid,
+        person_task_uuid: &PersonTaskUuid,
+        state: String,
+    ) -> Result<(), String> {
+        let normalized_state = state.trim().to_string();
+        if normalized_state.is_empty() {
+            return Err("Person task state cannot be empty".to_string());
+        }
+
+        let result = sqlx::query!(
+            r#"
+                UPDATE person_task
+                SET state = $3::TEXT
+                WHERE uuid = $1::UUID
+                  AND person_uuid = $2::UUID
+                  AND completed_at IS NULL
+                  AND abandoned_at IS NULL
+                  AND failed_at IS NULL;
+            "#,
+            person_task_uuid.to_uuid(),
+            person_uuid.to_uuid(),
+            normalized_state
+        )
+        .execute(&self.sqlx)
+        .await
+        .map_err(|err| format!("Error updating person task state: {}", err))?;
+
+        if result.rows_affected() != 1 {
+            return Err(format!(
+                "Expected one active task row to update state for {}",
+                person_task_uuid.to_uuid()
+            ));
+        }
+
+        Ok(())
+    }
 }

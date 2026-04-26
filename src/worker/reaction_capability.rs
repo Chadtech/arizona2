@@ -28,7 +28,9 @@ pub enum Error {
     FailedToGetMotivations(String),
     FailedToGetReactionDualLayer(String),
     FailedToClassifyTaskOutcome(String),
+    FailedToInferTaskState(String),
     InvalidTaskOutcomeToolCall(String),
+    InvalidTaskStateToolCall(String),
     NoPersonActionFound,
     MoreThanOnePersonActionFound(Vec<PersonReaction>),
 }
@@ -139,7 +141,9 @@ impl ReactionCapability for Worker {
             Error::FailedToGetMotivations(message) => message,
             Error::FailedToGetReactionDualLayer(message) => message,
             Error::FailedToClassifyTaskOutcome(message) => message,
+            Error::FailedToInferTaskState(message) => message,
             Error::InvalidTaskOutcomeToolCall(message) => message,
+            Error::InvalidTaskStateToolCall(message) => message,
             Error::NoPersonActionFound => "No person action found".to_string(),
             Error::MoreThanOnePersonActionFound(actions) => {
                 let actions_str = actions
@@ -165,7 +169,37 @@ impl ReactionCapability for Worker {
                 Error::FailedToGetMotivations(message) => message,
                 Error::FailedToGetReactionDualLayer(message) => message,
                 Error::FailedToClassifyTaskOutcome(message) => message,
+                Error::FailedToInferTaskState(message) => message,
                 Error::InvalidTaskOutcomeToolCall(message) => message,
+                Error::InvalidTaskStateToolCall(message) => message,
+                Error::NoPersonActionFound => "No person action found".to_string(),
+                Error::MoreThanOnePersonActionFound(actions) => {
+                    let actions_str = actions
+                        .into_iter()
+                        .map(|action| format!("{:?}", action))
+                        .collect::<Vec<String>>()
+                        .join(",\n");
+                    format!("More than one person action found: \n{}", actions_str)
+                }
+            })
+    }
+
+    async fn infer_updated_task_state(
+        &self,
+        task: PersonTask,
+        situation: String,
+        action_summary: Option<String>,
+    ) -> Result<String, String> {
+        infer_updated_task_state_helper(self, &task.person_uuid, &task, situation, action_summary)
+            .await
+            .map_err(|err| match err {
+                Error::CompletionError(completion_err) => completion_err.message(),
+                Error::FailedToGetMotivations(message) => message,
+                Error::FailedToGetReactionDualLayer(message) => message,
+                Error::FailedToClassifyTaskOutcome(message) => message,
+                Error::FailedToInferTaskState(message) => message,
+                Error::InvalidTaskOutcomeToolCall(message) => message,
+                Error::InvalidTaskStateToolCall(message) => message,
                 Error::NoPersonActionFound => "No person action found".to_string(),
                 Error::MoreThanOnePersonActionFound(actions) => {
                     let actions_str = actions
@@ -380,8 +414,81 @@ async fn classify_task_outcome_helper(
     Ok(classification.outcome)
 }
 
+async fn infer_updated_task_state_helper(
+    worker: &Worker,
+    person_uuid: &PersonUuid,
+    task: &PersonTask,
+    situation: String,
+    action_summary: Option<String>,
+) -> Result<String, Error> {
+    let mut completion = Completion::new();
+    completion.add_message(
+        Role::System,
+        "You update a person's current task state after new events.\n\nUse the provided tool call exactly once.\n\nRules:\n- Use only the evidence in the prompt.\n- Return a short free-text task state that reflects the person's current progress, focus, or blocker on this task.\n- Prefer concise phrases, not full sentences.\n- If the existing task state still fits best, return it unchanged.\n- Always return a non-empty task state.\n- Do not classify the task as completed, failed, or abandoned here; only update its active-state description.",
+    );
+    completion.add_tool_call(update_task_state_tool());
+
+    let action_summary_text = match action_summary {
+        Some(summary) => summary,
+        None => "None.".to_string(),
+    };
+
+    completion.add_message(
+        Role::User,
+        format!(
+            "Person UUID: {}\n\nCurrent task:\n{}\n\nCurrent task state:\n{}\n\nSuccess condition:\n{}\n\nFailure condition:\n{}\n\nAbandon condition:\n{}\n\nLatest situation:\n{}\n\nLatest action taken:\n{}",
+            person_uuid.to_uuid(),
+            task.content,
+            optional_condition_text(task.state.as_deref()),
+            optional_condition_text(task.success_condition.as_deref()),
+            optional_condition_text(task.failure_condition.as_deref()),
+            optional_condition_text(task.abandon_condition.as_deref()),
+            situation,
+            action_summary_text
+        )
+        .as_str(),
+    );
+
+    let response = completion
+        .send_request(&worker.open_ai_key, worker.reqwest_client.clone())
+        .await
+        .map_err(|err| {
+            Error::FailedToInferTaskState(format!(
+                "Failed to request task state update: {}",
+                err.message()
+            ))
+        })?;
+
+    let tool_calls = response.as_tool_calls().map_err(|err| {
+        Error::FailedToInferTaskState(format!(
+            "Failed to decode task state updater tool calls: {}",
+            err.message()
+        ))
+    })?;
+    let task_state_update = tool_calls_into_task_state_updates(tool_calls)?;
+
+    worker.logger.log(
+        Level::Info,
+        format!(
+            "Task state update for person {} task {}: {:?} ({})",
+            person_uuid.to_uuid(),
+            task.uuid.to_uuid(),
+            task_state_update.state,
+            task_state_update.reason
+        )
+        .as_str(),
+    );
+
+    Ok(task_state_update.state)
+}
+
 struct TaskOutcomeClassification {
     outcome: PersonTaskOutcomeCheck,
+    reason: String,
+}
+
+struct TaskStateUpdate {
+    state: String,
     reason: String,
 }
 
@@ -399,6 +506,26 @@ fn classify_task_outcome_tool() -> Tool {
             ToolFunctionParameter::String {
                 name: "reason".to_string(),
                 description: "Short evidence-based explanation for the classification.".to_string(),
+                required: true,
+            },
+        ],
+    ))
+}
+
+fn update_task_state_tool() -> Tool {
+    Tool::FunctionCall(ToolFunction::new(
+        "update_task_state".to_string(),
+        "Update the person's current active task state based on the latest evidence.".to_string(),
+        vec![
+            ToolFunctionParameter::String {
+                name: "state".to_string(),
+                description: "Short non-empty free-text task state.".to_string(),
+                required: true,
+            },
+            ToolFunctionParameter::String {
+                name: "reason".to_string(),
+                description: "Short evidence-based explanation for the task state update."
+                    .to_string(),
                 required: true,
             },
         ],
@@ -474,6 +601,78 @@ fn tool_calls_into_task_outcomes(
     })?;
 
     Ok(TaskOutcomeClassification { outcome, reason })
+}
+
+fn tool_calls_into_task_state_updates(tool_calls: Vec<ToolCall>) -> Result<TaskStateUpdate, Error> {
+    if tool_calls.is_empty() {
+        return Err(Error::InvalidTaskStateToolCall(
+            "Task state updater returned no tool calls".to_string(),
+        ));
+    }
+
+    if tool_calls.len() > 1 {
+        return Err(Error::InvalidTaskStateToolCall(format!(
+            "Task state updater returned {} tool calls; expected exactly one",
+            tool_calls.len()
+        )));
+    }
+
+    let tool_call = tool_calls.into_iter().next().expect("checked len above");
+    if tool_call.name.as_str() != "update_task_state" {
+        return Err(Error::InvalidTaskStateToolCall(format!(
+            "Unexpected tool name from task state updater: {}",
+            tool_call.name
+        )));
+    }
+
+    let mut maybe_state: Option<String> = None;
+    let mut maybe_reason: Option<String> = None;
+
+    for (key, value) in tool_call.arguments {
+        match key.as_str() {
+            "state" => {
+                let value = value.as_str().ok_or_else(|| {
+                    Error::InvalidTaskStateToolCall(
+                        "Task state `state` argument was not a string".to_string(),
+                    )
+                })?;
+                let trimmed = value.trim();
+                if trimmed.is_empty() {
+                    return Err(Error::InvalidTaskStateToolCall(
+                        "Task state updater returned an empty `state` argument".to_string(),
+                    ));
+                }
+                maybe_state = Some(trimmed.to_string());
+            }
+            "reason" => {
+                let value = value.as_str().ok_or_else(|| {
+                    Error::InvalidTaskStateToolCall(
+                        "Task state `reason` argument was not a string".to_string(),
+                    )
+                })?;
+                maybe_reason = Some(value.to_string());
+            }
+            unexpected => {
+                return Err(Error::InvalidTaskStateToolCall(format!(
+                    "Unexpected task state updater argument: {}",
+                    unexpected
+                )));
+            }
+        }
+    }
+
+    let state = maybe_state.ok_or_else(|| {
+        Error::InvalidTaskStateToolCall(
+            "Task state updater omitted required `state` argument".to_string(),
+        )
+    })?;
+    let reason = maybe_reason.ok_or_else(|| {
+        Error::InvalidTaskStateToolCall(
+            "Task state updater omitted required `reason` argument".to_string(),
+        )
+    })?;
+
+    Ok(TaskStateUpdate { state, reason })
 }
 
 fn task_outcome_check_names() -> Vec<String> {

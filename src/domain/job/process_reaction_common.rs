@@ -117,6 +117,8 @@ pub enum Error {
     FailedToDeleteReflectionMotivation(String),
     FailedToGetCurrentTask(String),
     TaskOutcomeClassification(String),
+    TaskStateUpdate(String),
+    TaskStatePersistence(String),
     TaskTransition(String),
     Action(ActionHandleError),
     Reflection(String),
@@ -264,6 +266,12 @@ impl NiceDisplay for Error {
             }
             Error::TaskOutcomeClassification(err) => {
                 format!("Task outcome classification failed:\n{}", err)
+            }
+            Error::TaskStateUpdate(err) => {
+                format!("Task state update failed:\n{}", err)
+            }
+            Error::TaskStatePersistence(err) => {
+                format!("Task state persistence failed:\n{}", err)
             }
             Error::TaskTransition(err) => {
                 format!("Task transition failed:\n{}", err)
@@ -534,12 +542,26 @@ async fn maybe_transition_current_task<W: PersonTaskCapability + ReactionCapabil
     };
 
     let outcome = worker
-        .classify_current_task_outcome(current_task.clone(), situation, action_summary)
+        .classify_current_task_outcome(
+            current_task.clone(),
+            situation.clone(),
+            action_summary.clone(),
+        )
         .await
         .map_err(Error::TaskOutcomeClassification)?;
 
     match outcome {
-        PersonTaskOutcomeCheck::StillActive => Ok(()),
+        PersonTaskOutcomeCheck::StillActive => {
+            let updated_state = worker
+                .infer_updated_task_state(current_task.clone(), situation, action_summary)
+                .await
+                .map_err(Error::TaskStateUpdate)?;
+
+            worker
+                .update_person_task_state(person_uuid, &current_task.uuid, updated_state)
+                .await
+                .map_err(Error::TaskStatePersistence)
+        }
         PersonTaskOutcomeCheck::Terminal(outcome) => worker
             .transition_person_task(person_uuid, &current_task.uuid, outcome)
             .await
@@ -1481,6 +1503,15 @@ mod tests {
         ) -> Result<PersonTaskOutcomeCheck, String> {
             Ok(PersonTaskOutcomeCheck::StillActive)
         }
+
+        async fn infer_updated_task_state(
+            &self,
+            _task: PersonTask,
+            _situation: String,
+            _action_summary: Option<String>,
+        ) -> Result<String, String> {
+            Ok("mock updated state".to_string())
+        }
     }
 
     impl PersonTaskCapability for MockWorker {
@@ -1503,6 +1534,15 @@ mod tests {
             _person_uuid: &PersonUuid,
             _person_task_uuid: &PersonTaskUuid,
             _outcome: PersonTaskTerminalOutcome,
+        ) -> Result<(), String> {
+            Ok(())
+        }
+
+        async fn update_person_task_state(
+            &self,
+            _person_uuid: &PersonUuid,
+            _person_task_uuid: &PersonTaskUuid,
+            _state: String,
         ) -> Result<(), String> {
             Ok(())
         }
