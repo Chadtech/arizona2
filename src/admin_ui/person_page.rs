@@ -480,6 +480,7 @@ fn person_current_task_view(current_task: &Option<PersonTask>) -> Element<'_, Ms
                 w::text(format!("Priority: {}", task.priority)).size(s::S3),
                 w::text(format!("UUID: {}", task.uuid.to_uuid())).size(s::S3),
                 w::text(&task.content),
+                optional_condition_view("State", task.state.as_deref()),
                 optional_condition_view("Success", task.success_condition.as_deref()),
                 optional_condition_view("Abandon", task.abandon_condition.as_deref()),
                 optional_condition_view("Failure", task.failure_condition.as_deref()),
