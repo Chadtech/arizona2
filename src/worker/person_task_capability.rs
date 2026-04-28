@@ -4,6 +4,7 @@ use crate::domain::person_task::{PersonTask, PersonTaskTerminalOutcome};
 use crate::domain::person_task_uuid::PersonTaskUuid;
 use crate::domain::person_uuid::PersonUuid;
 use crate::worker::Worker;
+use uuid::Uuid;
 
 impl PersonTaskCapability for Worker {
     async fn get_persons_current_active_task(
@@ -357,6 +358,40 @@ impl PersonTaskCapability for Worker {
             return Err("Person task state cannot be empty".to_string());
         }
 
+        let mut transaction = self
+            .sqlx
+            .begin()
+            .await
+            .map_err(|err| format!("Error starting person task state transaction: {}", err))?;
+
+        let current_task_state = sqlx::query!(
+            r#"
+                SELECT state
+                FROM person_task
+                WHERE uuid = $1::UUID
+                  AND person_uuid = $2::UUID
+                  AND completed_at IS NULL
+                  AND abandoned_at IS NULL
+                  AND failed_at IS NULL
+                FOR UPDATE;
+            "#,
+            person_task_uuid.to_uuid(),
+            person_uuid.to_uuid()
+        )
+        .fetch_optional(&mut *transaction)
+        .await
+        .map_err(|err| format!("Error fetching current person task state: {}", err))?;
+
+        let state_before: Option<String> = match current_task_state {
+            Some(current_task_state) => current_task_state.state,
+            None => {
+                return Err(format!(
+                    "Expected one active task row to update state for {}",
+                    person_task_uuid.to_uuid()
+                ));
+            }
+        };
+
         let result = sqlx::query!(
             r#"
                 UPDATE person_task
@@ -371,7 +406,7 @@ impl PersonTaskCapability for Worker {
             person_uuid.to_uuid(),
             normalized_state
         )
-        .execute(&self.sqlx)
+        .execute(&mut *transaction)
         .await
         .map_err(|err| format!("Error updating person task state: {}", err))?;
 
@@ -382,6 +417,33 @@ impl PersonTaskCapability for Worker {
             ));
         }
 
-        Ok(())
+        sqlx::query!(
+            r#"
+                INSERT INTO person_task_historical_state (
+                    uuid,
+                    person_task_uuid,
+                    content,
+                    state_before
+                )
+                VALUES (
+                    $1::UUID,
+                    $2::UUID,
+                    $3::TEXT,
+                    $4::TEXT
+                );
+            "#,
+            Uuid::now_v7(),
+            person_task_uuid.to_uuid(),
+            normalized_state,
+            state_before
+        )
+        .execute(&mut *transaction)
+        .await
+        .map_err(|err| format!("Error inserting person task historical state: {}", err))?;
+
+        transaction
+            .commit()
+            .await
+            .map_err(|err| format!("Error committing person task state transaction: {}", err))
     }
 }
