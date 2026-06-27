@@ -13,12 +13,18 @@ This is a Rust workspace with source in `src/`. Core areas include:
 ## Build, Test, and Development Commands
 - `cargo build` builds the project.
 - `cargo fmt` formats the codebase; run it after completing code changes.
-- `cargo run -- run` starts the web server (port 1754).
-- `cargo run -- admin-ui` launches the desktop UI.
+- `cargo run -- --help` lists the currently implemented CLI commands.
+- `cargo run -- admin-ui` launches the Iced desktop admin UI.
 - `cargo run -- run-job-runner` runs the background job processor.
 - `cargo run -- new-migration <name>` creates a migration file in `db/migrations/`; use this command instead of creating migration files manually so timestamps stay consistent.
 - `cargo run -- run-migrations` applies pending migrations.
+- `cargo run -- run-test-migrations` applies migrations to the test database.
+- `cargo run -- summarize-person-identities` refreshes person identity summaries.
+- `cargo run -- summarize-memories-v2` refreshes memory v2 summaries.
 - `cargo test` runs all tests; `cargo test <module_or_test>` scopes execution.
+
+There is currently no `cargo run -- run` web-server command in `src/main.rs`; use
+the admin UI and job runner commands above as the active runtime surfaces.
 
 ## Coding Style & Naming Conventions
 - Follow standard Rust style (rustfmt defaults, 4-space indentation).
