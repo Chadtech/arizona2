@@ -4,10 +4,11 @@ use std::fmt::Display;
 pub enum Model {
     Gpt4o,
     Gpt5Mini,
+    Gpt5p5,
 }
 
 impl Model {
-    pub const DEFAULT: Model = Model::Gpt5Mini;
+    pub const DEFAULT: Model = Model::Gpt5p5;
 }
 
 impl Display for Model {
@@ -18,6 +19,7 @@ impl Display for Model {
             match self {
                 Model::Gpt4o => "gpt-4o-2024-08-06".to_string(),
                 Model::Gpt5Mini => "gpt-5-mini".to_string(),
+                Model::Gpt5p5 => "gpt-5.5".to_string(),
             }
         )
     }

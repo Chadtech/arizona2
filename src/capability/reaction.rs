@@ -1,3 +1,4 @@
+use crate::capability::person_task::NewPersonTask;
 use crate::domain::memory::Memory;
 use crate::domain::person_task::PersonTask;
 use crate::domain::person_task::PersonTaskOutcomeCheck;
@@ -27,6 +28,15 @@ pub trait ReactionCapability {
         state_of_mind: String,
         situation: String,
     ) -> Result<PersonReaction, String>;
+
+    #[allow(dead_code)]
+    async fn infer_person_task_to_adopt(
+        &self,
+        memories: Vec<Memory>,
+        person_uuid: PersonUuid,
+        state_of_mind: String,
+        situation: String,
+    ) -> Result<NewPersonTask, String>;
 
     async fn classify_current_task_outcome(
         &self,

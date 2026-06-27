@@ -773,6 +773,24 @@ mod tests {
             })
         }
 
+        async fn infer_person_task_to_adopt(
+            &self,
+            _memories: Vec<Memory>,
+            person_uuid: PersonUuid,
+            _state_of_mind: String,
+            _situation: String,
+        ) -> Result<NewPersonTask, String> {
+            Ok(NewPersonTask {
+                person_uuid,
+                content: "mock task".to_string(),
+                state: None,
+                success_condition: None,
+                abandon_condition: None,
+                failure_condition: None,
+                priority: 50,
+            })
+        }
+
         async fn classify_current_task_outcome(
             &self,
             _task: PersonTask,

@@ -1,7 +1,7 @@
 use crate::capability::motivation::MotivationCapability;
 use crate::capability::person::PersonCapability;
 use crate::capability::person_identity::PersonIdentityCapability;
-use crate::capability::person_task::PersonTaskCapability;
+use crate::capability::person_task::{NewPersonTask, PersonTaskCapability};
 use crate::capability::reaction::{ReactionCapability, ReactionPromptPreview};
 use crate::capability::state_of_mind::StateOfMindCapability;
 use crate::domain::logger::Level;
@@ -27,8 +27,12 @@ pub enum Error {
     CompletionError(CompletionError),
     FailedToGetMotivations(String),
     FailedToGetReactionDualLayer(String),
+    #[allow(dead_code)]
+    FailedToInferPersonTaskToAdopt(String),
     FailedToClassifyTaskOutcome(String),
     FailedToInferTaskState(String),
+    #[allow(dead_code)]
+    InvalidTaskAdoptionToolCall(String),
     InvalidTaskOutcomeToolCall(String),
     InvalidTaskStateToolCall(String),
     NoPersonActionFound,
@@ -140,8 +144,10 @@ impl ReactionCapability for Worker {
             Error::CompletionError(completion_err) => completion_err.message(),
             Error::FailedToGetMotivations(message) => message,
             Error::FailedToGetReactionDualLayer(message) => message,
+            Error::FailedToInferPersonTaskToAdopt(message) => message,
             Error::FailedToClassifyTaskOutcome(message) => message,
             Error::FailedToInferTaskState(message) => message,
+            Error::InvalidTaskAdoptionToolCall(message) => message,
             Error::InvalidTaskOutcomeToolCall(message) => message,
             Error::InvalidTaskStateToolCall(message) => message,
             Error::NoPersonActionFound => "No person action found".to_string(),
@@ -156,6 +162,26 @@ impl ReactionCapability for Worker {
         })
     }
 
+    async fn infer_person_task_to_adopt(
+        &self,
+        memories: Vec<Memory>,
+        person_uuid: PersonUuid,
+        state_of_mind: String,
+        situation: String,
+    ) -> Result<NewPersonTask, String> {
+        let person_identity = get_person_identity_summary(self, &person_uuid).await?;
+        infer_person_task_to_adopt_helper(
+            self,
+            memories,
+            person_uuid,
+            person_identity,
+            state_of_mind,
+            situation,
+        )
+        .await
+        .map_err(reaction_capability_error_message)
+    }
+
     async fn classify_current_task_outcome(
         &self,
         task: PersonTask,
@@ -168,8 +194,10 @@ impl ReactionCapability for Worker {
                 Error::CompletionError(completion_err) => completion_err.message(),
                 Error::FailedToGetMotivations(message) => message,
                 Error::FailedToGetReactionDualLayer(message) => message,
+                Error::FailedToInferPersonTaskToAdopt(message) => message,
                 Error::FailedToClassifyTaskOutcome(message) => message,
                 Error::FailedToInferTaskState(message) => message,
+                Error::InvalidTaskAdoptionToolCall(message) => message,
                 Error::InvalidTaskOutcomeToolCall(message) => message,
                 Error::InvalidTaskStateToolCall(message) => message,
                 Error::NoPersonActionFound => "No person action found".to_string(),
@@ -196,8 +224,10 @@ impl ReactionCapability for Worker {
                 Error::CompletionError(completion_err) => completion_err.message(),
                 Error::FailedToGetMotivations(message) => message,
                 Error::FailedToGetReactionDualLayer(message) => message,
+                Error::FailedToInferPersonTaskToAdopt(message) => message,
                 Error::FailedToClassifyTaskOutcome(message) => message,
                 Error::FailedToInferTaskState(message) => message,
+                Error::InvalidTaskAdoptionToolCall(message) => message,
                 Error::InvalidTaskOutcomeToolCall(message) => message,
                 Error::InvalidTaskStateToolCall(message) => message,
                 Error::NoPersonActionFound => "No person action found".to_string(),
@@ -210,6 +240,30 @@ impl ReactionCapability for Worker {
                     format!("More than one person action found: \n{}", actions_str)
                 }
             })
+    }
+}
+
+#[allow(dead_code)]
+fn reaction_capability_error_message(err: Error) -> String {
+    match err {
+        Error::CompletionError(completion_err) => completion_err.message(),
+        Error::FailedToGetMotivations(message) => message,
+        Error::FailedToGetReactionDualLayer(message) => message,
+        Error::FailedToInferPersonTaskToAdopt(message) => message,
+        Error::FailedToClassifyTaskOutcome(message) => message,
+        Error::FailedToInferTaskState(message) => message,
+        Error::InvalidTaskAdoptionToolCall(message) => message,
+        Error::InvalidTaskOutcomeToolCall(message) => message,
+        Error::InvalidTaskStateToolCall(message) => message,
+        Error::NoPersonActionFound => "No person action found".to_string(),
+        Error::MoreThanOnePersonActionFound(actions) => {
+            let actions_str = actions
+                .into_iter()
+                .map(|action| format!("{:?}", action))
+                .collect::<Vec<String>>()
+                .join(",\n");
+            format!("More than one person action found: \n{}", actions_str)
+        }
     }
 }
 
@@ -345,6 +399,96 @@ async fn get_reaction_helper(
     }
 
     Ok(fallback_reaction())
+}
+
+#[allow(dead_code)]
+async fn infer_person_task_to_adopt_helper(
+    worker: &Worker,
+    memories: Vec<Memory>,
+    person_uuid: PersonUuid,
+    person_identity: String,
+    state_of_mind: String,
+    situation: String,
+) -> Result<NewPersonTask, Error> {
+    let person_name = worker
+        .get_persons_name(person_uuid.clone())
+        .await
+        .map_err(|err| {
+            Error::FailedToInferPersonTaskToAdopt(format!("Failed to get person's name: {}", err))
+        })?;
+
+    let motivations = worker
+        .get_motivations_for_person(&person_uuid)
+        .await
+        .map_err(Error::FailedToGetMotivations)?;
+
+    let current_person_task_text = get_current_person_task_text(worker, &person_uuid)
+        .await
+        .map_err(|err| {
+            Error::FailedToInferPersonTaskToAdopt(format!(
+                "Failed to get current person task: {}",
+                err
+            ))
+        })?;
+
+    let prompt = build_task_adoption_prompt(
+        person_name.as_str(),
+        &memories,
+        &motivations,
+        person_identity.as_str(),
+        state_of_mind.as_str(),
+        situation.as_str(),
+        current_person_task_text.as_str(),
+    );
+
+    let mut completion = Completion::new();
+    completion.add_message(Role::System, build_task_adoption_system_prompt());
+    completion.add_message(Role::User, prompt.as_str());
+    completion.add_tool_call(adopt_person_task_tool());
+
+    worker.logger.log(
+        Level::Info,
+        format!(
+            "Task adoption prompt for person {}:\nSystem Prompt ========\n{}\n\nUser Prompt =======\n{}",
+            person_uuid.to_uuid(),
+            build_task_adoption_system_prompt(),
+            prompt
+        )
+        .as_str(),
+    );
+
+    let response = completion
+        .send_request(&worker.open_ai_key, worker.reqwest_client.clone())
+        .await
+        .map_err(|err| {
+            Error::FailedToInferPersonTaskToAdopt(format!(
+                "Failed to request task adoption inference: {}",
+                err.message()
+            ))
+        })?;
+
+    let tool_calls = response.as_tool_calls().map_err(|err| {
+        Error::FailedToInferPersonTaskToAdopt(format!(
+            "Failed to decode task adoption tool calls: {}",
+            err.message()
+        ))
+    })?;
+    let task_adoption = tool_calls_into_person_tasks(tool_calls, person_uuid.clone())?;
+
+    worker.logger.log(
+        Level::Info,
+        format!(
+            "Task adoption for person {}: {} (priority {}, state: {}, reason: {})",
+            person_uuid.to_uuid(),
+            task_adoption.task.content,
+            task_adoption.task.priority,
+            optional_condition_text(task_adoption.task.state.as_deref()),
+            task_adoption.reason
+        )
+        .as_str(),
+    );
+
+    Ok(task_adoption.task)
 }
 
 async fn classify_task_outcome_helper(
@@ -492,6 +636,30 @@ struct TaskStateUpdate {
     reason: String,
 }
 
+#[allow(dead_code)]
+struct TaskAdoption {
+    task: NewPersonTask,
+    reason: String,
+}
+
+#[allow(dead_code)]
+fn build_task_adoption_system_prompt() -> &'static str {
+    "You infer the task a simulated person wants to adopt for themselves.
+
+Use the provided tool call exactly once.
+
+Rules:
+- Use only the evidence in the prompt.
+- Choose one active task that the person would genuinely adopt now, not a task assigned by the system.
+- Prefer tasks that follow from the person's identity, memories, background drives, state of mind, and latest situation.
+- If the person already has a current task, preserve continuity unless the latest situation makes a different task clearly more important.
+- The task must be pursueable through future Arizona2 behavior, such as speaking, moving scenes, gazing, waiting, hibernating, or idling. Do not create tasks that require direct file edits, object manipulation, external APIs, or physical actions.
+- Make the task content concrete and first-person-motivated, but write it as a plain task description, not dialogue.
+- Success, failure, and abandon conditions should be evidence-based and checkable from future events.
+- Use priority 1-100, where 100 is urgent and identity-defining, 50 is ordinary, and 1 is barely worth adopting.
+- Always return a non-empty task."
+}
+
 fn classify_task_outcome_tool() -> Tool {
     Tool::FunctionCall(ToolFunction::new(
         "classify_task_outcome".to_string(),
@@ -506,6 +674,55 @@ fn classify_task_outcome_tool() -> Tool {
             ToolFunctionParameter::String {
                 name: "reason".to_string(),
                 description: "Short evidence-based explanation for the classification.".to_string(),
+                required: true,
+            },
+        ],
+    ))
+}
+
+#[allow(dead_code)]
+fn adopt_person_task_tool() -> Tool {
+    Tool::FunctionCall(ToolFunction::new(
+        "adopt_person_task".to_string(),
+        "Infer the task this person wants to adopt for themselves.".to_string(),
+        vec![
+            ToolFunctionParameter::String {
+                name: "content".to_string(),
+                description: "Short concrete description of the task the person wants to adopt."
+                    .to_string(),
+                required: true,
+            },
+            ToolFunctionParameter::String {
+                name: "state".to_string(),
+                description: "Short active-state description for the task, or omit if no useful state is known.".to_string(),
+                required: false,
+            },
+            ToolFunctionParameter::String {
+                name: "success_condition".to_string(),
+                description: "Checkable condition that means the task has been completed."
+                    .to_string(),
+                required: false,
+            },
+            ToolFunctionParameter::String {
+                name: "failure_condition".to_string(),
+                description: "Checkable condition that means the task has failed.".to_string(),
+                required: false,
+            },
+            ToolFunctionParameter::String {
+                name: "abandon_condition".to_string(),
+                description: "Checkable condition that means the person has abandoned this task."
+                    .to_string(),
+                required: false,
+            },
+            ToolFunctionParameter::Integer {
+                name: "priority".to_string(),
+                description: "Task priority from 1 to 100.".to_string(),
+                required: true,
+            },
+            ToolFunctionParameter::String {
+                name: "reason".to_string(),
+                description: "Short evidence-based explanation for why this person adopts the task."
+                    .to_string(),
                 required: true,
             },
         ],
@@ -530,6 +747,144 @@ fn update_task_state_tool() -> Tool {
             },
         ],
     ))
+}
+
+#[allow(dead_code)]
+fn build_task_adoption_prompt(
+    person_name: &str,
+    memories: &[Memory],
+    motivations: &[Motivation],
+    person_identity: &str,
+    state_of_mind: &str,
+    situation: &str,
+    current_person_task_text: &str,
+) -> String {
+    format!(
+        "Infer the task this person wants to adopt now.\n\nName:\n{}\n\nMemories:\n{}\n\nBackground drives:\n{}\n\nPerson identity:\n{}\n\nState of mind:\n{}\n\nSituation:\n{}{}",
+        person_name,
+        Memory::many_to_list_text(memories),
+        Motivation::many_to_list_text(motivations),
+        person_identity,
+        state_of_mind,
+        situation,
+        current_person_task_text
+    )
+}
+
+#[allow(dead_code)]
+fn tool_calls_into_person_tasks(
+    tool_calls: Vec<ToolCall>,
+    person_uuid: PersonUuid,
+) -> Result<TaskAdoption, Error> {
+    if tool_calls.is_empty() {
+        return Err(Error::InvalidTaskAdoptionToolCall(
+            "Task adoption returned no tool calls".to_string(),
+        ));
+    }
+
+    if tool_calls.len() > 1 {
+        return Err(Error::InvalidTaskAdoptionToolCall(format!(
+            "Task adoption returned {} tool calls; expected exactly one",
+            tool_calls.len()
+        )));
+    }
+
+    let tool_call = tool_calls.into_iter().next().expect("checked len above");
+    if tool_call.name.as_str() != "adopt_person_task" {
+        return Err(Error::InvalidTaskAdoptionToolCall(format!(
+            "Unexpected tool name from task adoption: {}",
+            tool_call.name
+        )));
+    }
+
+    let mut maybe_content: Option<String> = None;
+    let mut maybe_state: Option<String> = None;
+    let mut maybe_success_condition: Option<String> = None;
+    let mut maybe_failure_condition: Option<String> = None;
+    let mut maybe_abandon_condition: Option<String> = None;
+    let mut maybe_priority: Option<i32> = None;
+    let mut maybe_reason: Option<String> = None;
+
+    for (key, value) in tool_call.arguments {
+        match key.as_str() {
+            "content" => {
+                maybe_content = Some(required_non_empty_string_arg(
+                    value,
+                    "Task adoption `content` argument",
+                )?);
+            }
+            "state" => {
+                maybe_state = optional_string_arg(value, "Task adoption `state` argument")?;
+            }
+            "success_condition" => {
+                maybe_success_condition =
+                    optional_string_arg(value, "Task adoption `success_condition` argument")?;
+            }
+            "failure_condition" => {
+                maybe_failure_condition =
+                    optional_string_arg(value, "Task adoption `failure_condition` argument")?;
+            }
+            "abandon_condition" => {
+                maybe_abandon_condition =
+                    optional_string_arg(value, "Task adoption `abandon_condition` argument")?;
+            }
+            "priority" => {
+                let priority = value.as_i64().ok_or_else(|| {
+                    Error::InvalidTaskAdoptionToolCall(
+                        "Task adoption `priority` argument was not an integer".to_string(),
+                    )
+                })?;
+                if !(1..=100).contains(&priority) {
+                    return Err(Error::InvalidTaskAdoptionToolCall(format!(
+                        "Task adoption `priority` argument was {}; expected 1-100",
+                        priority
+                    )));
+                }
+                maybe_priority = Some(priority as i32);
+            }
+            "reason" => {
+                maybe_reason = Some(required_non_empty_string_arg(
+                    value,
+                    "Task adoption `reason` argument",
+                )?);
+            }
+            unexpected => {
+                return Err(Error::InvalidTaskAdoptionToolCall(format!(
+                    "Unexpected task adoption argument: {}",
+                    unexpected
+                )));
+            }
+        }
+    }
+
+    let content = maybe_content.ok_or_else(|| {
+        Error::InvalidTaskAdoptionToolCall(
+            "Task adoption omitted required `content` argument".to_string(),
+        )
+    })?;
+    let priority = maybe_priority.ok_or_else(|| {
+        Error::InvalidTaskAdoptionToolCall(
+            "Task adoption omitted required `priority` argument".to_string(),
+        )
+    })?;
+    let reason = maybe_reason.ok_or_else(|| {
+        Error::InvalidTaskAdoptionToolCall(
+            "Task adoption omitted required `reason` argument".to_string(),
+        )
+    })?;
+
+    Ok(TaskAdoption {
+        task: NewPersonTask {
+            person_uuid,
+            content,
+            state: maybe_state,
+            success_condition: maybe_success_condition,
+            abandon_condition: maybe_abandon_condition,
+            failure_condition: maybe_failure_condition,
+            priority,
+        },
+        reason,
+    })
 }
 
 fn tool_calls_into_task_outcomes(
@@ -1184,6 +1539,112 @@ mod tests {
     }
 
     #[test]
+    fn test_build_task_adoption_system_prompt_limits_task_capabilities() {
+        let prompt = build_task_adoption_system_prompt();
+
+        assert!(prompt.contains("Use the provided tool call exactly once"));
+        assert!(prompt.contains("future Arizona2 behavior"));
+        assert!(prompt.contains("Do not create tasks that require direct file edits"));
+        assert!(prompt.contains("priority 1-100"));
+    }
+
+    #[test]
+    fn test_build_task_adoption_prompt_includes_context() {
+        let prompt = build_task_adoption_prompt(
+            "Alice",
+            &[],
+            &[],
+            "Careful and curious.",
+            "Alert.",
+            "Bob asked for help.",
+            "\n\nCurrent Task: Watch the room.\nCurrent Task Priority: 40",
+        );
+
+        assert!(prompt.contains("Name:\nAlice"));
+        assert!(prompt.contains("Person identity:\nCareful and curious."));
+        assert!(prompt.contains("State of mind:\nAlert."));
+        assert!(prompt.contains("Situation:\nBob asked for help."));
+        assert!(prompt.contains("Current Task: Watch the room."));
+    }
+
+    #[test]
+    fn test_tool_calls_into_person_tasks_decodes_task() {
+        let person_uuid = crate::domain::person_uuid::PersonUuid::new();
+        let result = tool_calls_into_person_tasks(
+            vec![ToolCall {
+                name: "adopt_person_task".to_string(),
+                arguments: vec![
+                    (
+                        "content".to_string(),
+                        serde_json::Value::String("Help Bob understand the room.".to_string()),
+                    ),
+                    (
+                        "state".to_string(),
+                        serde_json::Value::String("listening for Bob's concern".to_string()),
+                    ),
+                    (
+                        "success_condition".to_string(),
+                        serde_json::Value::String("Bob indicates he understands.".to_string()),
+                    ),
+                    ("priority".to_string(), serde_json::Value::from(73)),
+                    (
+                        "reason".to_string(),
+                        serde_json::Value::String("Bob asked for help.".to_string()),
+                    ),
+                ],
+            }],
+            person_uuid.clone(),
+        );
+        let result = match result {
+            Ok(result) => result,
+            Err(_) => panic!("task adoption should decode"),
+        };
+
+        assert_eq!(result.task.person_uuid.to_uuid(), person_uuid.to_uuid());
+        assert_eq!(result.task.content, "Help Bob understand the room.");
+        assert_eq!(
+            result.task.state,
+            Some("listening for Bob's concern".to_string())
+        );
+        assert_eq!(
+            result.task.success_condition,
+            Some("Bob indicates he understands.".to_string())
+        );
+        assert_eq!(result.task.failure_condition, None);
+        assert_eq!(result.task.abandon_condition, None);
+        assert_eq!(result.task.priority, 73);
+        assert_eq!(result.reason, "Bob asked for help.");
+    }
+
+    #[test]
+    fn test_tool_calls_into_person_tasks_rejects_out_of_range_priority() {
+        let result = tool_calls_into_person_tasks(
+            vec![ToolCall {
+                name: "adopt_person_task".to_string(),
+                arguments: vec![
+                    (
+                        "content".to_string(),
+                        serde_json::Value::String("Help Bob.".to_string()),
+                    ),
+                    ("priority".to_string(), serde_json::Value::from(101)),
+                    (
+                        "reason".to_string(),
+                        serde_json::Value::String("Bob asked.".to_string()),
+                    ),
+                ],
+            }],
+            crate::domain::person_uuid::PersonUuid::new(),
+        );
+
+        match result {
+            Err(Error::InvalidTaskAdoptionToolCall(message)) => {
+                assert!(message.contains("expected 1-100"));
+            }
+            _ => panic!("expected InvalidTaskAdoptionToolCall"),
+        }
+    }
+
+    #[test]
     fn test_format_current_person_task_text_includes_state_under_heading() {
         let formatted = format_current_person_task_text(&sample_person_task(Some("waiting")));
 
@@ -1253,6 +1714,46 @@ fn format_current_person_task_text(person_task: &PersonTask) -> String {
             "\n\nCurrent Task: {}\nCurrent Task Priority: {}",
             person_task.content, person_task.priority
         ),
+    }
+}
+
+#[allow(dead_code)]
+fn required_non_empty_string_arg(
+    value: serde_json::Value,
+    argument_name: &str,
+) -> Result<String, Error> {
+    let value = value.as_str().ok_or_else(|| {
+        Error::InvalidTaskAdoptionToolCall(format!("{} was not a string", argument_name))
+    })?;
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Err(Error::InvalidTaskAdoptionToolCall(format!(
+            "{} was empty",
+            argument_name
+        )));
+    }
+    Ok(trimmed.to_string())
+}
+
+#[allow(dead_code)]
+fn optional_string_arg(
+    value: serde_json::Value,
+    argument_name: &str,
+) -> Result<Option<String>, Error> {
+    match value {
+        serde_json::Value::Null => Ok(None),
+        serde_json::Value::String(text) => {
+            let trimmed = text.trim();
+            if trimmed.is_empty() {
+                Ok(None)
+            } else {
+                Ok(Some(trimmed.to_string()))
+            }
+        }
+        _ => Err(Error::InvalidTaskAdoptionToolCall(format!(
+            "{} was not a string",
+            argument_name
+        ))),
     }
 }
 
