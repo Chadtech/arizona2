@@ -14,32 +14,72 @@ use crate::worker::Worker;
 use async_trait::async_trait;
 use sqlx::Row;
 
+fn normalize_scene_name(scene_name: &str) -> Result<String, String> {
+    let normalized = scene_name
+        .split_whitespace()
+        .collect::<Vec<&str>>()
+        .join(" ");
+
+    if normalized.is_empty() {
+        Err("Scene name cannot be blank".to_string())
+    } else {
+        Ok(normalized)
+    }
+}
+
+async fn insert_scene_row(worker: &Worker, scene_name: &str) -> Result<Option<SceneUuid>, String> {
+    let scene_uuid = SceneUuid::new();
+    let maybe_row = sqlx::query(
+        r#"
+            INSERT INTO scene (uuid, name)
+            VALUES ($1::UUID, $2::TEXT)
+            ON CONFLICT DO NOTHING
+            RETURNING uuid;
+        "#,
+    )
+    .bind(scene_uuid.to_uuid())
+    .bind(scene_name)
+    .fetch_optional(&worker.sqlx)
+    .await
+    .map_err(|err| format!("Error inserting new scene: {}", err))?;
+
+    match maybe_row {
+        Some(row) => {
+            let uuid = row
+                .try_get::<uuid::Uuid, _>("uuid")
+                .map_err(|err| format!("Error reading inserted scene uuid: {}", err))?;
+            Ok(Some(SceneUuid::from_uuid(uuid)))
+        }
+        None => Ok(None),
+    }
+}
+
 #[async_trait]
 impl SceneCapability for Worker {
     async fn create_scene(&self, new_scene: NewScene) -> Result<SceneUuid, String> {
-        let ret = sqlx::query!(
-            r#"
-				INSERT INTO scene (uuid, name)
-				VALUES ($1::UUID, $2::TEXT)
-				RETURNING uuid;
-			"#,
-            SceneUuid::new().to_uuid(),
-            new_scene.name,
-        )
-        .fetch_one(&self.sqlx)
-        .await
-        .map_err(|err| format!("Error inserting new scene: {}", err))?;
+        let scene_name = normalize_scene_name(&new_scene.name)?;
 
-        let scene_uuid = SceneUuid::from_uuid(ret.uuid);
+        if self
+            .get_scene_from_name(scene_name.clone())
+            .await?
+            .is_some()
+        {
+            return Err(format!("Scene already exists: {}", scene_name));
+        }
+
+        let scene_uuid = match insert_scene_row(self, &scene_name).await? {
+            Some(scene_uuid) => scene_uuid,
+            None => return Err(format!("Scene already exists: {}", scene_name)),
+        };
 
         let new_snapshot = NewSceneSnapshot {
-            scene_uuid,
+            scene_uuid: scene_uuid.clone(),
             description: new_scene.description,
         };
 
         self.create_scene_snapshot(new_snapshot).await?;
 
-        Ok(SceneUuid::from_uuid(ret.uuid))
+        Ok(scene_uuid)
     }
 
     async fn delete_scene(&self, scene_uuid: &SceneUuid) -> Result<(), String> {
@@ -276,26 +316,52 @@ impl SceneCapability for Worker {
     }
 
     async fn get_scene_from_name(&self, scene_name: String) -> Result<Option<Scene>, String> {
-        let maybe_ret = sqlx::query_as!(
-            Scene,
+        let scene_name = normalize_scene_name(&scene_name)?;
+        let maybe_row = sqlx::query(
             r#"
                 SELECT
                     scene.uuid,
                     scene.name,
-                    scene_snapshot.description
+                    latest_snapshot.description
                 FROM scene
-                LEFT JOIN scene_snapshot ON scene.uuid = scene_snapshot.scene_uuid
-                WHERE scene.name = $1::TEXT
+                LEFT JOIN LATERAL (
+                    SELECT description
+                    FROM scene_snapshot
+                    WHERE scene_snapshot.scene_uuid = scene.uuid
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                ) AS latest_snapshot ON true
+                WHERE lower(btrim(scene.name)) = lower($1::TEXT)
                   AND scene.ended_at IS NULL
-                ORDER BY scene.uuid, scene_snapshot.created_at DESC;
+                ORDER BY scene.started_at ASC, scene.uuid ASC
+                LIMIT 1;
             "#,
-            scene_name,
         )
+        .bind(scene_name)
         .fetch_optional(&self.sqlx)
         .await
         .map_err(|err| format!("Error fetching scene by name: {}", err))?;
 
-        Ok(maybe_ret)
+        match maybe_row {
+            Some(row) => {
+                let uuid = row
+                    .try_get::<uuid::Uuid, _>("uuid")
+                    .map_err(|err| format!("Error reading scene uuid: {}", err))?;
+                let name = row
+                    .try_get::<String, _>("name")
+                    .map_err(|err| format!("Error reading scene name: {}", err))?;
+                let description = row
+                    .try_get::<Option<String>, _>("description")
+                    .map_err(|err| format!("Error reading scene description: {}", err))?;
+
+                Ok(Some(Scene {
+                    uuid: SceneUuid::from_uuid(uuid),
+                    name,
+                    description,
+                }))
+            }
+            None => Ok(None),
+        }
     }
 
     async fn get_scene_current_participants(
@@ -466,6 +532,11 @@ impl SceneCapability for Worker {
         scene_name: String,
         basis_scene_uuid: SceneUuid,
     ) -> Result<Scene, String> {
+        let scene_name = normalize_scene_name(&scene_name)?;
+        if let Some(existing_scene) = self.get_scene_from_name(scene_name.clone()).await? {
+            return Ok(existing_scene);
+        }
+
         let maybe_basis_scene_name = self.get_scene_name(&basis_scene_uuid).await?;
 
         let basis_scene_name = if let Some(name) = maybe_basis_scene_name {
@@ -507,17 +578,50 @@ impl SceneCapability for Worker {
             )
         })?;
 
-        let scene_uuid = self
-            .create_scene(NewScene {
-                name: scene_name.clone(),
-                description: description.clone(),
-            })
-            .await?;
+        let maybe_scene_uuid = insert_scene_row(self, &scene_name).await?;
+        let scene_uuid = match maybe_scene_uuid {
+            Some(scene_uuid) => {
+                self.create_scene_snapshot(NewSceneSnapshot {
+                    scene_uuid: scene_uuid.clone(),
+                    description: description.clone(),
+                })
+                .await?;
+                scene_uuid
+            }
+            None => {
+                let existing_scene = self.get_scene_from_name(scene_name.clone()).await?;
+                return existing_scene.ok_or_else(|| {
+                    format!(
+                        "Scene creation conflicted, but no active scene named '{}' was found",
+                        scene_name
+                    )
+                });
+            }
+        };
 
         Ok(Scene {
             uuid: scene_uuid,
             name: scene_name,
             description: Some(description),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_scene_name;
+
+    #[test]
+    fn test_normalize_scene_name_trims_and_collapses_whitespace() {
+        let scene_name = normalize_scene_name("  Chadtech's   office \n upstairs  ").unwrap();
+
+        assert_eq!(scene_name, "Chadtech's office upstairs");
+    }
+
+    #[test]
+    fn test_normalize_scene_name_rejects_blank_names() {
+        let result = normalize_scene_name(" \n\t ");
+
+        assert!(result.is_err());
     }
 }
